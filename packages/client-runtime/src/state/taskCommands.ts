@@ -12,6 +12,10 @@ import {
   removeTaskWorkspace,
   setTaskOwnership,
   validateTaskOwnership,
+  prepareTaskReview,
+  updateTaskHandoff,
+  requestTaskRestore,
+  undoTaskRestore,
   type ActivateTaskInput,
   type BindTaskThreadInput,
   type CancelTaskInput,
@@ -21,8 +25,17 @@ import {
   type RemoveTaskWorkspaceInput,
   type SetTaskOwnershipInput,
   type ValidateTaskOwnershipInput,
+  type PrepareTaskReviewInput,
+  type UpdateTaskHandoffInput,
+  type RequestTaskRestoreInput,
+  type UndoTaskRestoreInput,
 } from "../operations/commands.ts";
-import { createAtomCommandScheduler, createEnvironmentCommand } from "./runtime.ts";
+import { ORCHESTRATION_WS_METHODS } from "@t3tools/contracts";
+import {
+  createAtomCommandScheduler,
+  createEnvironmentCommand,
+  createEnvironmentRpcQueryAtomFamily,
+} from "./runtime.ts";
 
 export type {
   ActivateTaskInput,
@@ -34,6 +47,10 @@ export type {
   RemoveTaskWorkspaceInput,
   SetTaskOwnershipInput,
   ValidateTaskOwnershipInput,
+  PrepareTaskReviewInput,
+  UpdateTaskHandoffInput,
+  RequestTaskRestoreInput,
+  UndoTaskRestoreInput,
 };
 
 export function createTaskEnvironmentAtoms<R, E>(
@@ -99,6 +116,38 @@ export function createTaskEnvironmentAtoms<R, E>(
       execute: validateTaskOwnership,
       scheduler,
       concurrency,
+    }),
+    prepareReview: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:task:review:prepare",
+      execute: prepareTaskReview,
+      scheduler,
+      concurrency,
+    }),
+    updateHandoff: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:task:handoff:update",
+      execute: updateTaskHandoff,
+      scheduler,
+      concurrency,
+    }),
+    requestRestore: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:task:restore:request",
+      execute: requestTaskRestore,
+      scheduler,
+      concurrency,
+    }),
+    undoRestore: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:task:restore:undo",
+      execute: undoTaskRestore,
+      scheduler,
+      concurrency,
+    }),
+    changes: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:queries:task:changes",
+      tag: ORCHESTRATION_WS_METHODS.getTaskChanges,
+    }),
+    fileDiff: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:queries:task:file-diff",
+      tag: ORCHESTRATION_WS_METHODS.getTaskFileDiff,
     }),
   };
 }

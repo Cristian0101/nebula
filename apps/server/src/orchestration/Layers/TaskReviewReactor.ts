@@ -1,0 +1,518 @@
+import {
+  CheckpointRef,
+  CommandId,
+  EventId,
+  TaskHandoffId,
+  TaskRestoreId,
+  TaskReviewSnapshotId,
+  type OrchestrationEvent,
+  type OrchestrationTask,
+} from "@t3tools/contracts";
+import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import * as Cause from "effect/Cause";
+import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
+
+import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import { forkParked } from "../../serverActivation.ts";
+import * as TextGeneration from "../../textGeneration/TextGeneration.ts";
+import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
+import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { TaskReviewReactor, type TaskReviewReactorShape } from "../Services/TaskReviewReactor.ts";
+import { TaskChangeSetQuery } from "../TaskChangeSetQuery.ts";
+import { parseGeneratedTaskHandoff } from "../taskHandoff.ts";
+
+type ReviewEvent = Extract<
+  OrchestrationEvent,
+  {
+    type:
+      | "task.review.prepare-requested"
+      | "task.completion.freshness-requested"
+      | "task.restore.requested"
+      | "task.restore.undo-requested"
+      | "thread.turn-diff-completed";
+  }
+>;
+
+export const taskRestoreCheckpointRef = (taskId: string, restoreId: TaskRestoreId) =>
+  CheckpointRef.make(`refs/t3/checkpoints/tasks/${taskId}/restore/${restoreId}`);
+
+export function taskBranchIsPublished(remoteRefs: string, branch: string): boolean {
+  return remoteRefs.split("\n").some((ref) => ref.trim().endsWith(`/${branch}`));
+}
+
+export const restoreTaskWorkspaceToBaseline = Effect.fn(
+  "TaskReviewReactor.restoreTaskWorkspaceToBaseline",
+)(function* <E>(input: {
+  readonly path: string;
+  readonly baseCommit: string;
+  readonly safetyCheckpointRef: CheckpointRef;
+  readonly git: GitVcsDriver.GitVcsDriver["Service"];
+  readonly checkpoints: CheckpointStore.CheckpointStore["Service"];
+  readonly onSnapshotCaptured: (previousHead: string) => Effect.Effect<void, E>;
+}) {
+  const head = yield* input.git.execute({
+    operation: "TaskRestore.head",
+    cwd: input.path,
+    args: ["rev-parse", "HEAD"],
+  });
+  const previousHead = head.stdout.trim();
+  yield* input.checkpoints.captureCheckpoint({
+    cwd: input.path,
+    checkpointRef: input.safetyCheckpointRef,
+  });
+  yield* input.onSnapshotCaptured(previousHead);
+  yield* input.git.execute({
+    operation: "TaskRestore.reset",
+    cwd: input.path,
+    args: ["reset", "--hard", input.baseCommit],
+  });
+  const restored = yield* input.checkpoints.restoreCheckpoint({
+    cwd: input.path,
+    checkpointRef: CheckpointRef.make(input.baseCommit),
+    fallbackToHead: true,
+  });
+  if (!restored) return yield* Effect.fail("The Task baseline could not be restored.");
+  return previousHead;
+});
+
+export const undoTaskWorkspaceRestore = Effect.fn("TaskReviewReactor.undoTaskWorkspaceRestore")(
+  function* (input: {
+    readonly path: string;
+    readonly previousHead: string;
+    readonly safetyCheckpointRef: CheckpointRef;
+    readonly git: GitVcsDriver.GitVcsDriver["Service"];
+    readonly checkpoints: CheckpointStore.CheckpointStore["Service"];
+  }) {
+    yield* input.git.execute({
+      operation: "TaskRestore.undoHead",
+      cwd: input.path,
+      args: ["reset", "--hard", input.previousHead],
+    });
+    const restored = yield* input.checkpoints.restoreCheckpoint({
+      cwd: input.path,
+      checkpointRef: input.safetyCheckpointRef,
+    });
+    if (!restored) return yield* Effect.fail("The Task recovery snapshot is unavailable.");
+  },
+);
+
+const make = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
+  const engine = yield* OrchestrationEngineService;
+  const snapshots = yield* ProjectionSnapshotQuery;
+  const taskChanges = yield* TaskChangeSetQuery;
+  const checkpoints = yield* CheckpointStore.CheckpointStore;
+  const git = yield* GitVcsDriver.GitVcsDriver;
+  const textGeneration = yield* TextGeneration.TextGeneration;
+  const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
+  const commandId = (tag: string) =>
+    crypto.randomUUIDv4.pipe(Effect.map((id) => CommandId.make(`server:${tag}:${id}`)));
+
+  const appendTaskActivity = Effect.fn("TaskReviewReactor.appendTaskActivity")(function* (
+    task: OrchestrationTask,
+    kind: string,
+    summary: string,
+    tone: "info" | "error" = "info",
+  ) {
+    if (task.threadId === null) return;
+    const createdAt = yield* now;
+    yield* engine.dispatch({
+      type: "thread.activity.append",
+      commandId: yield* commandId("task-review-activity"),
+      threadId: task.threadId,
+      activity: {
+        id: EventId.make(yield* crypto.randomUUIDv4),
+        tone,
+        kind,
+        summary,
+        payload: { taskId: task.id },
+        turnId: null,
+        createdAt,
+      },
+      createdAt,
+    });
+  });
+
+  const resolveTask = Effect.fn("TaskReviewReactor.resolveTask")(function* (taskId: string) {
+    const model = yield* snapshots.getCommandReadModel();
+    return (model.tasks ?? []).find((candidate) => candidate.id === taskId) ?? null;
+  });
+
+  const markStale = Effect.fn("TaskReviewReactor.markStale")(function* (task: OrchestrationTask) {
+    if (!task.reviewSnapshot || task.reviewSnapshot.status === "stale") return;
+    yield* engine.dispatch({
+      type: "task.review.stale",
+      commandId: yield* commandId("task-review-stale"),
+      taskId: task.id,
+      createdAt: yield* now,
+    });
+  });
+
+  const prepare = Effect.fn("TaskReviewReactor.prepare")(function* (
+    taskId: string,
+    generation: "provider" | "manual",
+  ) {
+    const task = yield* resolveTask(taskId);
+    if (!task) return;
+    const snapshotId = TaskReviewSnapshotId.make(yield* crypto.randomUUIDv4);
+    const handoffId = TaskHandoffId.make(yield* crypto.randomUUIDv4);
+    const capturedAt = yield* now;
+    const captured = yield* taskChanges.capture(task, snapshotId);
+    let summary = "";
+    let testsRun: ReturnType<typeof parseGeneratedTaskHandoff>["testsRun"] = [];
+    let assumptions: ReadonlyArray<string> = [];
+    let interfaceChanges: ReadonlyArray<string> = [];
+    let migrations: ReadonlyArray<string> = [];
+    let knownRisks: ReadonlyArray<string> = [];
+    let followUps: ReadonlyArray<string> = [];
+    let generationError: string | null = null;
+    let resolvedGeneration = generation;
+    if (generation === "provider") {
+      const model = yield* snapshots.getCommandReadModel();
+      const thread = model.threads.find((candidate) => candidate.id === task.threadId);
+      if (!thread) {
+        generationError = "The Task thread was unavailable for provider handoff generation.";
+        resolvedGeneration = "manual";
+      } else {
+        const generated = yield* textGeneration
+          .generatePrContent({
+            cwd: captured.changeSet.workspace,
+            baseBranch: captured.changeSet.baseCommit,
+            headBranch: captured.changeSet.branch,
+            commitSummary: `Task: ${task.title}\nObjective: ${task.objective}`,
+            diffSummary: captured.changeSet.files
+              .map((file) => `${file.changeType}: ${file.path}`)
+              .join("\n"),
+            diffPatch:
+              "The immutable Task snapshot is the factual source. Do not invent tests or outcomes.",
+            changeRequestTemplate:
+              "Write a structured engineering handoff with sections: Summary, Tests run, Assumptions, Interface changes, Migrations, Known risks, Follow-ups. Clearly label unverified claims as reported. Do not invent commands or results.",
+            modelSelection: thread.modelSelection,
+          })
+          .pipe(Effect.result);
+        if (generated._tag === "Success") {
+          const narrative = parseGeneratedTaskHandoff(
+            generated.success.title,
+            generated.success.body,
+          );
+          summary = narrative.summary;
+          testsRun = narrative.testsRun;
+          assumptions = narrative.assumptions;
+          interfaceChanges = narrative.interfaceChanges;
+          migrations = narrative.migrations;
+          knownRisks = narrative.knownRisks;
+          followUps = narrative.followUps;
+        } else {
+          generationError = generated.failure.detail;
+          resolvedGeneration = "manual";
+        }
+      }
+    }
+    yield* engine.dispatch({
+      type: "task.review.prepared",
+      commandId: yield* commandId("task-review-prepared"),
+      taskId: task.id,
+      snapshot: {
+        id: snapshotId,
+        taskId: task.id,
+        baseCommit: captured.changeSet.baseCommit,
+        checkpointRef: captured.checkpointRef,
+        fingerprint: captured.changeSet.fingerprint,
+        branchHead: captured.changeSet.currentHead,
+        changedFiles: captured.changeSet.changedFiles,
+        additions: captured.changeSet.additions,
+        deletions: captured.changeSet.deletions,
+        files: captured.changeSet.files,
+        ownershipStatus: "valid",
+        status: "current",
+        capturedAt,
+      },
+      handoff: {
+        id: handoffId,
+        taskId: task.id,
+        snapshotId,
+        status: "draft",
+        summary,
+        testsRun,
+        assumptions,
+        interfaceChanges,
+        migrations,
+        knownRisks,
+        followUps,
+        generation: resolvedGeneration,
+        generationError,
+        createdAt: capturedAt,
+        updatedAt: capturedAt,
+      },
+      createdAt: capturedAt,
+    });
+  });
+
+  const validateFreshness = Effect.fn("TaskReviewReactor.validateFreshness")(function* (
+    taskId: string,
+  ) {
+    const task = yield* resolveTask(taskId);
+    if (!task) return;
+    yield* engine.dispatch({
+      type: "task.completion.freshness-validated",
+      commandId: yield* commandId("task-completion-freshness"),
+      taskId: task.id,
+      current: yield* taskChanges.isCurrent(task),
+      createdAt: yield* now,
+    });
+  });
+
+  const validateManagedRestore = Effect.fn("TaskReviewReactor.validateManagedRestore")(function* (
+    task: OrchestrationTask,
+  ) {
+    const workspace = task.workspace;
+    if (
+      workspace?.status !== "ready" ||
+      !workspace.path ||
+      !workspace.baseCommit ||
+      !workspace.branch
+    ) {
+      return yield* Effect.fail("The Task does not have a ready managed workspace.");
+    }
+    const [root, branch, remoteRefs] = yield* Effect.all([
+      git.execute({
+        operation: "TaskRestore.root",
+        cwd: workspace.path,
+        args: ["rev-parse", "--show-toplevel"],
+      }),
+      git.execute({
+        operation: "TaskRestore.branch",
+        cwd: workspace.path,
+        args: ["branch", "--show-current"],
+      }),
+      git.execute({
+        operation: "TaskRestore.remoteRefs",
+        cwd: workspace.path,
+        args: ["for-each-ref", "--format=%(refname)", "refs/remotes"],
+      }),
+    ]);
+    if (root.stdout.trim() !== workspace.path || branch.stdout.trim() !== workspace.branch) {
+      return yield* Effect.fail(
+        "The current checkout does not match the Task-managed workspace identity.",
+      );
+    }
+    if (taskBranchIsPublished(remoteRefs.stdout, workspace.branch)) {
+      return yield* Effect.fail(
+        "Safe restore is refused because this Task branch has been published.",
+      );
+    }
+    return {
+      path: workspace.path,
+      baseCommit: workspace.baseCommit,
+      branch: workspace.branch,
+    };
+  });
+
+  const failRestore = (taskId: OrchestrationTask["id"], restoreId: TaskRestoreId, error: unknown) =>
+    Effect.all({ commandId: commandId("task-restore-failed"), createdAt: now }).pipe(
+      Effect.flatMap((metadata) =>
+        engine.dispatch({
+          type: "task.restore.failed",
+          taskId,
+          restoreId,
+          failureReason:
+            typeof error === "string"
+              ? error
+              : error instanceof Error
+                ? error.message
+                : "Task restore failed; the safety ref was kept.",
+          ...metadata,
+        }),
+      ),
+      Effect.asVoid,
+    );
+
+  const restore = Effect.fn("TaskReviewReactor.restore")(function* (
+    taskId: OrchestrationTask["id"],
+    restoreId: TaskRestoreId,
+  ) {
+    const task = yield* resolveTask(taskId);
+    if (!task) return;
+    const workspace = yield* validateManagedRestore(task);
+    const safetyCheckpointRef = taskRestoreCheckpointRef(task.id, restoreId);
+    yield* restoreTaskWorkspaceToBaseline({
+      path: workspace.path,
+      baseCommit: workspace.baseCommit,
+      safetyCheckpointRef,
+      git,
+      checkpoints,
+      onSnapshotCaptured: (previousHead) =>
+        Effect.gen(function* () {
+          yield* engine.dispatch({
+            type: "task.restore.snapshot-captured",
+            commandId: yield* commandId("task-restore-snapshot"),
+            taskId: task.id,
+            restoreId,
+            safetyCheckpointRef,
+            previousHead,
+            createdAt: yield* now,
+          });
+        }),
+    });
+    yield* engine.dispatch({
+      type: "task.restored",
+      commandId: yield* commandId("task-restored"),
+      taskId: task.id,
+      restoreId,
+      createdAt: yield* now,
+    });
+    yield* engine.dispatch({
+      type: "task.ownership.validate",
+      commandId: yield* commandId("task-restore-revalidate-ownership"),
+      taskId: task.id,
+      createdAt: yield* now,
+    });
+    yield* appendTaskActivity(
+      task,
+      "task.workspace.restored",
+      "Task workspace restored to baseline. Provider should inspect current workspace state before continuing.",
+    );
+  });
+
+  const undo = Effect.fn("TaskReviewReactor.undo")(function* (
+    taskId: OrchestrationTask["id"],
+    restoreId: TaskRestoreId,
+  ) {
+    const task = yield* resolveTask(taskId);
+    if (!task?.restore?.safetyCheckpointRef || !task.restore.previousHead) return;
+    const workspace = yield* validateManagedRestore(task);
+    yield* undoTaskWorkspaceRestore({
+      path: workspace.path,
+      previousHead: task.restore.previousHead,
+      safetyCheckpointRef: task.restore.safetyCheckpointRef,
+      git,
+      checkpoints,
+    });
+    yield* engine.dispatch({
+      type: "task.restore.undone",
+      commandId: yield* commandId("task-restore-undone"),
+      taskId: task.id,
+      restoreId,
+      createdAt: yield* now,
+    });
+    yield* engine.dispatch({
+      type: "task.ownership.validate",
+      commandId: yield* commandId("task-restore-undo-revalidate-ownership"),
+      taskId: task.id,
+      createdAt: yield* now,
+    });
+    yield* appendTaskActivity(
+      task,
+      "task.workspace.restore-undone",
+      "Task workspace restore undone.",
+    );
+  });
+
+  const process = Effect.fn("TaskReviewReactor.process")(function* (event: ReviewEvent) {
+    if (event.type === "task.review.prepare-requested") {
+      yield* prepare(event.payload.taskId, event.payload.generation).pipe(
+        Effect.catch((error) =>
+          engine.dispatch({
+            type: "task.review.prepare-failed",
+            commandId: CommandId.make(`server:task-review-prepare-failed:${event.eventId}`),
+            taskId: event.payload.taskId,
+            failureReason:
+              typeof error === "object" && error !== null && "message" in error
+                ? String(error.message)
+                : "Task review snapshot capture failed.",
+            createdAt: event.occurredAt,
+          }),
+        ),
+      );
+      return;
+    }
+    if (event.type === "task.completion.freshness-requested") {
+      yield* validateFreshness(event.payload.taskId);
+      return;
+    }
+    if (event.type === "task.restore.requested") {
+      yield* restore(event.payload.taskId, event.payload.restoreId).pipe(
+        Effect.catch((error) => failRestore(event.payload.taskId, event.payload.restoreId, error)),
+      );
+      return;
+    }
+    if (event.type === "task.restore.undo-requested") {
+      yield* undo(event.payload.taskId, event.payload.restoreId).pipe(
+        Effect.catch((error) => failRestore(event.payload.taskId, event.payload.restoreId, error)),
+      );
+      return;
+    }
+    const model = yield* snapshots.getCommandReadModel();
+    const task = (model.tasks ?? []).find(
+      (candidate) => candidate.threadId === event.payload.threadId && candidate.status === "active",
+    );
+    if (task?.reviewSnapshot?.status === "current" && !(yield* taskChanges.isCurrent(task))) {
+      yield* markStale(task);
+    }
+  });
+
+  const worker = yield* makeDrainableWorker((event: ReviewEvent) =>
+    process(event).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Task review reactor failed", { cause: Cause.pretty(cause) }),
+      ),
+    ),
+  );
+
+  const reconcile = Effect.gen(function* () {
+    const model = yield* snapshots.getCommandReadModel();
+    for (const task of model.tasks ?? []) {
+      if (task.status !== "active") continue;
+      if (
+        task.reviewSnapshot?.status === "current" &&
+        !(yield* taskChanges.isCurrent(task).pipe(Effect.orElseSucceed(() => false)))
+      ) {
+        yield* markStale(task);
+      }
+      if (task.restore?.status === "requested") {
+        yield* restore(task.id, task.restore.id).pipe(
+          Effect.catch((error) => failRestore(task.id, task.restore!.id, error)),
+        );
+      } else if (task.restore?.status === "snapshot-captured") {
+        yield* failRestore(
+          task.id,
+          task.restore.id,
+          "Restore was interrupted after the safety snapshot; retry from the retained ref.",
+        );
+      }
+    }
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Task review startup reconciliation failed", {
+        cause: Cause.pretty(cause),
+      }),
+    ),
+  );
+
+  const start: TaskReviewReactorShape["start"] = Effect.fn("TaskReviewReactor.start")(function* () {
+    yield* forkParked(
+      Stream.runForEach(engine.streamDomainEvents, (event) => {
+        if (
+          event.type === "task.review.prepare-requested" ||
+          event.type === "task.completion.freshness-requested" ||
+          event.type === "task.restore.requested" ||
+          event.type === "task.restore.undo-requested" ||
+          event.type === "thread.turn-diff-completed"
+        ) {
+          return worker.enqueue(event as ReviewEvent);
+        }
+        return Effect.void;
+      }),
+    );
+    yield* reconcile;
+  });
+
+  return { start, drain: worker.drain } satisfies TaskReviewReactorShape;
+});
+
+export const TaskReviewReactorLive = Layer.effect(TaskReviewReactor, make);

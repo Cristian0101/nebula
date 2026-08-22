@@ -74,7 +74,6 @@ function card(currentTask: OrchestrationTask, actions = {}) {
     busy: false,
     onStart: () => undefined,
     onOpenThread: () => undefined,
-    onComplete: () => undefined,
     onCancel: () => undefined,
     onEditOwnership: () => undefined,
     onValidateOwnership: () => undefined,
@@ -132,16 +131,16 @@ describe("ProjectTaskCard", () => {
     expect(html).toMatch(/<button[^>]*disabled[^>]*>.*Start/s);
   });
 
-  it("offers linked-thread, complete, and cancel actions only while active", () => {
+  it("offers linked-thread, prepare-completion, and cancel actions while active", () => {
     const onOpenThread = vi.fn();
-    const onComplete = vi.fn();
+    const onPrepareReview = vi.fn();
     const onCancel = vi.fn();
-    const tree = card(task("active"), { onOpenThread, onComplete, onCancel });
+    const tree = card(task("active"), { onOpenThread, onPrepareReview, onCancel });
     findAction(tree, "Open Thread")?.();
-    findAction(tree, "Complete")?.();
+    findAction(tree, "Prepare completion")?.();
     findAction(tree, "Cancel")?.();
     expect(onOpenThread).toHaveBeenCalledOnce();
-    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onPrepareReview).toHaveBeenCalledWith("provider");
     expect(onCancel).toHaveBeenCalledOnce();
   });
 

@@ -15,7 +15,10 @@ import {
   NonNegativeInt,
   PositiveInt,
   ProjectId,
+  TaskHandoffId,
   TaskId,
+  TaskRestoreId,
+  TaskReviewSnapshotId,
   ProviderItemId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -29,6 +32,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getWorkflowScript: "orchestration.getWorkflowScript",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
+  getTaskChanges: "orchestration.getTaskChanges",
+  getTaskFileDiff: "orchestration.getTaskFileDiff",
   searchThreads: "orchestration.searchThreads",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
@@ -299,7 +304,7 @@ export const TaskOwnershipRule = Schema.Struct({
 });
 export type TaskOwnershipRule = typeof TaskOwnershipRule.Type;
 
-export const TaskOwnershipChangeType = Schema.Literals([
+export const TaskChangeType = Schema.Literals([
   "added",
   "modified",
   "deleted",
@@ -307,7 +312,124 @@ export const TaskOwnershipChangeType = Schema.Literals([
   "copied",
   "untracked",
 ]);
+export type TaskChangeType = typeof TaskChangeType.Type;
+export const TaskOwnershipChangeType = TaskChangeType;
 export type TaskOwnershipChangeType = typeof TaskOwnershipChangeType.Type;
+
+export const TaskChangedFile = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  previousPath: Schema.NullOr(TrimmedNonEmptyString),
+  changeType: TaskChangeType,
+  additions: Schema.NullOr(NonNegativeInt),
+  deletions: Schema.NullOr(NonNegativeInt),
+  binary: Schema.Boolean,
+  untracked: Schema.Boolean,
+});
+export type TaskChangedFile = typeof TaskChangedFile.Type;
+
+export const TaskChangeSet = Schema.Struct({
+  taskId: TaskId,
+  baseCommit: TrimmedNonEmptyString,
+  currentHead: TrimmedNonEmptyString,
+  branch: TrimmedNonEmptyString,
+  workspace: TrimmedNonEmptyString,
+  files: Schema.Array(TaskChangedFile),
+  changedFiles: NonNegativeInt,
+  additions: NonNegativeInt,
+  deletions: NonNegativeInt,
+  fingerprint: TrimmedNonEmptyString,
+  generatedAt: IsoDateTime,
+});
+export type TaskChangeSet = typeof TaskChangeSet.Type;
+
+export const TaskReviewSnapshotStatus = Schema.Literals(["current", "stale"]);
+export type TaskReviewSnapshotStatus = typeof TaskReviewSnapshotStatus.Type;
+
+export const TaskReviewSnapshot = Schema.Struct({
+  id: TaskReviewSnapshotId,
+  taskId: TaskId,
+  baseCommit: TrimmedNonEmptyString,
+  checkpointRef: CheckpointRef,
+  fingerprint: TrimmedNonEmptyString,
+  branchHead: TrimmedNonEmptyString,
+  changedFiles: NonNegativeInt,
+  additions: NonNegativeInt,
+  deletions: NonNegativeInt,
+  files: Schema.optional(Schema.Array(TaskChangedFile)),
+  ownershipStatus: Schema.Literal("valid"),
+  status: TaskReviewSnapshotStatus,
+  capturedAt: IsoDateTime,
+});
+export type TaskReviewSnapshot = typeof TaskReviewSnapshot.Type;
+
+export const TaskHandoffStatus = Schema.Literals(["draft", "ready", "stale"]);
+export type TaskHandoffStatus = typeof TaskHandoffStatus.Type;
+
+export const TaskHandoffTestExecution = Schema.Struct({
+  command: TrimmedNonEmptyString,
+  result: TrimmedNonEmptyString,
+  evidence: Schema.Literals(["observed", "reported"]),
+});
+export type TaskHandoffTestExecution = typeof TaskHandoffTestExecution.Type;
+
+export const TaskHandoff = Schema.Struct({
+  id: TaskHandoffId,
+  taskId: TaskId,
+  snapshotId: TaskReviewSnapshotId,
+  status: TaskHandoffStatus,
+  summary: Schema.String,
+  testsRun: Schema.Array(TaskHandoffTestExecution),
+  assumptions: Schema.Array(TrimmedNonEmptyString),
+  interfaceChanges: Schema.Array(TrimmedNonEmptyString),
+  migrations: Schema.Array(TrimmedNonEmptyString),
+  knownRisks: Schema.Array(TrimmedNonEmptyString),
+  followUps: Schema.Array(TrimmedNonEmptyString),
+  generation: Schema.Literals(["provider", "manual"]),
+  generationError: Schema.NullOr(Schema.String),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type TaskHandoff = typeof TaskHandoff.Type;
+
+export const TaskResult = Schema.Struct({
+  taskId: TaskId,
+  status: Schema.Literal("completed"),
+  summary: Schema.String,
+  files: Schema.Array(TaskChangedFile),
+  baseCommit: TrimmedNonEmptyString,
+  snapshotId: TaskReviewSnapshotId,
+  testsRun: Schema.Array(TaskHandoffTestExecution),
+  assumptions: Schema.Array(TrimmedNonEmptyString),
+  interfaceChanges: Schema.Array(TrimmedNonEmptyString),
+  migrations: Schema.Array(TrimmedNonEmptyString),
+  knownRisks: Schema.Array(TrimmedNonEmptyString),
+  followUps: Schema.Array(TrimmedNonEmptyString),
+  providerInstanceId: Schema.NullOr(ProviderInstanceId),
+  threadId: Schema.NullOr(ThreadId),
+  branch: TrimmedNonEmptyString,
+  completedAt: IsoDateTime,
+});
+export type TaskResult = typeof TaskResult.Type;
+
+export const TaskRestoreStatus = Schema.Literals([
+  "requested",
+  "snapshot-captured",
+  "completed",
+  "failed",
+  "undone",
+]);
+export type TaskRestoreStatus = typeof TaskRestoreStatus.Type;
+
+export const TaskRestoreState = Schema.Struct({
+  id: TaskRestoreId,
+  status: TaskRestoreStatus,
+  safetyCheckpointRef: Schema.NullOr(CheckpointRef),
+  previousHead: Schema.NullOr(TrimmedNonEmptyString),
+  failureReason: Schema.NullOr(Schema.String),
+  requestedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type TaskRestoreState = typeof TaskRestoreState.Type;
 
 export const TaskOwnershipViolationReason = Schema.Literals([
   "denied",
@@ -363,6 +485,11 @@ export const OrchestrationTask = Schema.Struct({
   workspace: Schema.optional(Schema.NullOr(NebulaTaskWorkspace)),
   // Optional so snapshots and events created before Prompt 5 remain readable.
   ownership: Schema.optional(Schema.NullOr(TaskOwnershipState)),
+  reviewSnapshot: Schema.optional(Schema.NullOr(TaskReviewSnapshot)),
+  handoff: Schema.optional(Schema.NullOr(TaskHandoff)),
+  restore: Schema.optional(Schema.NullOr(TaskRestoreState)),
+  reviewError: Schema.optional(Schema.NullOr(Schema.String)),
+  result: Schema.optional(Schema.NullOr(TaskResult)),
 });
 export type OrchestrationTask = typeof OrchestrationTask.Type;
 
@@ -839,6 +966,45 @@ const TaskOwnershipValidateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const TaskReviewPrepareCommand = Schema.Struct({
+  type: Schema.Literal("task.review.prepare"),
+  commandId: CommandId,
+  taskId: TaskId,
+  generation: Schema.Literals(["provider", "manual"]),
+  createdAt: IsoDateTime,
+});
+
+const TaskHandoffUpdateCommand = Schema.Struct({
+  type: Schema.Literal("task.handoff.update"),
+  commandId: CommandId,
+  taskId: TaskId,
+  snapshotId: TaskReviewSnapshotId,
+  status: Schema.Literals(["draft", "ready"]),
+  summary: Schema.String,
+  testsRun: Schema.Array(TaskHandoffTestExecution),
+  assumptions: Schema.Array(TrimmedNonEmptyString),
+  interfaceChanges: Schema.Array(TrimmedNonEmptyString),
+  migrations: Schema.Array(TrimmedNonEmptyString),
+  knownRisks: Schema.Array(TrimmedNonEmptyString),
+  followUps: Schema.Array(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
+const TaskRestoreRequestCommand = Schema.Struct({
+  type: Schema.Literal("task.restore.request"),
+  commandId: CommandId,
+  taskId: TaskId,
+  restoreId: TaskRestoreId,
+  createdAt: IsoDateTime,
+});
+
+const TaskRestoreUndoCommand = Schema.Struct({
+  type: Schema.Literal("task.restore.undo"),
+  commandId: CommandId,
+  taskId: TaskId,
+  createdAt: IsoDateTime,
+});
+
 const ProjectMetaUpdateCommand = Schema.Struct({
   type: Schema.Literal("project.meta.update"),
   commandId: CommandId,
@@ -1117,6 +1283,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   TaskWorkspaceRemoveCommand,
   TaskOwnershipSetCommand,
   TaskOwnershipValidateCommand,
+  TaskReviewPrepareCommand,
+  TaskHandoffUpdateCommand,
+  TaskRestoreRequestCommand,
+  TaskRestoreUndoCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -1154,6 +1324,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   TaskWorkspaceRemoveCommand,
   TaskOwnershipSetCommand,
   TaskOwnershipValidateCommand,
+  TaskReviewPrepareCommand,
+  TaskHandoffUpdateCommand,
+  TaskRestoreRequestCommand,
+  TaskRestoreUndoCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -1311,6 +1485,8 @@ const TaskOwnershipValidatedCommand = Schema.Struct({
   changedPathCount: NonNegativeInt,
   violations: Schema.Array(TaskOwnershipViolation),
   requestCompletion: Schema.Boolean,
+  requestReview: Schema.optional(Schema.Boolean),
+  generation: Schema.optional(Schema.Literals(["provider", "manual"])),
   createdAt: IsoDateTime,
 });
 
@@ -1320,6 +1496,74 @@ const TaskOwnershipValidationFailedCommand = Schema.Struct({
   taskId: TaskId,
   failureReason: TrimmedNonEmptyString,
   requestCompletion: Schema.Boolean,
+  requestReview: Schema.optional(Schema.Boolean),
+  createdAt: IsoDateTime,
+});
+
+const TaskReviewPreparedCommand = Schema.Struct({
+  type: Schema.Literal("task.review.prepared"),
+  commandId: CommandId,
+  taskId: TaskId,
+  snapshot: TaskReviewSnapshot,
+  handoff: TaskHandoff,
+  createdAt: IsoDateTime,
+});
+
+const TaskReviewPrepareFailedCommand = Schema.Struct({
+  type: Schema.Literal("task.review.prepare-failed"),
+  commandId: CommandId,
+  taskId: TaskId,
+  failureReason: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const TaskReviewStaleCommand = Schema.Struct({
+  type: Schema.Literal("task.review.stale"),
+  commandId: CommandId,
+  taskId: TaskId,
+  createdAt: IsoDateTime,
+});
+
+const TaskCompletionFreshnessValidatedCommand = Schema.Struct({
+  type: Schema.Literal("task.completion.freshness-validated"),
+  commandId: CommandId,
+  taskId: TaskId,
+  current: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+const TaskRestoreSnapshotCapturedCommand = Schema.Struct({
+  type: Schema.Literal("task.restore.snapshot-captured"),
+  commandId: CommandId,
+  taskId: TaskId,
+  restoreId: TaskRestoreId,
+  safetyCheckpointRef: CheckpointRef,
+  previousHead: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const TaskRestoredCommand = Schema.Struct({
+  type: Schema.Literal("task.restored"),
+  commandId: CommandId,
+  taskId: TaskId,
+  restoreId: TaskRestoreId,
+  createdAt: IsoDateTime,
+});
+
+const TaskRestoreFailedCommand = Schema.Struct({
+  type: Schema.Literal("task.restore.failed"),
+  commandId: CommandId,
+  taskId: TaskId,
+  restoreId: TaskRestoreId,
+  failureReason: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const TaskRestoreUndoneCommand = Schema.Struct({
+  type: Schema.Literal("task.restore.undone"),
+  commandId: CommandId,
+  taskId: TaskId,
+  restoreId: TaskRestoreId,
   createdAt: IsoDateTime,
 });
 
@@ -1332,6 +1576,14 @@ const InternalOrchestrationCommand = Schema.Union([
   TaskWorkspaceCleanupFailedCommand,
   TaskOwnershipValidatedCommand,
   TaskOwnershipValidationFailedCommand,
+  TaskReviewPreparedCommand,
+  TaskReviewPrepareFailedCommand,
+  TaskReviewStaleCommand,
+  TaskCompletionFreshnessValidatedCommand,
+  TaskRestoreSnapshotCapturedCommand,
+  TaskRestoredCommand,
+  TaskRestoreFailedCommand,
+  TaskRestoreUndoneCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
@@ -1370,6 +1622,18 @@ export const OrchestrationEventType = Schema.Literals([
   "task.ownership-validation-requested",
   "task.ownership-validated",
   "task.ownership-validation-failed",
+  "task.review.prepare-requested",
+  "task.review.prepared",
+  "task.review.prepare-failed",
+  "task.review.stale",
+  "task.handoff.updated",
+  "task.completion.freshness-requested",
+  "task.restore.requested",
+  "task.restore.snapshot-captured",
+  "task.restored",
+  "task.restore.undo-requested",
+  "task.restore.failed",
+  "task.restore.undone",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -1453,6 +1717,8 @@ export const OrchestrationTaskOwnershipUpdatedPayload = Schema.Struct({
 export const OrchestrationTaskOwnershipValidationRequestedPayload = Schema.Struct({
   taskId: TaskId,
   requestCompletion: Schema.Boolean,
+  requestReview: Schema.optional(Schema.Boolean),
+  generation: Schema.optional(Schema.Literals(["provider", "manual"])),
   updatedAt: IsoDateTime,
 });
 
@@ -1472,6 +1738,81 @@ export const OrchestrationTaskOwnershipValidationFailedPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+export const OrchestrationTaskReviewPrepareRequestedPayload = Schema.Struct({
+  taskId: TaskId,
+  generation: Schema.Literals(["provider", "manual"]),
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskReviewPreparedPayload = Schema.Struct({
+  taskId: TaskId,
+  snapshot: TaskReviewSnapshot,
+  handoff: TaskHandoff,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskReviewPrepareFailedPayload = Schema.Struct({
+  taskId: TaskId,
+  failureReason: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskReviewStalePayload = Schema.Struct({
+  taskId: TaskId,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskHandoffUpdatedPayload = Schema.Struct({
+  taskId: TaskId,
+  handoff: TaskHandoff,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskCompletionFreshnessRequestedPayload = Schema.Struct({
+  taskId: TaskId,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskRestoreRequestedPayload = Schema.Struct({
+  taskId: TaskId,
+  restoreId: TaskRestoreId,
+  requestedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskRestoreSnapshotCapturedPayload = Schema.Struct({
+  taskId: TaskId,
+  restoreId: TaskRestoreId,
+  safetyCheckpointRef: CheckpointRef,
+  previousHead: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskRestoredPayload = Schema.Struct({
+  taskId: TaskId,
+  restoreId: TaskRestoreId,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskRestoreUndoRequestedPayload = Schema.Struct({
+  taskId: TaskId,
+  restoreId: TaskRestoreId,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskRestoreFailedPayload = Schema.Struct({
+  taskId: TaskId,
+  restoreId: TaskRestoreId,
+  failureReason: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskRestoreUndonePayload = Schema.Struct({
+  taskId: TaskId,
+  restoreId: TaskRestoreId,
+  updatedAt: IsoDateTime,
+});
+
 export const OrchestrationTaskThreadBoundPayload = Schema.Struct({
   taskId: TaskId,
   threadId: ThreadId,
@@ -1488,6 +1829,7 @@ export const OrchestrationTaskCompletedPayload = Schema.Struct({
   taskId: TaskId,
   completedAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  result: Schema.optional(TaskResult),
 });
 
 export const OrchestrationTaskCancelledPayload = Schema.Struct({
@@ -1871,6 +2213,66 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("task.review.prepare-requested"),
+    payload: OrchestrationTaskReviewPrepareRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.review.prepared"),
+    payload: OrchestrationTaskReviewPreparedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.review.prepare-failed"),
+    payload: OrchestrationTaskReviewPrepareFailedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.review.stale"),
+    payload: OrchestrationTaskReviewStalePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.handoff.updated"),
+    payload: OrchestrationTaskHandoffUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.completion.freshness-requested"),
+    payload: OrchestrationTaskCompletionFreshnessRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.restore.requested"),
+    payload: OrchestrationTaskRestoreRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.restore.snapshot-captured"),
+    payload: OrchestrationTaskRestoreSnapshotCapturedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.restored"),
+    payload: OrchestrationTaskRestoredPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.restore.undo-requested"),
+    payload: OrchestrationTaskRestoreUndoRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.restore.failed"),
+    payload: OrchestrationTaskRestoreFailedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.restore.undone"),
+    payload: OrchestrationTaskRestoreUndonePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.created"),
     payload: ThreadCreatedPayload,
   }),
@@ -2103,6 +2505,31 @@ export type OrchestrationGetFullThreadDiffInput = typeof OrchestrationGetFullThr
 export const OrchestrationGetFullThreadDiffResult = ThreadTurnDiff;
 export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullThreadDiffResult.Type;
 
+export const OrchestrationGetTaskChangesInput = Schema.Struct({
+  taskId: TaskId,
+});
+export type OrchestrationGetTaskChangesInput = typeof OrchestrationGetTaskChangesInput.Type;
+
+export const OrchestrationGetTaskChangesResult = Schema.Struct({
+  changeSet: TaskChangeSet,
+  snapshotStatus: Schema.NullOr(TaskReviewSnapshotStatus),
+});
+export type OrchestrationGetTaskChangesResult = typeof OrchestrationGetTaskChangesResult.Type;
+
+export const OrchestrationGetTaskFileDiffInput = Schema.Struct({
+  taskId: TaskId,
+  path: TrimmedNonEmptyString,
+});
+export type OrchestrationGetTaskFileDiffInput = typeof OrchestrationGetTaskFileDiffInput.Type;
+
+export const OrchestrationGetTaskFileDiffResult = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  patch: Schema.String,
+  binary: Schema.Boolean,
+  truncated: Schema.Boolean,
+});
+export type OrchestrationGetTaskFileDiffResult = typeof OrchestrationGetTaskFileDiffResult.Type;
+
 export const OrchestrationThreadSearchSource = Schema.Literals(["user", "assistant"]);
 export type OrchestrationThreadSearchSource = typeof OrchestrationThreadSearchSource.Type;
 
@@ -2193,6 +2620,14 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
   },
+  getTaskChanges: {
+    input: OrchestrationGetTaskChangesInput,
+    output: OrchestrationGetTaskChangesResult,
+  },
+  getTaskFileDiff: {
+    input: OrchestrationGetTaskFileDiffInput,
+    output: OrchestrationGetTaskFileDiffResult,
+  },
   searchThreads: {
     input: OrchestrationSearchThreadsInput,
     output: OrchestrationSearchThreadsResult,
@@ -2238,6 +2673,14 @@ export class OrchestrationGetTurnDiffError extends Schema.TaggedErrorClass<Orche
 
 export class OrchestrationGetFullThreadDiffError extends Schema.TaggedErrorClass<OrchestrationGetFullThreadDiffError>()(
   "OrchestrationGetFullThreadDiffError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export class OrchestrationGetTaskChangesError extends Schema.TaggedErrorClass<OrchestrationGetTaskChangesError>()(
+  "OrchestrationGetTaskChangesError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),

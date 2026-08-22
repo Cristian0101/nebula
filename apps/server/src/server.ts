@@ -37,6 +37,7 @@ import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReap
 import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
+import * as TaskChangeSetQuery from "./orchestration/TaskChangeSetQuery.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
@@ -56,6 +57,7 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor.ts";
 import { TaskWorkspaceReactorLive } from "./orchestration/Layers/TaskWorkspaceReactor.ts";
 import { TaskOwnershipReactorLive } from "./orchestration/Layers/TaskOwnershipReactor.ts";
+import { TaskReviewReactorLive } from "./orchestration/Layers/TaskReviewReactor.ts";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus.ts";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion.ts";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor.ts";
@@ -249,6 +251,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(ThreadDeletionReactorLive),
   Layer.provideMerge(TaskWorkspaceReactorLive),
   Layer.provideMerge(TaskOwnershipReactorLive),
+  Layer.provideMerge(TaskReviewReactorLive),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
@@ -374,8 +377,13 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
-  Layer.provideMerge(ServerSettingsLayerLive),
-  Layer.provideMerge(CheckpointingLayerLive),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      ServerSettingsLayerLive,
+      CheckpointingLayerLive,
+      TaskChangeSetQuery.layer.pipe(Layer.provide(CheckpointingLayerLive)),
+    ),
+  ),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),

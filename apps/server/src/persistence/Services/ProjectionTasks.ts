@@ -46,6 +46,11 @@ export const ProjectionTask = Schema.Struct({
   ownershipViolationsJson: Schema.String,
   ownershipErrorReason: Schema.NullOr(Schema.String),
   ownershipUpdatedAt: Schema.NullOr(IsoDateTime),
+  reviewSnapshotJson: Schema.NullOr(Schema.String),
+  handoffJson: Schema.NullOr(Schema.String),
+  restoreJson: Schema.NullOr(Schema.String),
+  reviewError: Schema.NullOr(Schema.String),
+  resultJson: Schema.NullOr(Schema.String),
 });
 export type ProjectionTask = typeof ProjectionTask.Type;
 

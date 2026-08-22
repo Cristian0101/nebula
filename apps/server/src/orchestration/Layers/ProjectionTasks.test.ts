@@ -1,9 +1,12 @@
 import {
   CommandId,
+  CheckpointRef,
   EventId,
   ProjectId,
   ProviderInstanceId,
   TaskId,
+  TaskHandoffId,
+  TaskReviewSnapshotId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -206,6 +209,66 @@ it.effect("restores Task status and Thread association after a projection restar
         metadata: {},
         payload: { taskId, activatedAt, updatedAt: activatedAt },
       });
+      const snapshotId = TaskReviewSnapshotId.make("snapshot-task-restart");
+      yield* events.append({
+        type: "task.review.prepared",
+        eventId: EventId.make("event-task-review-restart"),
+        aggregateKind: "task",
+        aggregateId: taskId,
+        occurredAt: activatedAt,
+        commandId: CommandId.make("command-task-review-restart"),
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: {
+          taskId,
+          snapshot: {
+            id: snapshotId,
+            taskId,
+            baseCommit: "0123456789abcdef",
+            checkpointRef: CheckpointRef.make(
+              "refs/t3/checkpoints/tasks/task-restart/review/snapshot-task-restart",
+            ),
+            fingerprint: "tree-restart",
+            branchHead: "head-restart",
+            changedFiles: 1,
+            additions: 3,
+            deletions: 1,
+            files: [
+              {
+                path: "src/frontend/restart.ts",
+                previousPath: null,
+                changeType: "modified",
+                additions: 3,
+                deletions: 1,
+                binary: false,
+                untracked: false,
+              },
+            ],
+            ownershipStatus: "valid",
+            status: "current",
+            capturedAt: activatedAt,
+          },
+          handoff: {
+            id: TaskHandoffId.make("handoff-task-restart"),
+            taskId,
+            snapshotId,
+            status: "ready",
+            summary: "Durable handoff",
+            testsRun: [{ command: "vp test run fixture", result: "passed", evidence: "observed" }],
+            assumptions: [],
+            interfaceChanges: [],
+            migrations: [],
+            knownRisks: [],
+            followUps: [],
+            generation: "manual",
+            generationError: null,
+            createdAt: activatedAt,
+            updatedAt: activatedAt,
+          },
+          updatedAt: activatedAt,
+        },
+      });
       yield* pipeline.bootstrap;
     }).pipe(Effect.provide(projectionLayer));
 
@@ -223,6 +286,8 @@ it.effect("restores Task status and Thread association after a projection restar
         readonly ownershipRules: string;
         readonly ownershipStatus: string | null;
         readonly ownershipViolations: string;
+        readonly reviewSnapshotStatus: string | null;
+        readonly handoffStatus: string | null;
       }>`
         SELECT
           task.task_id AS "taskId",
@@ -234,6 +299,8 @@ it.effect("restores Task status and Thread association after a projection restar
           , task.ownership_rules_json AS "ownershipRules"
           , task.ownership_status AS "ownershipStatus"
           , task.ownership_violations_json AS "ownershipViolations"
+          , json_extract(task.review_snapshot_json, '$.status') AS "reviewSnapshotStatus"
+          , json_extract(task.handoff_json, '$.status') AS "handoffStatus"
         FROM projection_tasks AS task
         JOIN projection_projects AS project ON project.project_id = task.project_id
         LEFT JOIN projection_threads AS thread ON thread.thread_id = task.thread_id
@@ -254,6 +321,8 @@ it.effect("restores Task status and Thread association after a projection restar
         ownershipStatus: "violation",
         ownershipViolations:
           '[{"path":"package.json","changeType":"modified","reason":"unclassified","matchedRules":[]}]',
+        reviewSnapshotStatus: "current",
+        handoffStatus: "ready",
       },
     ]);
   }).pipe(

@@ -493,8 +493,8 @@ describe("index.html boot script", () => {
 
     expect(boot.themeId).toBeUndefined();
     expect(boot.themeSelected).toBeUndefined();
-    expect(boot.backgroundColor).toBe("#ffffff");
-    expect(boot.metaContent).toBe("#ffffff");
+    expect(boot.backgroundColor).toBe("#f7f4ee");
+    expect(boot.metaContent).toBe("#f7f4ee");
   });
 
   it("leaves unknown preferences unthemed so the runtime default applies", () => {

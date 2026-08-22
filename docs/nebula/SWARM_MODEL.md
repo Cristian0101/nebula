@@ -48,9 +48,9 @@ Roles are permission sets. A Builder should not silently approve its own integra
 
 Cross-provider assignment is allowed. Reassignment must preserve Task and Workspace identity and explicitly update the provider session binding.
 
-## Structured handoff target
+## Structured handoff
 
-A future completed task should provide:
+A prepared Task review provides:
 
 - summary;
 - changed files;
@@ -60,6 +60,6 @@ A future completed task should provide:
 - migrations;
 - known risks;
 - follow-ups; and
-- result commit.
+- immutable base, snapshot, and current-head evidence.
 
-The handoff is concise evidence for review and integration, not a duplicate project-management report. It is not implemented by this architecture contract.
+The handoff is concise evidence for review and integration, not a duplicate project-management report. Git facts are captured automatically and cannot be edited. Provider-generated narrative is explicitly separate, remains a draft until human review, and has a manual fallback. This does not implement an independent Reviewer, quality gates, integration, Mission/DAG planning, or Swarm automation.

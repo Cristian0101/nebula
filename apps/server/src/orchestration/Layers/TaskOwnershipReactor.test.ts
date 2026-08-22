@@ -9,11 +9,8 @@ import * as Path from "effect/Path";
 import * as ServerConfig from "../../config.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
-import {
-  mergeUntrackedChanges,
-  parseNameStatus,
-  taskNeedsOwnershipReconciliation,
-} from "./TaskOwnershipReactor.ts";
+import { taskNeedsOwnershipReconciliation } from "./TaskOwnershipReactor.ts";
+import { mergeUntrackedChanges, parseNameStatus } from "../taskChangeSet.ts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "nebula-task-ownership-git-",

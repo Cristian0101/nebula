@@ -1,5 +1,12 @@
 # Nebula changelog
 
+## Unreleased — Task Diff, review handoff, and safe restore
+
+- Added canonical complete Task change sets, line statistics, binary metadata, and lazy file diffs from immutable Task base to current worktree state.
+- Added immutable review snapshots, provider-neutral structured handoffs, manual fallback, deterministic stale detection, and a two-pass ownership/freshness completion gate.
+- Added confirmed Task-only restore for unpublished managed branches with a durable pre-restore recovery ref, restart fail-closed behavior, retained provider history, and Undo Restore.
+- Kept independent Reviewer roles, quality gates, shared-resource locking, integration, Mission/DAG, and Swarm automation out of scope.
+
 ## Unreleased — Antigravity CLI provider
 
 - Added Antigravity as a first-party ProviderDriver using the official `agy` headless `stream-json` interface.

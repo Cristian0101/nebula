@@ -27,6 +27,7 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         , ownership_required, ownership_rules_json, ownership_status, ownership_validated_at,
         ownership_changed_path_count, ownership_violations_json, ownership_error_reason,
         ownership_updated_at
+        , review_snapshot_json, handoff_json, restore_json, review_error, result_json
       ) VALUES (
         ${row.taskId}, ${row.projectId}, ${row.title}, ${row.objective}, ${row.role}, ${row.status},
         ${row.threadId}, ${row.createdAt}, ${row.updatedAt}, ${row.activatedAt},
@@ -38,6 +39,8 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         , ${row.ownershipRequired}, ${row.ownershipRulesJson}, ${row.ownershipStatus},
         ${row.ownershipValidatedAt}, ${row.ownershipChangedPathCount},
         ${row.ownershipViolationsJson}, ${row.ownershipErrorReason}, ${row.ownershipUpdatedAt}
+        , ${row.reviewSnapshotJson}, ${row.handoffJson}, ${row.restoreJson}, ${row.reviewError},
+          ${row.resultJson}
       )
       ON CONFLICT (task_id) DO UPDATE SET
         project_id = excluded.project_id,
@@ -69,6 +72,11 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         , ownership_violations_json = excluded.ownership_violations_json
         , ownership_error_reason = excluded.ownership_error_reason
         , ownership_updated_at = excluded.ownership_updated_at
+        , review_snapshot_json = excluded.review_snapshot_json
+        , handoff_json = excluded.handoff_json
+        , restore_json = excluded.restore_json
+        , review_error = excluded.review_error
+        , result_json = excluded.result_json
     `,
   });
 
@@ -103,6 +111,11 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
     , ownership_violations_json AS "ownershipViolationsJson"
     , ownership_error_reason AS "ownershipErrorReason"
     , ownership_updated_at AS "ownershipUpdatedAt"
+    , review_snapshot_json AS "reviewSnapshotJson"
+    , handoff_json AS "handoffJson"
+    , restore_json AS "restoreJson"
+    , review_error AS "reviewError"
+    , result_json AS "resultJson"
   `;
 
   const getRow = SqlSchema.findOneOption({

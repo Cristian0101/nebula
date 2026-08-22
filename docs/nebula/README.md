@@ -22,6 +22,8 @@ Nebula product docs describe what the product is and where it is going. Architec
 
 The current implemented safety boundary combines one Git worktree per writable Builder Task with durable repository-relative write, read-only, and deny ownership rules. Nebula validates the Task's complete change set from its recorded base commit, including untracked files and both sides of renames, and blocks completion while violations or validation errors remain.
 
+Task Diff, immutable review snapshots, structured handoffs, and safe Task restore are implemented on that same boundary. A managed Task exposes its net Git delta from its immutable base, captures a hidden-ref snapshot after fresh ownership validation, and requires a human-reviewed ready handoff plus a second ownership and freshness check before completion. Restore affects only the isolated unpublished Task branch/worktree, first captures a retained recovery ref, leaves provider conversation history intact, and supports explicit undo.
+
 Antigravity CLI is the implemented Google first-party provider for individual Google accounts. Nebula invokes its official headless CLI, keeps authentication provider-owned, and binds each run to the canonical Task worktree. The preserved Gemini CLI prototype remains experimental and blocked for the individual-account authentication path; it is not a mainline provider.
 
 ## Source hierarchy
