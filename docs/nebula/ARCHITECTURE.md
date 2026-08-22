@@ -103,6 +103,8 @@ Task commands produce persisted Task events. The in-memory projector and `projec
 
 Task does not persist provider-session identity or trust a renderer-supplied workspace path. New Builder Tasks persist a server-resolved source repository, exact base commit, stable Task branch, inherited worktree path, lifecycle state, timestamps, and safe failure details. Execution context is derived as `Task → Thread → provider/session`, while the decider requires the Thread branch/path to equal the ready Task workspace. Existing Threads and pre-isolation Tasks remain valid.
 
+A Task may persist an optional manual provider/model assignment before execution. This is assignment intent, not provider-session identity. It lets a draft hydrate truthfully without manufacturing a Thread. After Start creates and binds the canonical Thread, the Thread's model selection is authoritative for its provider execution.
+
 This slice does not create ownership requests, shared-resource locks, Missions, routing, an independent Reviewer role, quality gates, or integration behavior.
 
 ### Workspace isolation
@@ -141,6 +143,16 @@ This is an enforced progression and future integration boundary, not a filesyste
 `TaskChangeSetQuery` is the canonical Git evidence service shared by Task Diff, ownership, review capture, and freshness checks. It captures the complete current tree through the inherited checkpoint store, compares it with the Task's recorded base, preserves rename/copy/binary metadata and line statistics, and loads individual patches only when selected. Immutable review and pre-restore snapshots are hidden Git refs under a Task-scoped namespace.
 
 `TaskReviewReactor` captures review snapshots, routes handoff drafting through the Thread's configured text-generation provider, falls back to an editable manual draft on generation failure, reconciles stale snapshots at startup, and services restore. Git-derived identity and statistics are non-editable facts; provider text is a claim until a human marks the handoff ready. Restore is provider-neutral: it refuses any Task branch present under remote refs, captures and durably records a safety snapshot before reset/clean, changes only the isolated Task workspace, retains provider conversation history, keeps the Task active, and preserves the recovery ref for Undo Restore.
+
+### Command Deck composition
+
+Command Deck is an implemented Project route in the existing web client and desktop shell. It reads the existing shell snapshot and provider registry, scopes canonical Tasks to the active Project, and issues the same typed Task and Thread commands as the project Task surface. It introduces no `CommandDeckTask`, workspace manager, provider runtime, event log, or database.
+
+The Task rail and summary remain lightweight. Only the selected Task mounts the existing lazy Task Diff surface, and provider output remains in the selected canonical Thread rather than being copied into a second chat. Derived labels such as **Running**, **Ready for review**, and **Needs attention** combine existing Task lifecycle, Thread runtime, ownership, workspace, provider readiness, and handoff state without extending the canonical lifecycle enum.
+
+Command Deck activity is a filtered presentation of durable projected milestones already attached to Tasks. It intentionally excludes token deltas and does not become a second orchestration history. Because Tasks, workspaces, ownership, review, restore, and Threads already hydrate from the orchestration projection, restarting the client or server reconstructs the Deck without Command Deck-specific recovery state.
+
+The route is desktop-first: the rail and selected workspace form two columns at ordinary desktop widths, the inspector moves below them when needed, and wide displays use three columns. Mobile receives no separate orchestration implementation in this milestone.
 
 ### Shared resources
 

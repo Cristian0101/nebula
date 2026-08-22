@@ -89,6 +89,7 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
 );
 const ProjectionTaskDbRowSchema = ProjectionTask.mapFields(
   Struct.assign({
+    modelSelectionJson: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     ownershipRulesJson: Schema.fromJsonString(Schema.Array(TaskOwnershipRule)),
     ownershipViolationsJson: Schema.fromJsonString(Schema.Array(TaskOwnershipViolation)),
     reviewSnapshotJson: Schema.NullOr(Schema.fromJsonString(TaskReviewSnapshot)),
@@ -104,6 +105,7 @@ const mapTaskRow = (row: ProjectionTaskRow): OrchestrationTask => ({
   title: row.title,
   objective: row.objective,
   role: row.role,
+  modelSelection: row.modelSelectionJson,
   status: row.status,
   threadId: row.threadId,
   createdAt: row.createdAt,
@@ -486,6 +488,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           title,
           objective,
           role,
+          model_selection_json AS "modelSelectionJson",
           status,
           thread_id AS "threadId",
           created_at AS "createdAt",

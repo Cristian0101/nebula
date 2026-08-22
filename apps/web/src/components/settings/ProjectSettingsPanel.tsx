@@ -756,6 +756,25 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   return (
     <>
       <SettingsPageContainer>
+        <SettingsSection title="Command Deck">
+          <SettingsRow
+            title="Manual multi-agent orchestration"
+            description="Create, assign, start, monitor, review, and restore independent provider Tasks for this project."
+            control={
+              <Button
+                size="sm"
+                onClick={() =>
+                  void navigate({
+                    to: "/projects/$projectKey/command-deck",
+                    params: { projectKey: group.projectKey },
+                  })
+                }
+              >
+                Open Command Deck
+              </Button>
+            }
+          />
+        </SettingsSection>
         <ProjectTasksSection project={representative} />
         <SettingsSection title="Project">
           <SettingsRow

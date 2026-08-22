@@ -13,6 +13,7 @@ import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
@@ -44,6 +45,17 @@ export const taskRestoreCheckpointRef = (taskId: string, restoreId: TaskRestoreI
 export function taskBranchIsPublished(remoteRefs: string, branch: string): boolean {
   return remoteRefs.split("\n").some((ref) => ref.trim().endsWith(`/${branch}`));
 }
+
+export const taskWorkspacePathsMatch = Effect.fn("TaskReviewReactor.taskWorkspacePathsMatch")(
+  function* (recordedPath: string, reportedPath: string) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const [recordedRealPath, reportedRealPath] = yield* Effect.all([
+      fileSystem.realPath(recordedPath),
+      fileSystem.realPath(reportedPath),
+    ]);
+    return recordedRealPath === reportedRealPath;
+  },
+);
 
 export const restoreTaskWorkspaceToBaseline = Effect.fn(
   "TaskReviewReactor.restoreTaskWorkspaceToBaseline",
@@ -109,6 +121,7 @@ const make = Effect.gen(function* () {
   const checkpoints = yield* CheckpointStore.CheckpointStore;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const textGeneration = yield* TextGeneration.TextGeneration;
+  const fileSystem = yield* FileSystem.FileSystem;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const commandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((id) => CommandId.make(`server:${tag}:${id}`)));
@@ -296,7 +309,11 @@ const make = Effect.gen(function* () {
         args: ["for-each-ref", "--format=%(refname)", "refs/remotes"],
       }),
     ]);
-    if (root.stdout.trim() !== workspace.path || branch.stdout.trim() !== workspace.branch) {
+    const workspacePathMatches = yield* taskWorkspacePathsMatch(
+      workspace.path,
+      root.stdout.trim(),
+    ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
+    if (!workspacePathMatches || branch.stdout.trim() !== workspace.branch) {
       return yield* Effect.fail(
         "The current checkout does not match the Task-managed workspace identity.",
       );

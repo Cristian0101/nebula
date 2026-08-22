@@ -473,6 +473,9 @@ export const OrchestrationTask = Schema.Struct({
   title: TrimmedNonEmptyString,
   objective: TrimmedNonEmptyString,
   role: NebulaTaskRole,
+  // Manual execution assignment selected before a draft Task has a Thread.
+  // Provider session identity remains derived from the bound Thread.
+  modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   status: NebulaTaskStatus,
   threadId: Schema.NullOr(ThreadId),
   createdAt: IsoDateTime,
@@ -905,6 +908,7 @@ const TaskCreateCommand = Schema.Struct({
   title: TrimmedNonEmptyString,
   objective: TrimmedNonEmptyString,
   role: NebulaTaskRole.pipe(Schema.withDecodingDefault(Effect.succeed("builder" as const))),
+  modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   createdAt: IsoDateTime,
 });
 
@@ -1703,6 +1707,7 @@ export const OrchestrationTaskCreatedPayload = Schema.Struct({
   title: TrimmedNonEmptyString,
   objective: TrimmedNonEmptyString,
   role: NebulaTaskRole,
+  modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   ownershipRequired: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

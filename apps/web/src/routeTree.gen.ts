@@ -27,6 +27,7 @@ import { Route as SettingsAppearanceRouteImport } from './routes/settings.appear
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
 import { Route as ConnectCallbackRouteImport } from './routes/connect_.callback'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
+import { Route as ProjectsProjectKeyCommandDeckRouteImport } from './routes/projects.$projectKey_.command-deck'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
@@ -119,6 +120,12 @@ const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
   path: '/pull-requests',
   getParentRoute: () => ChatRoute,
 } as any)
+const ProjectsProjectKeyCommandDeckRoute =
+  ProjectsProjectKeyCommandDeckRouteImport.update({
+    id: '/projects/$projectKey_/command-deck',
+    path: '/projects/$projectKey/command-deck',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -151,6 +158,7 @@ export interface FileRoutesByFullPath {
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/projects/$projectKey/command-deck': typeof ProjectsProjectKeyCommandDeckRoute
 }
 export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
@@ -172,6 +180,7 @@ export interface FileRoutesByTo {
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/projects/$projectKey/command-deck': typeof ProjectsProjectKeyCommandDeckRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -195,6 +204,7 @@ export interface FileRoutesById {
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/projects/$projectKey_/command-deck': typeof ProjectsProjectKeyCommandDeckRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -218,6 +228,7 @@ export interface FileRouteTypes {
     | '/settings/source-control'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/projects/$projectKey/command-deck'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/connect'
@@ -239,6 +250,7 @@ export interface FileRouteTypes {
     | '/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/projects/$projectKey/command-deck'
   id:
     | '__root__'
     | '/_chat'
@@ -261,6 +273,7 @@ export interface FileRouteTypes {
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
+    | '/projects/$projectKey_/command-deck'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -271,6 +284,7 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   ConnectCallbackRoute: typeof ConnectCallbackRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
+  ProjectsProjectKeyCommandDeckRoute: typeof ProjectsProjectKeyCommandDeckRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -401,6 +415,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatPullRequestsRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/projects/$projectKey_/command-deck': {
+      id: '/projects/$projectKey_/command-deck'
+      path: '/projects/$projectKey/command-deck'
+      fullPath: '/projects/$projectKey/command-deck'
+      preLoaderRoute: typeof ProjectsProjectKeyCommandDeckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -470,6 +491,7 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   ConnectCallbackRoute: ConnectCallbackRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
+  ProjectsProjectKeyCommandDeckRoute: ProjectsProjectKeyCommandDeckRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

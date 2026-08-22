@@ -320,6 +320,7 @@ export function projectEvent(
               title: payload.title,
               objective: payload.objective,
               role: payload.role,
+              modelSelection: payload.modelSelection ?? null,
               status: "draft" as const,
               threadId: null,
               createdAt: payload.createdAt,

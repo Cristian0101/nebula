@@ -450,7 +450,7 @@ export function TaskOwnershipEditor({
   );
 }
 
-function TaskChangesPanel({
+export function TaskChangesPanel({
   environmentId,
   task,
   provider,
@@ -683,7 +683,9 @@ export function ownershipDraftsValid(rules: ReadonlyArray<OwnershipRuleDraft>): 
   );
 }
 
-function ownershipRulesFromDrafts(rules: ReadonlyArray<OwnershipRuleDraft>): TaskOwnershipRule[] {
+export function ownershipRulesFromDrafts(
+  rules: ReadonlyArray<OwnershipRuleDraft>,
+): TaskOwnershipRule[] {
   const createdAt = new Date().toISOString();
   return rules.map((rule) => ({
     id: randomUUID(),
@@ -694,7 +696,7 @@ function ownershipRulesFromDrafts(rules: ReadonlyArray<OwnershipRuleDraft>): Tas
   }));
 }
 
-function taskOwnershipContext(task: OrchestrationTask): string {
+export function taskOwnershipContext(task: OrchestrationTask): string {
   const groups = {
     write: task.ownership?.rules.filter((rule) => rule.access === "write") ?? [],
     read: task.ownership?.rules.filter((rule) => rule.access === "read") ?? [],
@@ -793,6 +795,7 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
         title: nextTitle,
         objective: nextObjective,
         role: "builder",
+        modelSelection: project.defaultModelSelection,
       },
     });
     let error = commandError(result);
@@ -817,12 +820,14 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
 
   const launchReadyTask = async (task: OrchestrationTask) => {
     if (
-      project.defaultModelSelection === null ||
+      (task.modelSelection ?? project.defaultModelSelection) === null ||
       task.workspace?.status !== "ready" ||
       task.workspace.path === null ||
       task.workspace.branch === null
     )
       return;
+    const modelSelection = task.modelSelection ?? project.defaultModelSelection;
+    if (modelSelection === null) return;
     const threadId = newThreadId();
     const createResult = await createThread({
       environmentId: project.environmentId,
@@ -830,7 +835,7 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
         threadId,
         projectId: project.id,
         title: task.title,
-        modelSelection: project.defaultModelSelection,
+        modelSelection,
         runtimeMode: "full-access",
         interactionMode: "default",
         branch: task.workspace.branch,
@@ -870,7 +875,7 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
             text: `Task: ${task.title}\n\nObjective:\n${task.objective}\n\n${taskOwnershipContext(task)}`,
             attachments: [],
           },
-          modelSelection: project.defaultModelSelection,
+          modelSelection,
           titleSeed: task.title,
           runtimeMode: "full-access",
           interactionMode: "default",
@@ -891,10 +896,10 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
   };
 
   const startTask = async (task: OrchestrationTask) => {
-    if (project.defaultModelSelection === null) {
+    if ((task.modelSelection ?? project.defaultModelSelection) === null) {
       reportError(
-        "Choose a default model",
-        "Set this project's default provider and model before starting a Task.",
+        "Choose a provider and model",
+        "Assign this Task or its project a provider and model before starting.",
       );
       return;
     }

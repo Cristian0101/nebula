@@ -19,7 +19,7 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
     Request: ProjectionTask,
     execute: (row) => sql`
       INSERT INTO projection_tasks (
-        task_id, project_id, title, objective, role, status, thread_id,
+        task_id, project_id, title, objective, role, model_selection_json, status, thread_id,
         created_at, updated_at, activated_at, completed_at, cancelled_at
         , workspace_status, workspace_source_repository, workspace_base_commit,
         workspace_branch, workspace_path, workspace_created_at, workspace_removed_at,
@@ -29,7 +29,8 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         ownership_updated_at
         , review_snapshot_json, handoff_json, restore_json, review_error, result_json
       ) VALUES (
-        ${row.taskId}, ${row.projectId}, ${row.title}, ${row.objective}, ${row.role}, ${row.status},
+        ${row.taskId}, ${row.projectId}, ${row.title}, ${row.objective}, ${row.role},
+        ${row.modelSelectionJson}, ${row.status},
         ${row.threadId}, ${row.createdAt}, ${row.updatedAt}, ${row.activatedAt},
         ${row.completedAt}, ${row.cancelledAt}
         , ${row.workspaceStatus}, ${row.workspaceSourceRepository}, ${row.workspaceBaseCommit},
@@ -47,6 +48,7 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         title = excluded.title,
         objective = excluded.objective,
         role = excluded.role,
+        model_selection_json = excluded.model_selection_json,
         status = excluded.status,
         thread_id = excluded.thread_id,
         created_at = excluded.created_at,
@@ -86,6 +88,7 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
     title,
     objective,
     role,
+    model_selection_json AS "modelSelectionJson",
     status,
     thread_id AS "threadId",
     created_at AS "createdAt",

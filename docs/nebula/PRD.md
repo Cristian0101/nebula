@@ -94,12 +94,15 @@ The current repository already provides:
 - immutable Task review snapshots and provider-neutral structured handoffs with manual fallback;
 - stale-snapshot completion blocking with fresh ownership and freshness checks; and
 - confirmed, unpublished-branch-only Task restore with a retained pre-restore recovery snapshot and undo.
+- a desktop-first Command Deck that composes Project-scoped Tasks, provider readiness, workspaces, ownership, changes, review, restore, and the existing Thread execution surface;
+- durable manual provider/model assignment for draft Tasks before a Thread exists; and
+- manual parallel execution of independent provider-backed Tasks in separate managed worktrees.
 
 The current repository does **not** yet provide agent-generated ownership requests, shared-resource locks, an independent Reviewer role, automated quality gates, deterministic swarm, Mission planning, or integration queues.
 
-### ROADMAP v0.1 — Command Deck
+### IMPLEMENTED v0.1 — Command Deck
 
-Build toward:
+Command Deck now provides:
 
 - open a local repository;
 - detect providers and display authentication state;
@@ -114,7 +117,9 @@ Build toward:
 - configure providers; and
 - apply the Nebula design system.
 
-The current slice implements one explicit Task tied to one inherited thread/provider session. A new Builder Task requires explicit write ownership, prepares an isolated inherited Git worktree before its Thread is created, and receives a machine-generated ownership summary. Pre-ownership Tasks remain readable and keep their prior behavior. Multi-agent automation remains out of scope.
+The user remains the coordinator: provider/model choice, ownership, Start, review, completion, restore, and cleanup are explicit actions. Command Deck derives presentation and attention state from canonical Task, Thread, provider, workspace, ownership, and review projections. It does not persist a Command Deck entity or duplicate provider output. Draft Task assignment is stored on the Task because no Thread exists yet; once execution starts, the bound Thread's model selection is authoritative for that execution.
+
+Manual parallel provider Tasks are implemented. Automated planning, provider routing, Task dependencies, shared-resource locks, independent Reviewer automation, integration, and Swarm Mode remain out of scope.
 
 ### ROADMAP v0.2 — Deterministic Swarm
 
