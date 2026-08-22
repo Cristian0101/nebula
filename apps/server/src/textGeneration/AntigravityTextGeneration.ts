@@ -1,0 +1,248 @@
+import {
+  TextGenerationError,
+  type AntigravitySettings,
+  type ModelSelection,
+} from "@t3tools/contracts";
+import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { buildAntigravityStructuredArgs } from "../provider/antigravity/AntigravityCommand.ts";
+import * as TextGeneration from "./TextGeneration.ts";
+import {
+  buildBranchNamePrompt,
+  buildCommitMessagePrompt,
+  buildPrContentPrompt,
+  buildThreadTitlePrompt,
+} from "./TextGenerationPrompts.ts";
+import {
+  normalizeCliError,
+  sanitizeCommitSubject,
+  sanitizePrTitle,
+  sanitizeThreadTitle,
+  toJsonSchemaObject,
+} from "./TextGenerationUtils.ts";
+
+const TIMEOUT_MS = 180_000;
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+
+function extractStructuredValue(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if ("structured_output" in record) return record.structured_output;
+  if ("structuredOutput" in record) return record.structuredOutput;
+  if ("response" in record) {
+    const response = record.response;
+    if (typeof response !== "string") return response;
+    const decoded = decodeJsonOption(response);
+    return Option.isSome(decoded) ? decoded.value : response;
+  }
+  if (typeof record.result === "object" && record.result !== null) {
+    return extractStructuredValue(record.result);
+  }
+  return value;
+}
+
+export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGeneration")(function* (
+  settings: AntigravitySettings,
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+
+  const runJson = <S extends Schema.Top>(input: {
+    readonly operation:
+      | "generateCommitMessage"
+      | "generatePrContent"
+      | "generateBranchName"
+      | "generateThreadTitle";
+    readonly cwd: string;
+    readonly prompt: string;
+    readonly schema: S;
+    readonly modelSelection: ModelSelection;
+  }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
+    Effect.gen(function* () {
+      const schemaJson = yield* encodeJson(toJsonSchemaObject(input.schema)).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: input.operation,
+              detail: "Failed to encode Antigravity structured output schema.",
+              cause,
+            }),
+        ),
+      );
+      const effort = getModelSelectionStringOptionValue(input.modelSelection, "effort");
+      const args = buildAntigravityStructuredArgs({
+        prompt: input.prompt,
+        jsonSchema: schemaJson,
+        model: input.modelSelection.model,
+        ...(effort ? { effort } : {}),
+      });
+      const spawnCommand = yield* resolveSpawnCommand(settings.binaryPath || "agy", args, {
+        env: environment,
+      });
+      const child = yield* spawner
+        .spawn(
+          ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+            cwd: input.cwd,
+            env: environment,
+            shell: spawnCommand.shell,
+          }),
+        )
+        .pipe(
+          Effect.mapError((cause) =>
+            normalizeCliError("agy", input.operation, cause, "Failed to spawn Antigravity CLI"),
+          ),
+        );
+      const collect = <E>(stream: Stream.Stream<Uint8Array, E>) =>
+        stream.pipe(
+          Stream.decodeText(),
+          Stream.runFold(
+            () => "",
+            (all, chunk) => all + chunk,
+          ),
+          Effect.mapError((cause) =>
+            normalizeCliError("agy", input.operation, cause, "Failed to read Antigravity output"),
+          ),
+        );
+      const [stdout, stderr, exitCode] = yield* Effect.all(
+        [
+          collect(child.stdout),
+          collect(child.stderr),
+          child.exitCode.pipe(
+            Effect.mapError((cause) =>
+              normalizeCliError(
+                "agy",
+                input.operation,
+                cause,
+                "Failed to read Antigravity exit code",
+              ),
+            ),
+          ),
+        ],
+        { concurrency: "unbounded" },
+      );
+      if (exitCode !== 0) {
+        return yield* new TextGenerationError({
+          operation: input.operation,
+          detail: stderr.trim() || stdout.trim() || `Antigravity exited with code ${exitCode}.`,
+        });
+      }
+      const envelope = yield* decodeJson(stdout).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: input.operation,
+              detail: "Antigravity returned malformed structured JSON.",
+              cause,
+            }),
+        ),
+      );
+      const decodeOutput = Schema.decodeEffect(input.schema);
+      return yield* decodeOutput(extractStructuredValue(envelope)).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: input.operation,
+              detail: "Antigravity returned invalid structured output.",
+              cause,
+            }),
+        ),
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.timeoutOption(TIMEOUT_MS),
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.fail(
+              new TextGenerationError({
+                operation: input.operation,
+                detail: "Antigravity structured generation timed out.",
+              }),
+            ),
+          onSome: Effect.succeed,
+        }),
+      ),
+    );
+
+  return {
+    generateCommitMessage: Effect.fn("AntigravityText.generateCommitMessage")(function* (input) {
+      const built = buildCommitMessagePrompt({
+        branch: input.branch,
+        stagedSummary: input.stagedSummary,
+        stagedPatch: input.stagedPatch,
+        includeBranch: input.includeBranch === true,
+        policy: input.policy,
+      });
+      const generated = yield* runJson({
+        operation: "generateCommitMessage",
+        cwd: input.cwd,
+        prompt: built.prompt,
+        schema: built.outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return {
+        subject: sanitizeCommitSubject(generated.subject),
+        body: generated.body.trim(),
+        ...("branch" in generated && typeof generated.branch === "string"
+          ? { branch: sanitizeFeatureBranchName(generated.branch) }
+          : {}),
+      };
+    }),
+    generatePrContent: Effect.fn("AntigravityText.generatePrContent")(function* (input) {
+      const built = buildPrContentPrompt({
+        baseBranch: input.baseBranch,
+        headBranch: input.headBranch,
+        commitSummary: input.commitSummary,
+        diffSummary: input.diffSummary,
+        diffPatch: input.diffPatch,
+        policy: input.policy,
+        changeRequestTemplate: input.changeRequestTemplate,
+      });
+      const generated = yield* runJson({
+        operation: "generatePrContent",
+        cwd: input.cwd,
+        prompt: built.prompt,
+        schema: built.outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { title: sanitizePrTitle(generated.title), body: generated.body.trim() };
+    }),
+    generateBranchName: Effect.fn("AntigravityText.generateBranchName")(function* (input) {
+      const built = buildBranchNamePrompt({
+        message: input.message,
+        attachments: input.attachments,
+      });
+      const generated = yield* runJson({
+        operation: "generateBranchName",
+        cwd: input.cwd,
+        prompt: built.prompt,
+        schema: built.outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { branch: sanitizeBranchFragment(generated.branch) };
+    }),
+    generateThreadTitle: Effect.fn("AntigravityText.generateThreadTitle")(function* (input) {
+      const built = buildThreadTitlePrompt({
+        message: input.message,
+        previousTitle: input.previousTitle,
+        attachments: input.attachments,
+      });
+      const generated = yield* runJson({
+        operation: "generateThreadTitle",
+        cwd: input.cwd,
+        prompt: built.prompt,
+        schema: built.outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { title: sanitizeThreadTitle(generated.title) };
+    }),
+  } satisfies TextGeneration.TextGeneration["Service"];
+});

@@ -9,7 +9,7 @@
 | Category        | Open-source multi-agent development orchestration platform. |
 | Primary promise | **Your coding agents. One engineering team.**               |
 
-Nebula sits above coding agents the user already trusts. It coordinates independently authenticated tools such as Codex, Claude Code, Gemini/Antigravity, Cursor, Grok, OpenCode, and future providers. Provider support is earned through a real adapter and capability contract; names in this document do not imply that every provider is implemented today.
+Nebula sits above coding agents the user already trusts. It coordinates independently authenticated tools such as Codex, Claude Code, Antigravity, Cursor, Grok, OpenCode, and future providers. Provider support is earned through a real adapter and capability contract; names in this document do not imply that every provider is implemented today. For individual Google accounts, Antigravity is the supported Google terminal provider. The Gemini CLI prototype is retained outside mainline only for potential enterprise Code Assist, API-key, or future-compatible paths.
 
 ## What Nebula is not initially
 
@@ -72,7 +72,7 @@ The current repository already provides:
 - web, desktop, and mobile clients;
 - local and remote environment connections;
 - projects and durable threads;
-- built-in Codex, Claude, Cursor, Grok, and OpenCode drivers;
+- built-in Codex, Claude, Antigravity, Cursor, Grok, and OpenCode drivers;
 - provider-owned authentication detection and provider sessions;
 - terminal and process execution;
 - Git/VCS operations, including worktree creation and removal;

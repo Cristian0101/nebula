@@ -1,5 +1,13 @@
 # Nebula changelog
 
+## Unreleased — Antigravity CLI provider
+
+- Added Antigravity as a first-party ProviderDriver using the official `agy` headless `stream-json` interface.
+- Added provider-owned readiness, provider-default and manual model selection, structured JSON text generation, normalized text/tool/result events, conversation continuation, and managed cancellation.
+- Bound first turns to the effective Task worktree with `--new-project`; Task ownership remains the authoritative progression gate for resulting changes.
+- Kept permissions conservative: workspace edits use Antigravity's supported mode, dangerous permission bypass is never enabled, and soft-denied operations surface as provider errors.
+- For individual Google accounts, Antigravity is the supported Google terminal provider. The Gemini CLI prototype remains experimental and blocked for this authentication path.
+
 ## Unreleased — Task ownership engine
 
 - Added durable repository-relative write, read-only, and deny rules to new writable Builder Tasks.
