@@ -15,6 +15,7 @@ import {
   NonNegativeInt,
   PositiveInt,
   ProjectId,
+  TaskId,
   ProviderItemId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -249,6 +250,35 @@ export const OrchestrationProject = Schema.Struct({
 });
 export type OrchestrationProject = typeof OrchestrationProject.Type;
 
+export const NebulaTaskRole = Schema.Literals([
+  "architect",
+  "scout",
+  "builder",
+  "tester",
+  "reviewer",
+  "integrator",
+]);
+export type NebulaTaskRole = typeof NebulaTaskRole.Type;
+
+export const NebulaTaskStatus = Schema.Literals(["draft", "active", "completed", "cancelled"]);
+export type NebulaTaskStatus = typeof NebulaTaskStatus.Type;
+
+export const OrchestrationTask = Schema.Struct({
+  id: TaskId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  objective: TrimmedNonEmptyString,
+  role: NebulaTaskRole,
+  status: NebulaTaskStatus,
+  threadId: Schema.NullOr(ThreadId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  activatedAt: Schema.NullOr(IsoDateTime),
+  completedAt: Schema.NullOr(IsoDateTime),
+  cancelledAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationTask = typeof OrchestrationTask.Type;
+
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
@@ -425,6 +455,8 @@ export type OrchestrationThread = typeof OrchestrationThread.Type;
 export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
+  // Optional for in-process fixtures and persisted snapshots created before Prompt 3.
+  tasks: Schema.optional(Schema.Array(OrchestrationTask)),
   threads: Schema.Array(OrchestrationThread),
   updatedAt: IsoDateTime,
 });
@@ -500,6 +532,8 @@ export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
+  // Optional so cached shell snapshots from pre-Task clients remain readable.
+  tasks: Schema.optional(Schema.Array(OrchestrationTask)),
   threads: Schema.Array(OrchestrationThreadShell),
   updatedAt: IsoDateTime,
 });
@@ -525,6 +559,11 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     kind: Schema.Literal("thread-removed"),
     sequence: NonNegativeInt,
     threadId: ThreadId,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("task-upserted"),
+    sequence: NonNegativeInt,
+    task: OrchestrationTask,
   }),
 ]);
 export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent.Type;
@@ -641,6 +680,46 @@ export const ProjectCreateCommand = Schema.Struct({
   workspaceRoot: TrimmedNonEmptyString,
   createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  createdAt: IsoDateTime,
+});
+
+const TaskCreateCommand = Schema.Struct({
+  type: Schema.Literal("task.create"),
+  commandId: CommandId,
+  taskId: TaskId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  objective: TrimmedNonEmptyString,
+  role: NebulaTaskRole.pipe(Schema.withDecodingDefault(Effect.succeed("builder" as const))),
+  createdAt: IsoDateTime,
+});
+
+const TaskBindThreadCommand = Schema.Struct({
+  type: Schema.Literal("task.bind-thread"),
+  commandId: CommandId,
+  taskId: TaskId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+const TaskActivateCommand = Schema.Struct({
+  type: Schema.Literal("task.activate"),
+  commandId: CommandId,
+  taskId: TaskId,
+  createdAt: IsoDateTime,
+});
+
+const TaskCompleteCommand = Schema.Struct({
+  type: Schema.Literal("task.complete"),
+  commandId: CommandId,
+  taskId: TaskId,
+  createdAt: IsoDateTime,
+});
+
+const TaskCancelCommand = Schema.Struct({
+  type: Schema.Literal("task.cancel"),
+  commandId: CommandId,
+  taskId: TaskId,
   createdAt: IsoDateTime,
 });
 
@@ -913,6 +992,11 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
+  TaskCreateCommand,
+  TaskBindThreadCommand,
+  TaskActivateCommand,
+  TaskCompleteCommand,
+  TaskCancelCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -941,6 +1025,11 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
+  TaskCreateCommand,
+  TaskBindThreadCommand,
+  TaskActivateCommand,
+  TaskCompleteCommand,
+  TaskCancelCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -1059,6 +1148,11 @@ export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
   "project.deleted",
+  "task.created",
+  "task.thread-bound",
+  "task.activated",
+  "task.completed",
+  "task.cancelled",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -1088,7 +1182,7 @@ export const OrchestrationEventType = Schema.Literals([
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
-export const OrchestrationAggregateKind = Schema.Literals(["project", "thread"]);
+export const OrchestrationAggregateKind = Schema.Literals(["project", "task", "thread"]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
 
@@ -1120,6 +1214,40 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   deletedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskCreatedPayload = Schema.Struct({
+  taskId: TaskId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  objective: TrimmedNonEmptyString,
+  role: NebulaTaskRole,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskThreadBoundPayload = Schema.Struct({
+  taskId: TaskId,
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskActivatedPayload = Schema.Struct({
+  taskId: TaskId,
+  activatedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskCompletedPayload = Schema.Struct({
+  taskId: TaskId,
+  completedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskCancelledPayload = Schema.Struct({
+  taskId: TaskId,
+  cancelledAt: IsoDateTime,
+  updatedAt: IsoDateTime,
 });
 
 export const ThreadCreatedPayload = Schema.Struct({
@@ -1332,7 +1460,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId]),
+  aggregateId: Schema.Union([ProjectId, TaskId, ThreadId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -1355,6 +1483,31 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.created"),
+    payload: OrchestrationTaskCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.thread-bound"),
+    payload: OrchestrationTaskThreadBoundPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.activated"),
+    payload: OrchestrationTaskActivatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.completed"),
+    payload: OrchestrationTaskCompletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.cancelled"),
+    payload: OrchestrationTaskCancelledPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

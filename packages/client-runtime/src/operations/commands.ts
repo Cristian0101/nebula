@@ -31,6 +31,11 @@ type CommandInput<T extends CommandType> = Omit<
 export type CreateProjectInput = CommandInput<"project.create">;
 export type UpdateProjectInput = CommandInput<"project.meta.update">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
+export type CreateTaskInput = CommandInput<"task.create">;
+export type BindTaskThreadInput = CommandInput<"task.bind-thread">;
+export type ActivateTaskInput = CommandInput<"task.activate">;
+export type CompleteTaskInput = CommandInput<"task.complete">;
+export type CancelTaskInput = CommandInput<"task.cancel">;
 export type CreateThreadInput = CommandInput<"thread.create">;
 export type DeleteThreadInput = CommandInput<"thread.delete">;
 export type ArchiveThreadInput = CommandInput<"thread.archive">;
@@ -116,6 +121,41 @@ export const deleteProject: (input: DeleteProjectInput) => CommandEffect = Effec
     type: "project.delete",
     commandId: yield* commandId(input),
   });
+});
+
+export const createTask: (input: CreateTaskInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.createTask",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.create", ...metadata });
+});
+
+export const bindTaskThread: (input: BindTaskThreadInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.bindTaskThread",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.bind-thread", ...metadata });
+});
+
+export const activateTask: (input: ActivateTaskInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.activateTask",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.activate", ...metadata });
+});
+
+export const completeTask: (input: CompleteTaskInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.completeTask",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.complete", ...metadata });
+});
+
+export const cancelTask: (input: CancelTaskInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.cancelTask",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.cancel", ...metadata });
 });
 
 export const createThread: (input: CreateThreadInput) => CommandEffect = Effect.fn(

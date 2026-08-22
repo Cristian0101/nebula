@@ -73,6 +73,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { ProjectTasksSection } from "../ProjectTasksSection";
 import {
   EMPTY_PROJECT_SCRIPT_INPUT,
   editorRequestForScript,
@@ -755,6 +756,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   return (
     <>
       <SettingsPageContainer>
+        <ProjectTasksSection project={representative} />
         <SettingsSection title="Project">
           <SettingsRow
             title="Name"

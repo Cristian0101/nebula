@@ -91,6 +91,16 @@ Nebula adds a task coordination domain to the existing orchestration engine.
 
 Do not create one class or package for every noun. The first implementation should add only the types and state transitions needed for an explicit Task.
 
+### Implemented Task vertical slice
+
+Nebula now implements Task identity and lifecycle through the inherited orchestration engine. A Task has a stable branded ID, Project, title, objective, role, lifecycle status, optional primary Thread, and lifecycle timestamps. The implemented transitions are `draft → active → completed`, `draft → cancelled`, and `active → cancelled`; terminal Tasks cannot be reopened.
+
+Task commands produce persisted Task events. The in-memory projector and `projection_tasks` relational projector apply those events inside the inherited SQLite transaction and replay model. Task rows are included in the existing shell snapshot/subscription and shared client cache. The project Task UI composes canonical Thread creation and provider turn dispatch instead of duplicating either runtime.
+
+Task does not persist provider-session identity or a renderer-supplied workspace path. Execution context is derived as `Task → Thread → provider/session` and `Task → Thread worktree path or Project workspace root`. Existing Threads remain valid without a Task.
+
+This slice does not create Task worktrees, branches, ownership rules, Missions, routing, review, or integration behavior.
+
 ### Workspace isolation
 
 Future concurrent writable tasks should use one Git worktree per writable task. The worktree must be tied to a stable task ID, declared branch, base revision, effective path, and cleanup state. Read-only analysis can reuse a checkout when no write capability is granted.

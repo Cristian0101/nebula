@@ -3,6 +3,7 @@ import {
   EnvironmentId,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
+  TaskId,
   ThreadId,
   type ClientOrchestrationCommand,
 } from "@t3tools/contracts";
@@ -22,8 +23,13 @@ import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
+  activateTask,
   archiveThread,
+  bindTaskThread,
+  cancelTask,
+  completeTask,
   createProject,
+  createTask,
   settleThread,
   stopThreadSession,
   unsettleThread,
@@ -169,6 +175,46 @@ describe("environment commands", () => {
           reason: "user",
         },
       ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches the complete Task command lifecycle through the inherited RPC", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+      const taskId = TaskId.make("task-1");
+      const metadata = {
+        commandId: CommandId.make("task-command"),
+        createdAt: "2026-08-22T12:00:00.000Z",
+      };
+      const provideSupervisor = Effect.provideService(
+        EnvironmentSupervisor.EnvironmentSupervisor,
+        supervisor,
+      );
+
+      yield* createTask({
+        ...metadata,
+        taskId,
+        projectId: ProjectId.make("project-1"),
+        title: "Persistent Task",
+        objective: "Exercise the existing command RPC.",
+        role: "builder",
+      }).pipe(provideSupervisor);
+      yield* bindTaskThread({ ...metadata, taskId, threadId: ThreadId.make("thread-1") }).pipe(
+        provideSupervisor,
+      );
+      yield* activateTask({ ...metadata, taskId }).pipe(provideSupervisor);
+      yield* completeTask({ ...metadata, taskId }).pipe(provideSupervisor);
+      yield* cancelTask({ ...metadata, taskId }).pipe(provideSupervisor);
+
+      expect(dispatched.map((command) => command.type)).toEqual([
+        "task.create",
+        "task.bind-thread",
+        "task.activate",
+        "task.complete",
+        "task.cancel",
+      ]);
+      expect(dispatched.every((command) => command.commandId === "task-command")).toBe(true);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 });

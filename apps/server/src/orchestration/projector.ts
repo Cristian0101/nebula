@@ -14,6 +14,11 @@ import {
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
+  TaskActivatedPayload,
+  TaskCancelledPayload,
+  TaskCompletedPayload,
+  TaskCreatedPayload,
+  TaskThreadBoundPayload,
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
@@ -189,6 +194,7 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
     projects: [],
+    tasks: [],
     threads: [],
     updatedAt: nowIso,
   };
@@ -274,6 +280,93 @@ export function projectEvent(
                   updatedAt: payload.deletedAt,
                 }
               : project,
+          ),
+        })),
+      );
+
+    case "task.created":
+      return decodeForEvent(TaskCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: [
+            ...(nextBase.tasks ?? []),
+            {
+              id: payload.taskId,
+              projectId: payload.projectId,
+              title: payload.title,
+              objective: payload.objective,
+              role: payload.role,
+              status: "draft" as const,
+              threadId: null,
+              createdAt: payload.createdAt,
+              updatedAt: payload.updatedAt,
+              activatedAt: null,
+              completedAt: null,
+              cancelledAt: null,
+            },
+          ],
+        })),
+      );
+
+    case "task.thread-bound":
+      return decodeForEvent(TaskThreadBoundPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? { ...task, threadId: payload.threadId, updatedAt: payload.updatedAt }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.activated":
+      return decodeForEvent(TaskActivatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  status: "active" as const,
+                  activatedAt: payload.activatedAt,
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.completed":
+      return decodeForEvent(TaskCompletedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  status: "completed" as const,
+                  completedAt: payload.completedAt,
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.cancelled":
+      return decodeForEvent(TaskCancelledPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  status: "cancelled" as const,
+                  cancelledAt: payload.cancelledAt,
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
           ),
         })),
       );
