@@ -79,9 +79,12 @@ The current repository already provides:
 - per-turn checkpoints, diffs, restore, and provider conversation rollback;
 - a persisted command/event/projection orchestration engine;
 - local SQLite state, migrations, and typed WebSocket RPC; and
-- system/light/dark appearance, built-in palettes, custom themes, and desktop theme bridging.
+- system/light/dark appearance, built-in palettes, custom themes, and desktop theme bridging;
+- durable Nebula Tasks scoped to a Project, with draft, active, completed, and cancelled lifecycle state;
+- optional one-to-one Task binding to an inherited Thread and its provider/session context; and
+- a compact project Task surface for creating, starting, opening, completing, and cancelling Tasks.
 
-The current repository does **not** yet provide the explicit Nebula Task, ownership policy, task-oriented workspace lifecycle, deterministic swarm, or Nebula product shell described below.
+The current repository does **not** yet provide automatic Task worktrees or branches, ownership policy, deterministic swarm, Mission planning, review automation, or integration queues.
 
 ### ROADMAP v0.1 — Command Deck
 
@@ -100,7 +103,7 @@ Build toward:
 - configure providers; and
 - apply the Nebula design system.
 
-The smallest useful slice is one explicit Task tied to one inherited thread/provider session and one inherited workspace. Multi-agent automation is not required for that slice.
+The first slice now implements one explicit Task tied to one inherited thread/provider session and one inherited workspace. Multi-agent automation remains out of scope.
 
 ### ROADMAP v0.2 — Deterministic Swarm
 

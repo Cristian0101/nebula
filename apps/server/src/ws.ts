@@ -32,6 +32,7 @@ import {
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   type ProjectId,
+  TaskId,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
@@ -558,6 +559,12 @@ const makeWsRpcLayer = (
                 projectId: event.payload.projectId,
               }),
             );
+          case "task.created":
+          case "task.thread-bound":
+          case "task.activated":
+          case "task.completed":
+          case "task.cancelled":
+            return taskUpsert(event.payload.taskId, event.sequence);
           case "thread.deleted":
           case "thread.archived":
             return Effect.succeed(
@@ -583,7 +590,7 @@ const makeWsRpcLayer = (
       // If both attempts fail, log and drop the stream item; treating an error as
       // a missing row would incorrectly remove a still-active aggregate.
       const retryShellProjectionRead = <A, E>(
-        aggregateKind: "project" | "thread",
+        aggregateKind: "project" | "task" | "thread",
         aggregateId: string,
         read: Effect.Effect<A, E>,
       ): Effect.Effect<Option.Option<A>, never, never> =>
@@ -598,6 +605,25 @@ const makeWsRpcLayer = (
             }),
           ),
           Effect.orElseSucceed(() => Option.none()),
+        );
+
+      const taskUpsert = (
+        taskId: TaskId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead("task", taskId, projectionSnapshotQuery.getShellSnapshot()).pipe(
+          Effect.map(
+            Option.flatMap((snapshot) => {
+              const task = snapshot.tasks?.find((candidate) => candidate.id === taskId);
+              return task === undefined
+                ? Option.none()
+                : Option.some({
+                    kind: "task-upserted" as const,
+                    sequence,
+                    task,
+                  });
+            }),
+          ),
         );
 
       const projectUpsertOrRemove = (

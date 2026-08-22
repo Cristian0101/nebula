@@ -12,6 +12,9 @@ import type * as PlatformError from "effect/PlatformError";
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
   listThreadsByProjectId,
+  listTasksByProjectId,
+  requireTask,
+  requireTaskAbsent,
   requireActiveProjectWorkspaceRootAbsent,
   requireProject,
   requireProjectAbsent,
@@ -307,16 +310,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const activeThreads = listThreadsByProjectId(readModel, command.projectId).filter(
         (thread) => thread.deletedAt === null,
       );
-      if (activeThreads.length > 0 && command.force !== true) {
+      const nonTerminalTasks = listTasksByProjectId(readModel, command.projectId).filter(
+        (task) => task.status === "draft" || task.status === "active",
+      );
+      if ((activeThreads.length > 0 || nonTerminalTasks.length > 0) && command.force !== true) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Project '${command.projectId}' is not empty and cannot be deleted without force=true.`,
         });
       }
-      if (activeThreads.length > 0) {
+      if (activeThreads.length > 0 || nonTerminalTasks.length > 0) {
+        const cancelledAt = yield* nowIso;
         return yield* decideCommandSequence({
           readModel,
           commands: [
+            ...nonTerminalTasks.map(
+              (task): Extract<OrchestrationCommand, { type: "task.cancel" }> => ({
+                type: "task.cancel",
+                commandId: command.commandId,
+                taskId: task.id,
+                createdAt: cancelledAt,
+              }),
+            ),
             ...activeThreads.map(
               (thread): Extract<OrchestrationCommand, { type: "thread.delete" }> => ({
                 type: "thread.delete",
@@ -345,6 +360,169 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           projectId: command.projectId,
           deletedAt: occurredAt,
+        },
+      };
+    }
+
+    case "task.create": {
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (project.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' cannot be created in deleted project '${command.projectId}'.`,
+        });
+      }
+      yield* requireTaskAbsent({ readModel, command, taskId: command.taskId });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.created",
+        payload: {
+          taskId: command.taskId,
+          projectId: command.projectId,
+          title: command.title,
+          objective: command.objective,
+          role: command.role,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.bind-thread": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.status !== "draft") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' must be draft before binding a thread.`,
+        });
+      }
+      if (task.threadId !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' already has a primary thread.`,
+        });
+      }
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      if (thread.deletedAt !== null || thread.projectId !== task.projectId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is not an active thread in Task project '${task.projectId}'.`,
+        });
+      }
+      const existingBinding = (readModel.tasks ?? []).find(
+        (candidate) => candidate.id !== task.id && candidate.threadId === command.threadId,
+      );
+      if (existingBinding !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is already bound to Task '${existingBinding.id}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.thread-bound",
+        payload: {
+          taskId: command.taskId,
+          threadId: command.threadId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.activate": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.status !== "draft" || task.threadId === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' must be draft with a bound thread before activation.`,
+        });
+      }
+      const project = yield* requireProject({ readModel, command, projectId: task.projectId });
+      const thread = yield* requireThread({ readModel, command, threadId: task.threadId });
+      if (
+        project.deletedAt !== null ||
+        thread.deletedAt !== null ||
+        thread.projectId !== task.projectId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' no longer has valid project and thread execution context.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.activated",
+        payload: {
+          taskId: command.taskId,
+          activatedAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.complete": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.status !== "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Only an active Task can be completed; '${command.taskId}' is '${task.status}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.completed",
+        payload: {
+          taskId: command.taskId,
+          completedAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.cancel": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.status === "completed" || task.status === "cancelled") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Terminal Task '${command.taskId}' cannot be cancelled.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.cancelled",
+        payload: {
+          taskId: command.taskId,
+          cancelledAt: command.createdAt,
+          updatedAt: command.createdAt,
         },
       };
     }
