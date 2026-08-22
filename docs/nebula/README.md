@@ -13,6 +13,7 @@ This directory is the durable product and architecture source of truth for Nebul
 | [Runtime map](RUNTIME_MAP.md)               | Evidence-based map of the inherited T3 Code repository.                                      |
 | [Extension contract](EXTENSION_CONTRACT.md) | Canonical attachment points, divergence budget, ADR review, and first module recommendation. |
 | [Design system](DESIGN_SYSTEM.md)           | Canonical visual identity, palette, theme behavior, accessibility, and asset status.         |
+| [Providers](PROVIDERS.md)                   | Implemented provider transports, authentication boundaries, and current limitations.         |
 | [Changelog](CHANGELOG.md)                   | Shipped and unreleased Nebula product behavior changes.                                      |
 | [ADRs](../adr/)                             | Accepted architecture decisions.                                                             |
 | [Upstream tracking](../../UPSTREAM.md)      | Fork baseline, attribution, sync strategy, and known divergence.                             |
@@ -20,6 +21,8 @@ This directory is the durable product and architecture source of truth for Nebul
 Nebula product docs describe what the product is and where it is going. Architecture docs distinguish inherited behavior from target behavior. The runtime map records what the current code actually does. The extension contract determines where Nebula may attach without creating competing systems.
 
 The current implemented safety boundary combines one Git worktree per writable Builder Task with durable repository-relative write, read-only, and deny ownership rules. Nebula validates the Task's complete change set from its recorded base commit, including untracked files and both sides of renames, and blocks completion while violations or validation errors remain.
+
+Antigravity CLI is the implemented Google first-party provider for individual Google accounts. Nebula invokes its official headless CLI, keeps authentication provider-owned, and binds each run to the canonical Task worktree. The preserved Gemini CLI prototype remains experimental and blocked for the individual-account authentication path; it is not a mainline provider.
 
 ## Source hierarchy
 

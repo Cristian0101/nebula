@@ -55,6 +55,10 @@ T3 Code is the runtime foundation, not a temporary prototype.
 
 Built-in providers register through `apps/server/src/provider/builtInDrivers.ts`. Drivers create scoped provider instances, adapters translate provider protocols, registries route by provider instance, and `ProviderService` owns the common session lifecycle. Provider authentication remains provider-owned.
 
+Antigravity uses the same boundaries. `AntigravityDriver` materializes the provider instance and optional structured text-generation service; `AntigravityAdapter` invokes `agy` through the inherited child-process spawner with the effective Thread/Task working directory. It parses the official NDJSON `init`, `step_update`, and `result` envelopes into normalized runtime events, persists the returned conversation ID as the resume cursor, and uses `--conversation` on later turns. First turns use the official `--new-project` behavior so the canonical Task worktree becomes Antigravity's workspace. The adapter does not use ACP, private Google endpoints, a second process manager, or a Nebula credential store.
+
+Antigravity headless permissions are an additional provider-side boundary. Nebula uses `accept-edits` for workspace file changes but never supplies `--dangerously-skip-permissions`; Antigravity can still soft-deny commands or operations outside its current policy. That boundary complements, and does not replace, Task worktree isolation and ownership validation.
+
 ### Git, workspaces, and recovery
 
 Projects hold a workspace root; a thread may override it with a worktree path. `apps/server/src/vcs` supplies VCS drivers and Git workflows, including worktree creation/removal. `apps/server/src/checkpointing` captures hidden Git refs, computes diffs, restores files, and coordinates provider conversation rollback.

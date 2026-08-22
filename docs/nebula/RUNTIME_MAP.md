@@ -64,7 +64,7 @@ Nebula application services should compose these boundaries. It should not add a
 
 ## 4. Provider architecture
 
-Canonical built-in registration is `apps/server/src/provider/builtInDrivers.ts`. The current built-ins are Codex, Claude, Cursor, Grok, and OpenCode.
+Canonical built-in registration is `apps/server/src/provider/builtInDrivers.ts`. The current built-ins are Codex, Claude, Antigravity, Cursor, Grok, and OpenCode.
 
 `apps/server/src/provider/ProviderDriver.ts` defines the driver SPI. A driver supplies metadata, configuration schema/defaults, status behavior, and scoped provider-instance creation. Materialized instances expose a stable instance ID, driver kind, continuation identity, display data, enabled/status snapshots, an adapter, and optional text generation.
 
