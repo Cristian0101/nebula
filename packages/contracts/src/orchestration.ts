@@ -287,6 +287,64 @@ export const NebulaTaskWorkspace = Schema.Struct({
 });
 export type NebulaTaskWorkspace = typeof NebulaTaskWorkspace.Type;
 
+export const TaskOwnershipAccess = Schema.Literals(["read", "write", "deny"]);
+export type TaskOwnershipAccess = typeof TaskOwnershipAccess.Type;
+
+export const TaskOwnershipRule = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  pattern: TrimmedNonEmptyString,
+  access: TaskOwnershipAccess,
+  reason: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  createdAt: IsoDateTime,
+});
+export type TaskOwnershipRule = typeof TaskOwnershipRule.Type;
+
+export const TaskOwnershipChangeType = Schema.Literals([
+  "added",
+  "modified",
+  "deleted",
+  "renamed",
+  "copied",
+  "untracked",
+]);
+export type TaskOwnershipChangeType = typeof TaskOwnershipChangeType.Type;
+
+export const TaskOwnershipViolationReason = Schema.Literals([
+  "denied",
+  "read-only",
+  "unclassified",
+]);
+export type TaskOwnershipViolationReason = typeof TaskOwnershipViolationReason.Type;
+
+export const TaskOwnershipViolation = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  changeType: TaskOwnershipChangeType,
+  reason: TaskOwnershipViolationReason,
+  matchedRules: Schema.Array(TaskOwnershipRule),
+});
+export type TaskOwnershipViolation = typeof TaskOwnershipViolation.Type;
+
+export const TaskOwnershipValidationStatus = Schema.Literals([
+  "unconfigured",
+  "pending",
+  "valid",
+  "violation",
+  "error",
+]);
+export type TaskOwnershipValidationStatus = typeof TaskOwnershipValidationStatus.Type;
+
+export const TaskOwnershipState = Schema.Struct({
+  required: Schema.Boolean,
+  rules: Schema.Array(TaskOwnershipRule),
+  status: TaskOwnershipValidationStatus,
+  validatedAt: Schema.NullOr(IsoDateTime),
+  changedPathCount: NonNegativeInt,
+  violations: Schema.Array(TaskOwnershipViolation),
+  errorReason: Schema.NullOr(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+export type TaskOwnershipState = typeof TaskOwnershipState.Type;
+
 export const OrchestrationTask = Schema.Struct({
   id: TaskId,
   projectId: ProjectId,
@@ -303,6 +361,8 @@ export const OrchestrationTask = Schema.Struct({
   // Null is the explicit compatibility state for Tasks created before
   // per-Task workspaces shipped.
   workspace: Schema.optional(Schema.NullOr(NebulaTaskWorkspace)),
+  // Optional so snapshots and events created before Prompt 5 remain readable.
+  ownership: Schema.optional(Schema.NullOr(TaskOwnershipState)),
 });
 export type OrchestrationTask = typeof OrchestrationTask.Type;
 
@@ -764,6 +824,21 @@ const TaskWorkspaceRemoveCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const TaskOwnershipSetCommand = Schema.Struct({
+  type: Schema.Literal("task.ownership.set"),
+  commandId: CommandId,
+  taskId: TaskId,
+  rules: Schema.Array(TaskOwnershipRule),
+  createdAt: IsoDateTime,
+});
+
+const TaskOwnershipValidateCommand = Schema.Struct({
+  type: Schema.Literal("task.ownership.validate"),
+  commandId: CommandId,
+  taskId: TaskId,
+  createdAt: IsoDateTime,
+});
+
 const ProjectMetaUpdateCommand = Schema.Struct({
   type: Schema.Literal("project.meta.update"),
   commandId: CommandId,
@@ -1040,6 +1115,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   TaskCancelCommand,
   TaskWorkspacePrepareCommand,
   TaskWorkspaceRemoveCommand,
+  TaskOwnershipSetCommand,
+  TaskOwnershipValidateCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -1075,6 +1152,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   TaskCancelCommand,
   TaskWorkspacePrepareCommand,
   TaskWorkspaceRemoveCommand,
+  TaskOwnershipSetCommand,
+  TaskOwnershipValidateCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -1225,6 +1304,25 @@ const TaskWorkspaceCleanupFailedCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const TaskOwnershipValidatedCommand = Schema.Struct({
+  type: Schema.Literal("task.ownership.validated"),
+  commandId: CommandId,
+  taskId: TaskId,
+  changedPathCount: NonNegativeInt,
+  violations: Schema.Array(TaskOwnershipViolation),
+  requestCompletion: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+const TaskOwnershipValidationFailedCommand = Schema.Struct({
+  type: Schema.Literal("task.ownership.validation-failed"),
+  commandId: CommandId,
+  taskId: TaskId,
+  failureReason: TrimmedNonEmptyString,
+  requestCompletion: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   TaskWorkspacePreparationStartedCommand,
   TaskWorkspaceReadyCommand,
@@ -1232,6 +1330,8 @@ const InternalOrchestrationCommand = Schema.Union([
   TaskWorkspaceMissingCommand,
   TaskWorkspaceRemovedCommand,
   TaskWorkspaceCleanupFailedCommand,
+  TaskOwnershipValidatedCommand,
+  TaskOwnershipValidationFailedCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
@@ -1266,6 +1366,10 @@ export const OrchestrationEventType = Schema.Literals([
   "task.workspace.remove-requested",
   "task.workspace.removed",
   "task.workspace.cleanup-failed",
+  "task.ownership-updated",
+  "task.ownership-validation-requested",
+  "task.ownership-validated",
+  "task.ownership-validation-failed",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -1335,7 +1439,36 @@ export const OrchestrationTaskCreatedPayload = Schema.Struct({
   title: TrimmedNonEmptyString,
   objective: TrimmedNonEmptyString,
   role: NebulaTaskRole,
+  ownershipRequired: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskOwnershipUpdatedPayload = Schema.Struct({
+  taskId: TaskId,
+  rules: Schema.Array(TaskOwnershipRule),
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskOwnershipValidationRequestedPayload = Schema.Struct({
+  taskId: TaskId,
+  requestCompletion: Schema.Boolean,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskOwnershipValidatedPayload = Schema.Struct({
+  taskId: TaskId,
+  status: Schema.Literals(["valid", "violation"]),
+  changedPathCount: NonNegativeInt,
+  violations: Schema.Array(TaskOwnershipViolation),
+  validatedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskOwnershipValidationFailedPayload = Schema.Struct({
+  taskId: TaskId,
+  failureReason: TrimmedNonEmptyString,
+  validatedAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
 
@@ -1715,6 +1848,26 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("task.workspace.cleanup-failed"),
     payload: OrchestrationTaskWorkspaceCleanupFailedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.ownership-updated"),
+    payload: OrchestrationTaskOwnershipUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.ownership-validation-requested"),
+    payload: OrchestrationTaskOwnershipValidationRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.ownership-validated"),
+    payload: OrchestrationTaskOwnershipValidatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.ownership-validation-failed"),
+    payload: OrchestrationTaskOwnershipValidationFailedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

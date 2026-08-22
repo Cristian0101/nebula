@@ -318,7 +318,23 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
           },
         }),
       );
-      expect(premature.message).toContain("ready isolated workspace");
+      expect(premature.message).toContain("explicit write ownership");
+
+      model = yield* applyCommand(model, {
+        type: "task.ownership.set",
+        commandId: CommandId.make("set-builder-ownership"),
+        taskId,
+        rules: [
+          {
+            id: "frontend",
+            access: "write",
+            pattern: "apps/web/src/**",
+            reason: null,
+            createdAt: now,
+          },
+        ],
+        createdAt: now,
+      });
 
       model = yield* applyCommand(model, {
         type: "task.workspace.prepare",
@@ -402,6 +418,20 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         taskId,
         createdAt: now,
       });
+      expect(model.tasks?.[0]).toMatchObject({
+        status: "active",
+        ownership: { status: "pending" },
+      });
+      model = yield* applyCommand(model, {
+        type: "task.ownership.validated",
+        commandId: CommandId.make("complete-isolated-after-validation"),
+        taskId,
+        changedPathCount: 1,
+        violations: [],
+        requestCompletion: true,
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]?.status).toBe("completed");
       model = yield* applyCommand(model, {
         type: "task.workspace.remove",
         commandId: CommandId.make("remove-isolated-workspace"),
@@ -420,6 +450,118 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
       expect(model.tasks?.[0]?.workspace).toMatchObject({
         status: "ready",
         failureCode: "dirty-workspace",
+      });
+    }),
+  );
+
+  it.effect("blocks completion on violations and permits explicit scope expansion", () =>
+    Effect.gen(function* () {
+      const seeded = yield* seedReadModel;
+      let model: OrchestrationReadModel = {
+        ...seeded,
+        tasks: [
+          {
+            id: taskId,
+            projectId: projectA,
+            title: "Owned builder",
+            objective: "Stay inside declared paths.",
+            role: "builder",
+            status: "active",
+            threadId: threadA,
+            createdAt: now,
+            updatedAt: now,
+            activatedAt: now,
+            completedAt: null,
+            cancelledAt: null,
+            workspace: {
+              status: "ready",
+              sourceRepository: "/tmp/project-a",
+              baseCommit: "0123456789abcdef",
+              branch: "nebula/manual/task-1",
+              path: "/tmp/worktrees/task-1",
+              createdAt: now,
+              removedAt: null,
+              failureCode: null,
+              failureReason: null,
+              updatedAt: now,
+            },
+            ownership: {
+              required: true,
+              rules: [
+                {
+                  id: "frontend",
+                  access: "write",
+                  pattern: "src/frontend/**",
+                  reason: null,
+                  createdAt: now,
+                },
+              ],
+              status: "valid",
+              validatedAt: now,
+              changedPathCount: 1,
+              violations: [],
+              errorReason: null,
+              updatedAt: now,
+            },
+          },
+        ],
+      };
+
+      model = yield* applyCommand(model, {
+        type: "task.complete",
+        commandId: CommandId.make("request-owned-completion"),
+        taskId,
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.ownership.validated",
+        commandId: CommandId.make("reject-owned-completion"),
+        taskId,
+        changedPathCount: 2,
+        violations: [
+          {
+            path: "src/backend/nope.ts",
+            changeType: "untracked",
+            reason: "unclassified",
+            matchedRules: [],
+          },
+        ],
+        requestCompletion: true,
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]).toMatchObject({
+        status: "active",
+        ownership: { status: "violation", changedPathCount: 2 },
+      });
+
+      model = yield* applyCommand(model, {
+        type: "task.ownership.set",
+        commandId: CommandId.make("expand-owned-scope"),
+        taskId,
+        rules: [
+          {
+            id: "all-src",
+            access: "write",
+            pattern: "src/**",
+            reason: "Explicit dependency expansion",
+            createdAt: now,
+          },
+        ],
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]?.ownership).toMatchObject({ status: "pending" });
+      model = yield* applyCommand(model, {
+        type: "task.ownership.validated",
+        commandId: CommandId.make("scope-expansion-valid"),
+        taskId,
+        changedPathCount: 2,
+        violations: [],
+        requestCompletion: false,
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]).toMatchObject({
+        status: "active",
+        ownership: { status: "valid", violations: [] },
       });
     }),
   );

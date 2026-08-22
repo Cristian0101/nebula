@@ -86,8 +86,12 @@ The current repository already provides:
 - one durable Git worktree per started writable Builder Task, captured from the clean source checkout's exact `HEAD` commit;
 - durable workspace preparation, ready, failed, missing, removal, and cleanup-failure state; and
 - explicit, dirty-safe worktree cleanup after a Task reaches a terminal state.
+- durable Task ownership rules with write, read-only, and deny access;
+- automatic and manual validation of committed and working-tree changes against the recorded Task base;
+- persisted ownership status and violation evidence with restart reconciliation; and
+- fresh ownership validation before a managed Task may complete.
 
-The current repository does **not** yet provide path ownership policy, shared-resource locks, deterministic swarm, Mission planning, review automation, or integration queues.
+The current repository does **not** yet provide agent-generated ownership requests, shared-resource locks, deterministic swarm, Mission planning, review automation, or integration queues.
 
 ### ROADMAP v0.1 — Command Deck
 
@@ -106,7 +110,7 @@ Build toward:
 - configure providers; and
 - apply the Nebula design system.
 
-The current slice implements one explicit Task tied to one inherited thread/provider session. A new Builder Task prepares an isolated inherited Git worktree before its Thread is created; pre-isolation Tasks remain readable and keep their prior shared-workspace behavior. Multi-agent automation remains out of scope.
+The current slice implements one explicit Task tied to one inherited thread/provider session. A new Builder Task requires explicit write ownership, prepares an isolated inherited Git worktree before its Thread is created, and receives a machine-generated ownership summary. Pre-ownership Tasks remain readable and keep their prior behavior. Multi-agent automation remains out of scope.
 
 ### ROADMAP v0.2 — Deterministic Swarm
 

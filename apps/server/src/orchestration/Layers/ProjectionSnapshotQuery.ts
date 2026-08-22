@@ -26,6 +26,8 @@ import {
   ModelSelection,
   ProjectId,
   ThreadId,
+  TaskOwnershipRule,
+  TaskOwnershipViolation,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -81,8 +83,13 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
   }),
 );
-const ProjectionTaskDbRowSchema = ProjectionTask;
-type ProjectionTaskRow = typeof ProjectionTask.Type;
+const ProjectionTaskDbRowSchema = ProjectionTask.mapFields(
+  Struct.assign({
+    ownershipRulesJson: Schema.fromJsonString(Schema.Array(TaskOwnershipRule)),
+    ownershipViolationsJson: Schema.fromJsonString(Schema.Array(TaskOwnershipViolation)),
+  }),
+);
+type ProjectionTaskRow = typeof ProjectionTaskDbRowSchema.Type;
 const mapTaskRow = (row: ProjectionTaskRow): OrchestrationTask => ({
   id: row.taskId,
   projectId: row.projectId,
@@ -110,6 +117,19 @@ const mapTaskRow = (row: ProjectionTaskRow): OrchestrationTask => ({
           failureCode: row.workspaceFailureCode,
           failureReason: row.workspaceFailureReason,
           updatedAt: row.workspaceUpdatedAt,
+        },
+  ownership:
+    row.ownershipRequired !== 1 || row.ownershipStatus === null || row.ownershipUpdatedAt === null
+      ? null
+      : {
+          required: true,
+          rules: row.ownershipRulesJson,
+          status: row.ownershipStatus,
+          validatedAt: row.ownershipValidatedAt,
+          changedPathCount: row.ownershipChangedPathCount,
+          violations: row.ownershipViolationsJson,
+          errorReason: row.ownershipErrorReason,
+          updatedAt: row.ownershipUpdatedAt,
         },
 });
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -470,6 +490,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           , workspace_failure_code AS "workspaceFailureCode"
           , workspace_failure_reason AS "workspaceFailureReason"
           , workspace_updated_at AS "workspaceUpdatedAt"
+          , ownership_required AS "ownershipRequired"
+          , ownership_rules_json AS "ownershipRulesJson"
+          , ownership_status AS "ownershipStatus"
+          , ownership_validated_at AS "ownershipValidatedAt"
+          , ownership_changed_path_count AS "ownershipChangedPathCount"
+          , ownership_violations_json AS "ownershipViolationsJson"
+          , ownership_error_reason AS "ownershipErrorReason"
+          , ownership_updated_at AS "ownershipUpdatedAt"
         FROM projection_tasks
         ORDER BY created_at ASC, task_id ASC
       `,

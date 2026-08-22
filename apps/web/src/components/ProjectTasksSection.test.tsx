@@ -3,7 +3,12 @@ import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { ProjectTaskCard, TaskCreateFields } from "./ProjectTasksSection";
+import {
+  ownershipDraftsValid,
+  ProjectTaskCard,
+  TaskCreateFields,
+  TaskOwnershipEditor,
+} from "./ProjectTasksSection";
 
 const projectId = ProjectId.make("project-1");
 
@@ -71,6 +76,8 @@ function card(currentTask: OrchestrationTask, actions = {}) {
     onOpenThread: () => undefined,
     onComplete: () => undefined,
     onCancel: () => undefined,
+    onEditOwnership: () => undefined,
+    onValidateOwnership: () => undefined,
     ...actions,
   });
 }
@@ -104,6 +111,27 @@ describe("ProjectTaskCard", () => {
     expect(textOf(tree)).not.toContain("Open Thread");
   });
 
+  it("disables start until a managed Builder Task has a write rule", () => {
+    const current = task("draft");
+    const html = renderToStaticMarkup(
+      card({
+        ...current,
+        ownership: {
+          required: true,
+          rules: [],
+          status: "unconfigured",
+          validatedAt: null,
+          changedPathCount: 0,
+          violations: [],
+          errorReason: null,
+          updatedAt: current.updatedAt,
+        },
+      }),
+    );
+    expect(html).toContain("Add at least one write path");
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>.*Start/s);
+  });
+
   it("offers linked-thread, complete, and cancel actions only while active", () => {
     const onOpenThread = vi.fn();
     const onComplete = vi.fn();
@@ -129,6 +157,49 @@ describe("ProjectTaskCard", () => {
     expect(onRemoveWorkspace).toHaveBeenCalledOnce();
     expect(text).toContain("The Task branch and committed work are preserved.");
   });
+
+  it("shows ownership violations and exposes remediation actions", () => {
+    const onEditOwnership = vi.fn();
+    const onValidateOwnership = vi.fn();
+    const current = task("active");
+    const tree = card(
+      {
+        ...current,
+        ownership: {
+          required: true,
+          rules: [
+            {
+              id: "deny-package",
+              access: "deny",
+              pattern: "package.json",
+              reason: null,
+              createdAt: current.createdAt,
+            },
+          ],
+          status: "violation",
+          validatedAt: current.updatedAt,
+          changedPathCount: 1,
+          violations: [
+            {
+              path: "package.json",
+              changeType: "modified",
+              reason: "denied",
+              matchedRules: [],
+            },
+          ],
+          errorReason: null,
+          updatedAt: current.updatedAt,
+        },
+      },
+      { onEditOwnership, onValidateOwnership },
+    );
+    expect(textOf(tree)).toContain("Completion is blocked");
+    expect(textOf(tree)).toContain("package.json");
+    findAction(tree, "Edit ownership")?.();
+    findAction(tree, "Validate ownership")?.();
+    expect(onEditOwnership).toHaveBeenCalledOnce();
+    expect(onValidateOwnership).toHaveBeenCalledOnce();
+  });
 });
 
 describe("TaskCreateFields", () => {
@@ -139,11 +210,40 @@ describe("TaskCreateFields", () => {
         objective="Task objective"
         onTitleChange={() => undefined}
         onObjectiveChange={() => undefined}
+        ownershipRules={[{ access: "write", pattern: "apps/web/src/**", reason: "" }]}
+        onOwnershipRulesChange={() => undefined}
       />,
     );
     expect(html).toContain("Title");
     expect(html).toContain("Task title");
     expect(html).toContain("Objective");
     expect(html).toContain("Task objective");
+  });
+
+  it("requires an explicit write rule and rejects traversal", () => {
+    expect(ownershipDraftsValid([{ access: "read", pattern: "src/**", reason: "" }])).toBe(false);
+    expect(ownershipDraftsValid([{ access: "write", pattern: "../src/**", reason: "" }])).toBe(
+      false,
+    );
+    expect(
+      ownershipDraftsValid([{ access: "write", pattern: "apps/web/src/**", reason: "" }]),
+    ).toBe(true);
+  });
+
+  it("renders write, read-only, deny, and Entire Repository controls", () => {
+    const html = renderToStaticMarkup(
+      <TaskOwnershipEditor
+        rules={[
+          { access: "write", pattern: "src/**", reason: "" },
+          { access: "read", pattern: "shared/**", reason: "" },
+          { access: "deny", pattern: "package.json", reason: "" },
+        ]}
+        onChange={() => undefined}
+      />,
+    );
+    expect(html).toContain("Entire repository writable");
+    expect(html).toContain("Write");
+    expect(html).toContain("Read-only");
+    expect(html).toContain("Denied");
   });
 });

@@ -10,6 +10,8 @@ import {
   createTask,
   prepareTaskWorkspace,
   removeTaskWorkspace,
+  setTaskOwnership,
+  validateTaskOwnership,
   type ActivateTaskInput,
   type BindTaskThreadInput,
   type CancelTaskInput,
@@ -17,6 +19,8 @@ import {
   type CreateTaskInput,
   type PrepareTaskWorkspaceInput,
   type RemoveTaskWorkspaceInput,
+  type SetTaskOwnershipInput,
+  type ValidateTaskOwnershipInput,
 } from "../operations/commands.ts";
 import { createAtomCommandScheduler, createEnvironmentCommand } from "./runtime.ts";
 
@@ -28,6 +32,8 @@ export type {
   CreateTaskInput,
   PrepareTaskWorkspaceInput,
   RemoveTaskWorkspaceInput,
+  SetTaskOwnershipInput,
+  ValidateTaskOwnershipInput,
 };
 
 export function createTaskEnvironmentAtoms<R, E>(
@@ -79,6 +85,18 @@ export function createTaskEnvironmentAtoms<R, E>(
     removeWorkspace: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:task:workspace:remove",
       execute: removeTaskWorkspace,
+      scheduler,
+      concurrency,
+    }),
+    setOwnership: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:task:ownership:set",
+      execute: setTaskOwnership,
+      scheduler,
+      concurrency,
+    }),
+    validateOwnership: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:task:ownership:validate",
+      execute: validateTaskOwnership,
       scheduler,
       concurrency,
     }),

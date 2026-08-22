@@ -4,6 +4,8 @@ import {
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
+  TaskOwnershipRule,
+  TaskOwnershipViolation,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -11,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
@@ -69,6 +72,13 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
 } as const;
+
+const encodeOwnershipRules = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(TaskOwnershipRule)),
+);
+const encodeOwnershipViolations = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(TaskOwnershipViolation)),
+);
 
 type ProjectorName =
   (typeof ORCHESTRATION_PROJECTOR_NAMES)[keyof typeof ORCHESTRATION_PROJECTOR_NAMES];
@@ -583,6 +593,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               workspaceFailureCode: null,
               workspaceFailureReason: null,
               workspaceUpdatedAt: null,
+              ownershipRequired: event.payload.ownershipRequired === true ? 1 : 0,
+              ownershipRulesJson: "[]",
+              ownershipStatus: event.payload.ownershipRequired === true ? "unconfigured" : null,
+              ownershipValidatedAt: null,
+              ownershipChangedPathCount: 0,
+              ownershipViolationsJson: "[]",
+              ownershipErrorReason: null,
+              ownershipUpdatedAt:
+                event.payload.ownershipRequired === true ? event.payload.updatedAt : null,
             });
             return;
           case "task.thread-bound":
@@ -719,6 +738,53 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 workspaceFailureCode: event.payload.failureCode,
                 workspaceFailureReason: event.payload.failureReason,
                 workspaceUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            }
+            return;
+          }
+          case "task.ownership-updated":
+          case "task.ownership-validation-requested":
+          case "task.ownership-validated":
+          case "task.ownership-validation-failed": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            const row = existing.value;
+            if (event.type === "task.ownership-updated") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                ownershipRulesJson: encodeOwnershipRules(event.payload.rules),
+                ownershipStatus: "pending",
+                ownershipErrorReason: null,
+                ownershipUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            } else if (event.type === "task.ownership-validation-requested") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                ownershipStatus: "pending",
+                ownershipErrorReason: null,
+                ownershipUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            } else if (event.type === "task.ownership-validated") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                ownershipStatus: event.payload.status,
+                ownershipValidatedAt: event.payload.validatedAt,
+                ownershipChangedPathCount: event.payload.changedPathCount,
+                ownershipViolationsJson: encodeOwnershipViolations(event.payload.violations),
+                ownershipErrorReason: null,
+                ownershipUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            } else {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                ownershipStatus: "error",
+                ownershipValidatedAt: event.payload.validatedAt,
+                ownershipErrorReason: event.payload.failureReason,
+                ownershipUpdatedAt: event.payload.updatedAt,
                 updatedAt: event.payload.updatedAt,
               });
             }
