@@ -13,7 +13,6 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import { forkParked } from "../../serverActivation.ts";
-import { GitVcsDriver } from "../../vcs/GitVcsDriver.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -21,6 +20,7 @@ import {
   type TaskOwnershipReactorShape,
 } from "../Services/TaskOwnershipReactor.ts";
 import { evaluateTaskOwnership, type TaskOwnershipChange } from "../taskOwnership.ts";
+import { TaskChangeSetQuery } from "../TaskChangeSetQuery.ts";
 
 type OwnershipEvent = Extract<
   OrchestrationEvent,
@@ -32,49 +32,6 @@ type OwnershipEvent = Extract<
       | "thread.turn-diff-completed";
   }
 >;
-
-export function parseNameStatus(output: string): TaskOwnershipChange[] {
-  const fields = output.split("\0");
-  if (fields.at(-1) === "") fields.pop();
-  const changes: TaskOwnershipChange[] = [];
-  for (let index = 0; index < fields.length; ) {
-    const status = fields[index++] ?? "";
-    const code = status[0];
-    if (code === "R" || code === "C") {
-      const previousPath = fields[index++];
-      const path = fields[index++];
-      if (previousPath && path) {
-        changes.push({
-          path,
-          previousPath,
-          changeType: code === "R" ? "renamed" : "copied",
-        });
-      }
-      continue;
-    }
-    const path = fields[index++];
-    if (!path) continue;
-    changes.push({
-      path,
-      changeType: code === "A" ? "added" : code === "D" ? "deleted" : "modified",
-    });
-  }
-  return changes;
-}
-
-export function mergeUntrackedChanges(
-  tracked: ReadonlyArray<TaskOwnershipChange>,
-  output: string,
-): TaskOwnershipChange[] {
-  const paths = output.split("\0").filter(Boolean);
-  const existing = new Set(tracked.flatMap((change) => [change.path, change.previousPath ?? ""]));
-  return [
-    ...tracked,
-    ...paths
-      .filter((path) => !existing.has(path))
-      .map((path): TaskOwnershipChange => ({ path, changeType: "untracked" })),
-  ];
-}
 
 export function taskNeedsOwnershipReconciliation(task: OrchestrationTask): boolean {
   return (
@@ -89,7 +46,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const engine = yield* OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery;
-  const git = yield* GitVcsDriver;
+  const taskChanges = yield* TaskChangeSetQuery;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const commandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((id) => CommandId.make(`server:${tag}:${id}`)));
@@ -101,39 +58,11 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const collectChanges = Effect.fn("TaskOwnershipReactor.collectChanges")(function* (
-    cwd: string,
-    baseCommit: string,
-  ) {
-    const [tracked, untracked] = yield* Effect.all(
-      [
-        git.execute({
-          operation: "TaskOwnership.collectTrackedChanges",
-          cwd,
-          args: [
-            "diff",
-            "--name-status",
-            "-z",
-            "--find-renames",
-            "--find-copies",
-            baseCommit,
-            "--",
-          ],
-        }),
-        git.execute({
-          operation: "TaskOwnership.collectUntrackedChanges",
-          cwd,
-          args: ["ls-files", "--others", "--exclude-standard", "-z", "--"],
-        }),
-      ],
-      { concurrency: "unbounded" },
-    );
-    return mergeUntrackedChanges(parseNameStatus(tracked.stdout), untracked.stdout);
-  });
-
   const validate = Effect.fn("TaskOwnershipReactor.validate")(function* (
     taskId: TaskId,
     requestCompletion: boolean,
+    requestReview = false,
+    generation: "provider" | "manual" = "provider",
   ) {
     const readModel = yield* snapshots.getCommandReadModel();
     const task = (readModel.tasks ?? []).find((candidate) => candidate.id === taskId);
@@ -146,7 +75,12 @@ const make = Effect.gen(function* () {
     ) {
       return;
     }
-    const changes = yield* collectChanges(task.workspace.path, task.workspace.baseCommit);
+    const changeSet = yield* taskChanges.collect(task);
+    const changes: TaskOwnershipChange[] = changeSet.files.map((file) => ({
+      path: file.path,
+      changeType: file.changeType,
+      ...(file.previousPath === null ? {} : { previousPath: file.previousPath }),
+    }));
     const result = evaluateTaskOwnership(task.ownership.rules, changes);
     const createdAt = yield* now;
     yield* engine.dispatch({
@@ -156,17 +90,20 @@ const make = Effect.gen(function* () {
       changedPathCount: result.changedPathCount,
       violations: result.violations,
       requestCompletion,
+      requestReview,
+      generation,
       createdAt,
     });
   });
 
-  const fail = (taskId: TaskId, requestCompletion: boolean) =>
+  const fail = (taskId: TaskId, requestCompletion: boolean, requestReview = false) =>
     Effect.all({ commandId: commandId("task-ownership-validation-failed"), createdAt: now }).pipe(
       Effect.flatMap((metadata) =>
         engine.dispatch({
           type: "task.ownership.validation-failed",
           taskId,
           requestCompletion,
+          requestReview,
           failureReason: "Ownership validation could not inspect the current Task Git state.",
           ...metadata,
         }),
@@ -176,7 +113,12 @@ const make = Effect.gen(function* () {
 
   const process = Effect.fn("TaskOwnershipReactor.process")(function* (event: OwnershipEvent) {
     if (event.type === "task.ownership-validation-requested") {
-      yield* validate(event.payload.taskId, event.payload.requestCompletion);
+      yield* validate(
+        event.payload.taskId,
+        event.payload.requestCompletion,
+        event.payload.requestReview ?? false,
+        event.payload.generation ?? "provider",
+      );
       return;
     }
     const readModel = yield* snapshots.getCommandReadModel();
@@ -213,7 +155,11 @@ const make = Effect.gen(function* () {
           const taskId = event.type === "thread.turn-diff-completed" ? null : event.payload.taskId;
           const requestCompletion =
             event.type === "task.ownership-validation-requested" && event.payload.requestCompletion;
-          const recovery = taskId === null ? Effect.void : fail(taskId, requestCompletion);
+          const requestReview =
+            event.type === "task.ownership-validation-requested" &&
+            (event.payload.requestReview ?? false);
+          const recovery =
+            taskId === null ? Effect.void : fail(taskId, requestCompletion, requestReview);
           return recovery.pipe(
             Effect.tap(() =>
               Effect.logWarning("Task ownership validation failed", { cause: Cause.pretty(cause) }),
@@ -235,7 +181,7 @@ const make = Effect.gen(function* () {
           .pipe(
             Stream.runForEach((event) =>
               event.type === "task.ownership-validation-requested"
-                ? worker.enqueue(event)
+                ? worker.enqueue(event as OwnershipEvent)
                 : Effect.void,
             ),
           );
@@ -259,7 +205,7 @@ const make = Effect.gen(function* () {
             event.type === "task.workspace.ready" ||
             event.type === "thread.turn-diff-completed"
           ) {
-            return worker.enqueue(event);
+            return worker.enqueue(event as OwnershipEvent);
           }
           return Effect.void;
         }),

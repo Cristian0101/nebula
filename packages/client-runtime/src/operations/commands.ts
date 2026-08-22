@@ -40,6 +40,10 @@ export type PrepareTaskWorkspaceInput = CommandInput<"task.workspace.prepare">;
 export type RemoveTaskWorkspaceInput = CommandInput<"task.workspace.remove">;
 export type SetTaskOwnershipInput = CommandInput<"task.ownership.set">;
 export type ValidateTaskOwnershipInput = CommandInput<"task.ownership.validate">;
+export type PrepareTaskReviewInput = CommandInput<"task.review.prepare">;
+export type UpdateTaskHandoffInput = CommandInput<"task.handoff.update">;
+export type RequestTaskRestoreInput = CommandInput<"task.restore.request">;
+export type UndoTaskRestoreInput = CommandInput<"task.restore.undo">;
 export type CreateThreadInput = CommandInput<"thread.create">;
 export type DeleteThreadInput = CommandInput<"thread.delete">;
 export type ArchiveThreadInput = CommandInput<"thread.archive">;
@@ -188,6 +192,34 @@ export const validateTaskOwnership: (input: ValidateTaskOwnershipInput) => Comma
     const metadata = yield* timestampedCommandMetadata(input);
     return yield* dispatch({ ...input, type: "task.ownership.validate", ...metadata });
   });
+
+export const prepareTaskReview: (input: PrepareTaskReviewInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.prepareTaskReview",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.review.prepare", ...metadata });
+});
+
+export const updateTaskHandoff: (input: UpdateTaskHandoffInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.updateTaskHandoff",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.handoff.update", ...metadata });
+});
+
+export const requestTaskRestore: (input: RequestTaskRestoreInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.requestTaskRestore",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.restore.request", ...metadata });
+});
+
+export const undoTaskRestore: (input: UndoTaskRestoreInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.undoTaskRestore",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.restore.undo", ...metadata });
+});
 
 export const createThread: (input: CreateThreadInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.createThread",

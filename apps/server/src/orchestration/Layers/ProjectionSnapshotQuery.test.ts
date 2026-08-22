@@ -2459,4 +2459,37 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
       }
     }),
   );
+
+  it.effect("hydrates Task review columns in the command read model", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+
+      yield* sql`DELETE FROM projection_tasks`;
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
+        )
+        VALUES ('project-task-review', 'Task review', '/tmp/project-task-review', '[]',
+          '2026-08-22T00:00:00.000Z', '2026-08-22T00:00:00.000Z', NULL)
+      `;
+      yield* sql`
+        INSERT INTO projection_tasks (
+          task_id, project_id, title, objective, role, status, thread_id, created_at, updated_at,
+          review_snapshot_json, handoff_json, restore_json, review_error, result_json
+        )
+        VALUES (
+          'task-review-columns', 'project-task-review', 'Review changes', 'Verify restart hydration',
+          'builder', 'active', NULL, '2026-08-22T00:00:00.000Z',
+          '2026-08-22T00:00:00.000Z', NULL, NULL, NULL, NULL, NULL
+        )
+      `;
+
+      const readModel = yield* snapshotQuery.getCommandReadModel();
+      const task = readModel.tasks?.find((candidate) => candidate.id === "task-review-columns");
+      assert.equal(task?.reviewError, null);
+      assert.equal(task?.result, null);
+    }),
+  );
 });

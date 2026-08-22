@@ -28,6 +28,10 @@ import {
   ThreadId,
   TaskOwnershipRule,
   TaskOwnershipViolation,
+  TaskReviewSnapshot,
+  TaskHandoff,
+  TaskRestoreState,
+  TaskResult,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -87,6 +91,10 @@ const ProjectionTaskDbRowSchema = ProjectionTask.mapFields(
   Struct.assign({
     ownershipRulesJson: Schema.fromJsonString(Schema.Array(TaskOwnershipRule)),
     ownershipViolationsJson: Schema.fromJsonString(Schema.Array(TaskOwnershipViolation)),
+    reviewSnapshotJson: Schema.NullOr(Schema.fromJsonString(TaskReviewSnapshot)),
+    handoffJson: Schema.NullOr(Schema.fromJsonString(TaskHandoff)),
+    restoreJson: Schema.NullOr(Schema.fromJsonString(TaskRestoreState)),
+    resultJson: Schema.NullOr(Schema.fromJsonString(TaskResult)),
   }),
 );
 type ProjectionTaskRow = typeof ProjectionTaskDbRowSchema.Type;
@@ -131,6 +139,11 @@ const mapTaskRow = (row: ProjectionTaskRow): OrchestrationTask => ({
           errorReason: row.ownershipErrorReason,
           updatedAt: row.ownershipUpdatedAt,
         },
+  reviewSnapshot: row.reviewSnapshotJson,
+  handoff: row.handoffJson,
+  restore: row.restoreJson,
+  reviewError: row.reviewError,
+  result: row.resultJson,
 });
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   Struct.assign({
@@ -498,6 +511,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           , ownership_violations_json AS "ownershipViolationsJson"
           , ownership_error_reason AS "ownershipErrorReason"
           , ownership_updated_at AS "ownershipUpdatedAt"
+          , review_snapshot_json AS "reviewSnapshotJson"
+          , handoff_json AS "handoffJson"
+          , restore_json AS "restoreJson"
+          , review_error AS "reviewError"
+          , result_json AS "resultJson"
         FROM projection_tasks
         ORDER BY created_at ASC, task_id ASC
       `,

@@ -550,6 +550,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       if (task.ownership?.required === true) {
+        if (
+          task.workspace?.status !== "ready" ||
+          task.workspace.path === null ||
+          task.workspace.baseCommit === null ||
+          task.workspace.branch === null
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Task '${command.taskId}' requires a ready managed workspace before completion.`,
+          });
+        }
+        if (
+          task.reviewSnapshot?.status !== "current" ||
+          task.handoff?.status !== "ready" ||
+          task.handoff.snapshotId !== task.reviewSnapshot.id
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Task '${command.taskId}' requires a current review snapshot and ready handoff before completion.`,
+          });
+        }
         if (!task.ownership.rules.some((rule) => rule.access === "write")) {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
@@ -636,16 +657,30 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Builder Task '${command.taskId}' requires at least one write rule.`,
         });
       }
-      return {
+      const updated: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "task",
           aggregateId: command.taskId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
         })),
-        type: "task.ownership-updated",
+        type: "task.ownership-updated" as const,
         payload: { taskId: command.taskId, rules: command.rules, updatedAt: command.createdAt },
       };
+      if (!task.reviewSnapshot) return updated;
+      return [
+        updated,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "task",
+            aggregateId: command.taskId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "task.review.stale" as const,
+          payload: { taskId: command.taskId, updatedAt: command.createdAt },
+        },
+      ];
     }
 
     case "task.ownership.validate": {
@@ -703,9 +738,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
-      if (!command.requestCompletion || command.violations.length > 0 || task.status !== "active") {
+      if (command.violations.length > 0 || task.status !== "active") {
         return validatedEvent;
       }
+      if (command.requestReview === true) {
+        return [
+          validatedEvent,
+          {
+            ...(yield* withEventBase({
+              aggregateKind: "task",
+              aggregateId: command.taskId,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            })),
+            type: "task.review.prepare-requested" as const,
+            payload: {
+              taskId: command.taskId,
+              generation: command.generation ?? "provider",
+              updatedAt: command.createdAt,
+            },
+          },
+        ];
+      }
+      if (!command.requestCompletion) return validatedEvent;
       return [
         validatedEvent,
         {
@@ -715,10 +770,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             occurredAt: command.createdAt,
             commandId: command.commandId,
           })),
-          type: "task.completed" as const,
+          type: "task.completion.freshness-requested" as const,
           payload: {
             taskId: command.taskId,
-            completedAt: command.createdAt,
             updatedAt: command.createdAt,
           },
         },
@@ -745,6 +799,349 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           taskId: command.taskId,
           failureReason: command.failureReason,
           validatedAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.review.prepare": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (
+        task.status !== "active" ||
+        task.workspace?.status !== "ready" ||
+        task.ownership?.required !== true ||
+        !task.ownership.rules.some((rule) => rule.access === "write")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' requires an active managed workspace and write ownership before review.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.ownership-validation-requested",
+        payload: {
+          taskId: command.taskId,
+          requestCompletion: false,
+          requestReview: true,
+          generation: command.generation,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.review.prepared": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.status !== "active" || task.ownership?.status !== "valid") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' is not eligible for a review snapshot.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.review.prepared",
+        payload: {
+          taskId: command.taskId,
+          snapshot: command.snapshot,
+          handoff: command.handoff,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.review.prepare-failed": {
+      yield* requireTask({ readModel, command, taskId: command.taskId });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.review.prepare-failed",
+        payload: {
+          taskId: command.taskId,
+          failureReason: command.failureReason,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.review.stale": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (!task.reviewSnapshot) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' has no review snapshot to mark stale.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.review.stale",
+        payload: { taskId: command.taskId, updatedAt: command.createdAt },
+      };
+    }
+
+    case "task.handoff.update": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (
+        task.status !== "active" ||
+        task.reviewSnapshot?.id !== command.snapshotId ||
+        task.reviewSnapshot.status !== "current" ||
+        !task.handoff ||
+        task.handoff.snapshotId !== command.snapshotId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' handoff does not target its current review snapshot.`,
+        });
+      }
+      if (command.status === "ready" && command.summary.trim().length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A ready handoff requires a summary.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.handoff.updated",
+        payload: {
+          taskId: command.taskId,
+          handoff: {
+            ...task.handoff,
+            status: command.status,
+            summary: command.summary,
+            testsRun: command.testsRun,
+            assumptions: command.assumptions,
+            interfaceChanges: command.interfaceChanges,
+            migrations: command.migrations,
+            knownRisks: command.knownRisks,
+            followUps: command.followUps,
+            updatedAt: command.createdAt,
+          },
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.completion.freshness-validated": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (!command.current) {
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: "task",
+            aggregateId: command.taskId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "task.review.stale",
+          payload: { taskId: command.taskId, updatedAt: command.createdAt },
+        };
+      }
+      if (
+        task.status !== "active" ||
+        task.reviewSnapshot?.status !== "current" ||
+        task.handoff?.status !== "ready"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' cannot complete without a current snapshot and ready handoff.`,
+        });
+      }
+      const thread = readModel.threads.find((candidate) => candidate.id === task.threadId);
+      const snapshot = task.reviewSnapshot;
+      const handoff = task.handoff;
+      const branch = task.workspace?.branch;
+      if (!snapshot || !handoff || !branch) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' cannot produce a durable result from incomplete review evidence.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.completed",
+        payload: {
+          taskId: command.taskId,
+          completedAt: command.createdAt,
+          updatedAt: command.createdAt,
+          result: {
+            taskId: task.id,
+            status: "completed",
+            summary: handoff.summary,
+            files: snapshot.files ?? [],
+            baseCommit: snapshot.baseCommit,
+            snapshotId: snapshot.id,
+            testsRun: handoff.testsRun,
+            assumptions: handoff.assumptions,
+            interfaceChanges: handoff.interfaceChanges,
+            migrations: handoff.migrations,
+            knownRisks: handoff.knownRisks,
+            followUps: handoff.followUps,
+            providerInstanceId: thread?.modelSelection.instanceId ?? null,
+            threadId: task.threadId,
+            branch,
+            completedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "task.restore.request": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.status !== "active" || task.workspace?.status !== "ready") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Only an active Task with a ready managed workspace can be restored.`,
+        });
+      }
+      if (task.restore?.status === "requested" || task.restore?.status === "snapshot-captured") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' already has a restore in progress.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.restore.requested",
+        payload: {
+          taskId: command.taskId,
+          restoreId: command.restoreId,
+          requestedAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.restore.snapshot-captured": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.restore?.id !== command.restoreId || task.restore.status !== "requested") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' has no matching restore request.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.restore.snapshot-captured",
+        payload: {
+          taskId: command.taskId,
+          restoreId: command.restoreId,
+          safetyCheckpointRef: command.safetyCheckpointRef,
+          previousHead: command.previousHead,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.restored":
+    case "task.restore.failed":
+    case "task.restore.undone": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.restore?.id !== command.restoreId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' has no matching restore operation.`,
+        });
+      }
+      const type =
+        command.type === "task.restored"
+          ? ("task.restored" as const)
+          : command.type === "task.restore.failed"
+            ? ("task.restore.failed" as const)
+            : ("task.restore.undone" as const);
+      const base = {
+        ...(yield* withEventBase({
+          aggregateKind: "task" as const,
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type,
+      };
+      if (command.type === "task.restore.failed") {
+        return {
+          ...base,
+          type: "task.restore.failed" as const,
+          payload: {
+            taskId: command.taskId,
+            restoreId: command.restoreId,
+            failureReason: command.failureReason,
+            updatedAt: command.createdAt,
+          },
+        };
+      }
+      return {
+        ...base,
+        type,
+        payload: {
+          taskId: command.taskId,
+          restoreId: command.restoreId,
+          updatedAt: command.createdAt,
+        },
+      } as Omit<OrchestrationEvent, "sequence">;
+    }
+
+    case "task.restore.undo": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (
+        task.status !== "active" ||
+        (task.restore?.status !== "completed" && task.restore?.status !== "failed") ||
+        task.restore.safetyCheckpointRef === null ||
+        task.restore.previousHead === null
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' has no completed restore to undo.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.restore.undo-requested",
+        payload: {
+          taskId: command.taskId,
+          restoreId: task.restore.id,
           updatedAt: command.createdAt,
         },
       };

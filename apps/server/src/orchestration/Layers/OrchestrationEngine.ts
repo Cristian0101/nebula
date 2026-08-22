@@ -88,6 +88,18 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "task.ownership.validate":
     case "task.ownership.validated":
     case "task.ownership.validation-failed":
+    case "task.review.prepare":
+    case "task.handoff.update":
+    case "task.restore.request":
+    case "task.restore.undo":
+    case "task.review.prepared":
+    case "task.review.prepare-failed":
+    case "task.review.stale":
+    case "task.completion.freshness-validated":
+    case "task.restore.snapshot-captured":
+    case "task.restored":
+    case "task.restore.failed":
+    case "task.restore.undone":
       return {
         aggregateKind: "task",
         aggregateId: command.taskId,

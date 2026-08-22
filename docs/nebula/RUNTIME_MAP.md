@@ -120,15 +120,15 @@ The inherited runtime already supports repository status, diffs, refs/branches, 
 
 Checkpoint coordination lives in `apps/server/src/checkpointing/`. `Utils.ts` defines hidden refs under `refs/t3/checkpoints/<encoded-thread>/turn/<n>`. Git checkpoint operations use a temporary index to capture the full worktree without disturbing the user's index, then use `write-tree`, `commit-tree`, and `update-ref`.
 
-`apps/server/src/orchestration/Layers/CheckpointReactor.ts` captures the baseline and turn checkpoints, calculates diffs, services revert commands, and coordinates provider conversation rollback. `CheckpointDiffQuery.ts` computes turn or full-thread diffs. Restore uses Git restore/clean/reset semantics and can remove untracked files inside the target workspace; UI and future Task Revert must present that consequence clearly.
+`apps/server/src/orchestration/Layers/CheckpointReactor.ts` captures the baseline and turn checkpoints, calculates diffs, services Thread revert commands, and coordinates provider conversation rollback. `CheckpointDiffQuery.ts` computes turn or full-thread diffs. Task restore reuses Git restore/clean/reset semantics, presents the untracked-file consequence explicitly, and intentionally leaves provider conversation history unchanged.
 
-Nebula can reuse:
+Nebula reuses:
 
 - Turn Diff directly;
-- Task Diff by anchoring an explicit task baseline/result boundary to existing checkpoint/VCS diff primitives; and
-- Task Revert by composing checkpoint restore, task lifecycle state, and provider rollback where applicable.
+- Task Diff through a Task-scoped base/current checkpoint boundary; and
+- Task restore through durable intent, a retained pre-restore safety ref, and the inherited checkpoint/VCS primitives.
 
-What is missing is task-level policy: one writable task/worktree, branch/base ownership, lifecycle, cleanup, allowed paths, and integration state.
+Independent review, shared locks, quality gates, and integration policy remain missing.
 
 ## 8. Event/orchestration architecture
 
@@ -178,7 +178,7 @@ Important persisted areas include:
 
 Server settings use the server settings services/store; desktop/client settings are persisted through desktop platform settings and client settings files. Web appearance choices and custom theme definitions also use browser local storage.
 
-Nebula does **not** need new SQLite infrastructure. It needs narrowly added migrations and projections only when a concrete Task model requires them. ADR-003 and ADR-004 already say to reuse these inherited layers and remain valid.
+Nebula does **not** need new SQLite infrastructure. Narrow Task migrations 041–044 extend the inherited projections for lifecycle, workspace, ownership, immutable review/handoff, and restore state. ADR-003 and ADR-004 remain valid.
 
 ## 10. RPC/client runtime
 
@@ -186,7 +186,7 @@ Nebula does **not** need new SQLite infrastructure. It needs narrowly added migr
 
 `packages/client-runtime/src/rpc/session.ts` creates a typed WebSocket client session and initial readiness/probe state. `packages/client-runtime/src/connection/supervisor.ts` owns retry, backoff, offline state, and reconnect. `state/shell.ts` caches the shell snapshot, refreshes it over HTTP, and resumes the sequenced shell subscription. `state/threads.ts` maintains paginated/cached thread snapshots and reduces thread event streams. `operations/commands.ts` exposes typed command helpers.
 
-Future Nebula Task commands should be schemas in `packages/contracts`, handled by the existing orchestration dispatch/engine, returned through existing projections/query RPC, and cached in `packages/client-runtime` when more than one client surface consumes them. They should not add REST polling or another socket.
+Nebula Task commands are schemas in `packages/contracts`, handled by the existing orchestration dispatch/engine, returned through existing projections/query RPC, and cached in `packages/client-runtime`. Later Task features must keep using this path rather than add REST polling or another socket.
 
 ## 11. Web UI
 

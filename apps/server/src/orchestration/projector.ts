@@ -31,6 +31,18 @@ import {
   TaskOwnershipValidationRequestedPayload,
   TaskOwnershipValidatedPayload,
   TaskOwnershipValidationFailedPayload,
+  TaskReviewPrepareRequestedPayload,
+  TaskReviewPreparedPayload,
+  TaskReviewPrepareFailedPayload,
+  TaskReviewStalePayload,
+  TaskHandoffUpdatedPayload,
+  TaskCompletionFreshnessRequestedPayload,
+  TaskRestoreRequestedPayload,
+  TaskRestoreSnapshotCapturedPayload,
+  TaskRestoredPayload,
+  TaskRestoreUndoRequestedPayload,
+  TaskRestoreFailedPayload,
+  TaskRestoreUndonePayload,
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
@@ -329,6 +341,9 @@ export function projectEvent(
                       updatedAt: payload.updatedAt,
                     }
                   : null,
+              reviewSnapshot: null,
+              handoff: null,
+              restore: null,
             },
           ],
         })),
@@ -373,6 +388,7 @@ export function projectEvent(
                   ...task,
                   status: "completed" as const,
                   completedAt: payload.completedAt,
+                  result: payload.result ?? null,
                   updatedAt: payload.updatedAt,
                 }
               : task,
@@ -714,6 +730,227 @@ export function projectEvent(
                     status: "error" as const,
                     validatedAt: payload.validatedAt,
                     errorReason: payload.failureReason,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.review.prepare-requested":
+    case "task.completion.freshness-requested":
+    case "task.restore.undo-requested": {
+      const schema =
+        event.type === "task.review.prepare-requested"
+          ? TaskReviewPrepareRequestedPayload
+          : event.type === "task.completion.freshness-requested"
+            ? TaskCompletionFreshnessRequestedPayload
+            : TaskRestoreUndoRequestedPayload;
+      return decodeForEvent(schema, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  reviewError:
+                    event.type === "task.review.prepare-requested"
+                      ? null
+                      : (task.reviewError ?? null),
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+    }
+
+    case "task.review.prepare-failed":
+      return decodeForEvent(
+        TaskReviewPrepareFailedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  reviewError: payload.failureReason,
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.review.prepared":
+      return decodeForEvent(TaskReviewPreparedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  reviewSnapshot: payload.snapshot,
+                  handoff: payload.handoff,
+                  reviewError: null,
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.review.stale":
+      return decodeForEvent(TaskReviewStalePayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  reviewSnapshot: task.reviewSnapshot
+                    ? { ...task.reviewSnapshot, status: "stale" as const }
+                    : null,
+                  handoff: task.handoff ? { ...task.handoff, status: "stale" as const } : null,
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.handoff.updated":
+      return decodeForEvent(TaskHandoffUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? { ...task, handoff: payload.handoff, updatedAt: payload.updatedAt }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.restore.requested":
+      return decodeForEvent(TaskRestoreRequestedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  restore: {
+                    id: payload.restoreId,
+                    status: "requested" as const,
+                    safetyCheckpointRef: null,
+                    previousHead: null,
+                    failureReason: null,
+                    requestedAt: payload.requestedAt,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.restore.snapshot-captured":
+      return decodeForEvent(
+        TaskRestoreSnapshotCapturedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.restore?.id === payload.restoreId
+              ? {
+                  ...task,
+                  restore: {
+                    ...task.restore,
+                    status: "snapshot-captured" as const,
+                    safetyCheckpointRef: payload.safetyCheckpointRef,
+                    previousHead: payload.previousHead,
+                    failureReason: null,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.restored":
+      return decodeForEvent(TaskRestoredPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.restore?.id === payload.restoreId
+              ? {
+                  ...task,
+                  reviewSnapshot: task.reviewSnapshot
+                    ? { ...task.reviewSnapshot, status: "stale" as const }
+                    : null,
+                  handoff: task.handoff ? { ...task.handoff, status: "stale" as const } : null,
+                  restore: {
+                    ...task.restore,
+                    status: "completed" as const,
+                    failureReason: null,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.restore.failed":
+      return decodeForEvent(TaskRestoreFailedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.restore?.id === payload.restoreId
+              ? {
+                  ...task,
+                  restore: {
+                    ...task.restore,
+                    status: "failed" as const,
+                    failureReason: payload.failureReason,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.restore.undone":
+      return decodeForEvent(TaskRestoreUndonePayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.restore?.id === payload.restoreId
+              ? {
+                  ...task,
+                  reviewSnapshot: task.reviewSnapshot
+                    ? { ...task.reviewSnapshot, status: "stale" as const }
+                    : null,
+                  handoff: task.handoff ? { ...task.handoff, status: "stale" as const } : null,
+                  restore: {
+                    ...task.restore,
+                    status: "undone" as const,
+                    failureReason: null,
                     updatedAt: payload.updatedAt,
                   },
                   updatedAt: payload.updatedAt,

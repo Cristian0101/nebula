@@ -90,8 +90,12 @@ The current repository already provides:
 - automatic and manual validation of committed and working-tree changes against the recorded Task base;
 - persisted ownership status and violation evidence with restart reconciliation; and
 - fresh ownership validation before a managed Task may complete.
+- complete Task Diff evidence from immutable base through committed, staged, unstaged, and untracked state, with lazy per-file patches;
+- immutable Task review snapshots and provider-neutral structured handoffs with manual fallback;
+- stale-snapshot completion blocking with fresh ownership and freshness checks; and
+- confirmed, unpublished-branch-only Task restore with a retained pre-restore recovery snapshot and undo.
 
-The current repository does **not** yet provide agent-generated ownership requests, shared-resource locks, deterministic swarm, Mission planning, review automation, or integration queues.
+The current repository does **not** yet provide agent-generated ownership requests, shared-resource locks, an independent Reviewer role, automated quality gates, deterministic swarm, Mission planning, or integration queues.
 
 ### ROADMAP v0.1 — Command Deck
 
@@ -114,7 +118,7 @@ The current slice implements one explicit Task tied to one inherited thread/prov
 
 ### ROADMAP v0.2 — Deterministic Swarm
 
-Later, add Mission Composer, an Architect responsibility, a task DAG, ownership prediction and enforcement, shared-resource locks, structured handoffs, independent review, quality gates, and a controlled integration queue.
+Later, add Mission Composer, an Architect responsibility, a task DAG, ownership prediction, shared-resource locks, independent review, quality gates, and a controlled integration queue.
 
 Command Deck and Swarm Mode must use the same Task, Workspace, Provider, Session, Event, Diff, and Review primitives.
 

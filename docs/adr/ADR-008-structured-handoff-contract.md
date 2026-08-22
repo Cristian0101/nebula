@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Implemented
 
 ## Context
 
@@ -24,7 +24,7 @@ Tasks become easier to review, resume, integrate, and audit. The contract must r
 
 ## Migration impact
 
-None for the foundation. The first runtime implementation will add the contract beside existing RPC and orchestration schemas.
+Migration 044 adds nullable JSON projection columns for immutable review snapshot, handoff, and restore state. Legacy Tasks decode with all three fields absent.
 
 ## Review conditions
 

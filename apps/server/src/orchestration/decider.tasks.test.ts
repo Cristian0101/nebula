@@ -1,9 +1,13 @@
 import {
   CommandId,
+  CheckpointRef,
   EventId,
   ProjectId,
   ProviderInstanceId,
   TaskId,
+  TaskHandoffId,
+  TaskRestoreId,
+  TaskReviewSnapshotId,
   ThreadId,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -399,6 +403,78 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         workspace: { path: "/tmp/worktrees/task-1" },
       });
 
+      const snapshotId = TaskReviewSnapshotId.make("snapshot-isolated");
+      model = yield* applyCommand(model, {
+        type: "task.review.prepare",
+        commandId: CommandId.make("prepare-isolated-review"),
+        taskId,
+        generation: "manual",
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.ownership.validated",
+        commandId: CommandId.make("validate-isolated-review"),
+        taskId,
+        changedPathCount: 1,
+        violations: [],
+        requestCompletion: false,
+        requestReview: true,
+        generation: "manual",
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.review.prepared",
+        commandId: CommandId.make("capture-isolated-review"),
+        taskId,
+        snapshot: {
+          id: snapshotId,
+          taskId,
+          baseCommit: "0123456789abcdef",
+          checkpointRef: CheckpointRef.make("refs/t3/checkpoints/tasks/task-1/review/snapshot"),
+          fingerprint: "tree-1",
+          branchHead: "head-1",
+          changedFiles: 1,
+          additions: 4,
+          deletions: 1,
+          ownershipStatus: "valid",
+          status: "current",
+          capturedAt: now,
+        },
+        handoff: {
+          id: TaskHandoffId.make("handoff-isolated"),
+          taskId,
+          snapshotId,
+          status: "draft",
+          summary: "Implemented the isolated change.",
+          testsRun: [],
+          assumptions: [],
+          interfaceChanges: [],
+          migrations: [],
+          knownRisks: [],
+          followUps: [],
+          generation: "manual",
+          generationError: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.handoff.update",
+        commandId: CommandId.make("ready-isolated-handoff"),
+        taskId,
+        snapshotId,
+        status: "ready",
+        summary: "Implemented the isolated change.",
+        testsRun: [],
+        assumptions: [],
+        interfaceChanges: [],
+        migrations: [],
+        knownRisks: [],
+        followUps: [],
+        createdAt: now,
+      });
+
       const activeCleanupFailure = yield* Effect.flip(
         decideOrchestrationCommand({
           readModel: model,
@@ -431,7 +507,25 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         requestCompletion: true,
         createdAt: now,
       });
-      expect(model.tasks?.[0]?.status).toBe("completed");
+      expect(model.tasks?.[0]?.status).toBe("active");
+      model = yield* applyCommand(model, {
+        type: "task.completion.freshness-validated",
+        commandId: CommandId.make("fresh-isolated-review"),
+        taskId,
+        current: true,
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]).toMatchObject({
+        status: "completed",
+        result: {
+          taskId,
+          status: "completed",
+          summary: "Implemented the isolated change.",
+          providerInstanceId: "codex",
+          threadId: isolatedThread,
+          branch: "nebula/manual/task1-isolated-builder",
+        },
+      });
       model = yield* applyCommand(model, {
         type: "task.workspace.remove",
         commandId: CommandId.make("remove-isolated-workspace"),
@@ -503,6 +597,37 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
               errorReason: null,
               updatedAt: now,
             },
+            reviewSnapshot: {
+              id: TaskReviewSnapshotId.make("owned-snapshot"),
+              taskId,
+              baseCommit: "0123456789abcdef",
+              checkpointRef: CheckpointRef.make("refs/t3/checkpoints/tasks/task-1/review/owned"),
+              fingerprint: "owned-tree",
+              branchHead: "owned-head",
+              changedFiles: 1,
+              additions: 1,
+              deletions: 0,
+              ownershipStatus: "valid",
+              status: "current",
+              capturedAt: now,
+            },
+            handoff: {
+              id: TaskHandoffId.make("owned-handoff"),
+              taskId,
+              snapshotId: TaskReviewSnapshotId.make("owned-snapshot"),
+              status: "ready",
+              summary: "Owned implementation",
+              testsRun: [],
+              assumptions: [],
+              interfaceChanges: [],
+              migrations: [],
+              knownRisks: [],
+              followUps: [],
+              generation: "manual",
+              generationError: null,
+              createdAt: now,
+              updatedAt: now,
+            },
           },
         ],
       };
@@ -563,6 +688,203 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         status: "active",
         ownership: { status: "valid", violations: [] },
       });
+    }),
+  );
+
+  it.effect("blocks stale completion and preserves recoverable restore state", () =>
+    Effect.gen(function* () {
+      const seeded = yield* seedReadModel;
+      const snapshotId = TaskReviewSnapshotId.make("review-snapshot");
+      const restoreId = TaskRestoreId.make("restore-1");
+      let model: OrchestrationReadModel = {
+        ...seeded,
+        tasks: [
+          {
+            id: taskId,
+            projectId: projectA,
+            title: "Reviewable task",
+            objective: "Exercise completion and restore gates.",
+            role: "builder",
+            status: "active",
+            threadId: threadA,
+            createdAt: now,
+            updatedAt: now,
+            activatedAt: now,
+            completedAt: null,
+            cancelledAt: null,
+            workspace: {
+              status: "ready",
+              sourceRepository: "/tmp/project-a",
+              baseCommit: "base-commit",
+              branch: "nebula/manual/reviewable-task",
+              path: "/tmp/task-reviewable",
+              createdAt: now,
+              removedAt: null,
+              failureCode: null,
+              failureReason: null,
+              updatedAt: now,
+            },
+            ownership: {
+              required: true,
+              rules: [
+                {
+                  id: "all",
+                  access: "write",
+                  pattern: "src/**",
+                  reason: null,
+                  createdAt: now,
+                },
+              ],
+              status: "valid",
+              validatedAt: now,
+              changedPathCount: 1,
+              violations: [],
+              errorReason: null,
+              updatedAt: now,
+            },
+            reviewSnapshot: {
+              id: snapshotId,
+              taskId,
+              baseCommit: "base-commit",
+              checkpointRef: CheckpointRef.make("refs/t3/checkpoints/tasks/task-1/review/current"),
+              fingerprint: "tree-current",
+              branchHead: "head-current",
+              changedFiles: 1,
+              additions: 2,
+              deletions: 0,
+              files: [
+                {
+                  path: "src/change.ts",
+                  previousPath: null,
+                  changeType: "modified",
+                  additions: 2,
+                  deletions: 0,
+                  binary: false,
+                  untracked: false,
+                },
+              ],
+              ownershipStatus: "valid",
+              status: "stale",
+              capturedAt: now,
+            },
+            handoff: {
+              id: TaskHandoffId.make("handoff-reviewable"),
+              taskId,
+              snapshotId,
+              status: "stale",
+              summary: "Reviewed work",
+              testsRun: [],
+              assumptions: [],
+              interfaceChanges: [],
+              migrations: [],
+              knownRisks: [],
+              followUps: [],
+              generation: "manual",
+              generationError: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+          },
+        ],
+      };
+
+      const staleCompletion = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            type: "task.complete",
+            commandId: CommandId.make("complete-stale"),
+            taskId,
+            createdAt: now,
+          },
+        }),
+      );
+      expect(staleCompletion.message).toContain("current review snapshot");
+
+      const missingHandoff = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: {
+            ...model,
+            tasks: model.tasks?.map((task) => ({
+              ...task,
+              reviewSnapshot: task.reviewSnapshot
+                ? { ...task.reviewSnapshot, status: "current" as const }
+                : null,
+              handoff: null,
+            })),
+          },
+          command: {
+            type: "task.complete",
+            commandId: CommandId.make("complete-missing-handoff"),
+            taskId,
+            createdAt: now,
+          },
+        }),
+      );
+      expect(missingHandoff.message).toContain("ready handoff");
+
+      const missingWorkspace = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: {
+            ...model,
+            tasks: model.tasks?.map((task) => ({ ...task, workspace: null })),
+          },
+          command: {
+            type: "task.complete",
+            commandId: CommandId.make("complete-missing-workspace"),
+            taskId,
+            createdAt: now,
+          },
+        }),
+      );
+      expect(missingWorkspace.message).toContain("ready managed workspace");
+
+      model = yield* applyCommand(model, {
+        type: "task.restore.request",
+        commandId: CommandId.make("request-restore"),
+        taskId,
+        restoreId,
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.restore.snapshot-captured",
+        commandId: CommandId.make("capture-restore"),
+        taskId,
+        restoreId,
+        safetyCheckpointRef: CheckpointRef.make(
+          "refs/t3/checkpoints/tasks/task-1/restore/restore-1",
+        ),
+        previousHead: "head-current",
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.restored",
+        commandId: CommandId.make("finish-restore"),
+        taskId,
+        restoreId,
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]).toMatchObject({
+        status: "active",
+        restore: { status: "completed", previousHead: "head-current" },
+        reviewSnapshot: { status: "stale" },
+        handoff: { status: "stale" },
+      });
+
+      model = yield* applyCommand(model, {
+        type: "task.restore.undo",
+        commandId: CommandId.make("request-undo"),
+        taskId,
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.restore.undone",
+        commandId: CommandId.make("finish-undo"),
+        taskId,
+        restoreId,
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]).toMatchObject({ status: "active", restore: { status: "undone" } });
     }),
   );
 });

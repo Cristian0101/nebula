@@ -6,6 +6,10 @@ import {
   ThreadId,
   TaskOwnershipRule,
   TaskOwnershipViolation,
+  TaskReviewSnapshot,
+  TaskHandoff,
+  TaskRestoreState,
+  TaskResult,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -79,6 +83,13 @@ const encodeOwnershipRules = Schema.encodeSync(
 const encodeOwnershipViolations = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(TaskOwnershipViolation)),
 );
+const encodeTaskReviewSnapshot = Schema.encodeSync(Schema.fromJsonString(TaskReviewSnapshot));
+const encodeTaskHandoff = Schema.encodeSync(Schema.fromJsonString(TaskHandoff));
+const encodeTaskRestore = Schema.encodeSync(Schema.fromJsonString(TaskRestoreState));
+const encodeTaskResult = Schema.encodeSync(Schema.fromJsonString(TaskResult));
+const decodeTaskReviewSnapshot = Schema.decodeSync(Schema.fromJsonString(TaskReviewSnapshot));
+const decodeTaskHandoff = Schema.decodeSync(Schema.fromJsonString(TaskHandoff));
+const decodeTaskRestore = Schema.decodeUnknownEffect(Schema.fromJsonString(TaskRestoreState));
 
 type ProjectorName =
   (typeof ORCHESTRATION_PROJECTOR_NAMES)[keyof typeof ORCHESTRATION_PROJECTOR_NAMES];
@@ -602,6 +613,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ownershipErrorReason: null,
               ownershipUpdatedAt:
                 event.payload.ownershipRequired === true ? event.payload.updatedAt : null,
+              reviewSnapshotJson: null,
+              handoffJson: null,
+              restoreJson: null,
+              reviewError: null,
+              resultJson: null,
             });
             return;
           case "task.thread-bound":
@@ -629,6 +645,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 ...row,
                 status: "completed",
                 completedAt: event.payload.completedAt,
+                resultJson: event.payload.result ? encodeTaskResult(event.payload.result) : null,
                 updatedAt: event.payload.updatedAt,
               });
             } else {
@@ -788,6 +805,153 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 updatedAt: event.payload.updatedAt,
               });
             }
+            return;
+          }
+          case "task.review.prepare-requested":
+          case "task.completion.freshness-requested":
+          case "task.restore.undo-requested": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            yield* projectionTaskRepository.upsert({
+              ...existing.value,
+              reviewError:
+                event.type === "task.review.prepare-requested" ? null : existing.value.reviewError,
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "task.review.prepare-failed": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            yield* projectionTaskRepository.upsert({
+              ...existing.value,
+              reviewError: event.payload.failureReason,
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "task.review.prepared": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            yield* projectionTaskRepository.upsert({
+              ...existing.value,
+              reviewSnapshotJson: encodeTaskReviewSnapshot(event.payload.snapshot),
+              handoffJson: encodeTaskHandoff(event.payload.handoff),
+              reviewError: null,
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "task.review.stale": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            const row = existing.value;
+            yield* projectionTaskRepository.upsert({
+              ...row,
+              reviewSnapshotJson:
+                row.reviewSnapshotJson === null
+                  ? null
+                  : encodeTaskReviewSnapshot({
+                      ...decodeTaskReviewSnapshot(row.reviewSnapshotJson),
+                      status: "stale",
+                    }),
+              handoffJson:
+                row.handoffJson === null
+                  ? null
+                  : encodeTaskHandoff({
+                      ...decodeTaskHandoff(row.handoffJson),
+                      status: "stale",
+                    }),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "task.handoff.updated": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            yield* projectionTaskRepository.upsert({
+              ...existing.value,
+              handoffJson: encodeTaskHandoff(event.payload.handoff),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "task.restore.requested": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            yield* projectionTaskRepository.upsert({
+              ...existing.value,
+              restoreJson: encodeTaskRestore({
+                id: event.payload.restoreId,
+                status: "requested",
+                safetyCheckpointRef: null,
+                previousHead: null,
+                failureReason: null,
+                requestedAt: event.payload.requestedAt,
+                updatedAt: event.payload.updatedAt,
+              }),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "task.restore.snapshot-captured":
+          case "task.restored":
+          case "task.restore.failed":
+          case "task.restore.undone": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            const row = existing.value;
+            const restoreJson = row.restoreJson;
+            if (restoreJson === null) return;
+            const restore = yield* decodeTaskRestore(restoreJson).pipe(Effect.orDie);
+            const nextRestore =
+              event.type === "task.restore.snapshot-captured"
+                ? {
+                    ...restore,
+                    status: "snapshot-captured" as const,
+                    safetyCheckpointRef: event.payload.safetyCheckpointRef,
+                    previousHead: event.payload.previousHead,
+                    failureReason: null,
+                    updatedAt: event.payload.updatedAt,
+                  }
+                : event.type === "task.restored"
+                  ? {
+                      ...restore,
+                      status: "completed" as const,
+                      failureReason: null,
+                      updatedAt: event.payload.updatedAt,
+                    }
+                  : event.type === "task.restore.failed"
+                    ? {
+                        ...restore,
+                        status: "failed" as const,
+                        failureReason: event.payload.failureReason,
+                        updatedAt: event.payload.updatedAt,
+                      }
+                    : {
+                        ...restore,
+                        status: "undone" as const,
+                        failureReason: null,
+                        updatedAt: event.payload.updatedAt,
+                      };
+            const staleSnapshot =
+              row.reviewSnapshotJson === null
+                ? null
+                : encodeTaskReviewSnapshot({
+                    ...decodeTaskReviewSnapshot(row.reviewSnapshotJson),
+                    status: "stale",
+                  });
+            const staleHandoff =
+              row.handoffJson === null
+                ? null
+                : encodeTaskHandoff({ ...decodeTaskHandoff(row.handoffJson), status: "stale" });
+            yield* projectionTaskRepository.upsert({
+              ...row,
+              reviewSnapshotJson: staleSnapshot,
+              handoffJson: staleHandoff,
+              restoreJson: encodeTaskRestore(nextRestore),
+              updatedAt: event.payload.updatedAt,
+            });
             return;
           }
           default:

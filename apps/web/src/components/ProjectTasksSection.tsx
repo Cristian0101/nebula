@@ -3,6 +3,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { TaskRestoreId } from "@t3tools/contracts";
 import type {
   EnvironmentId,
   ModelSelection,
@@ -15,6 +16,7 @@ import type {
 import { useNavigate } from "@tanstack/react-router";
 import {
   CheckIcon,
+  ChevronDownIcon,
   CircleSlash2Icon,
   ExternalLinkIcon,
   PlayIcon,
@@ -22,6 +24,7 @@ import {
   ShieldAlertIcon,
   ShieldCheckIcon,
   Trash2Icon,
+  Undo2Icon,
   XIcon,
 } from "lucide-react";
 import { type ComponentProps, useEffect, useMemo, useState } from "react";
@@ -48,6 +51,8 @@ import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { SettingsSection } from "./settings/settingsLayout";
+import { getRenderablePatch, resolveFileDiffPath } from "../lib/diffRendering";
+import { StyledDiffCodeView } from "./diffs/StyledDiffCodeView";
 
 interface ProjectTaskContext {
   readonly environmentId: EnvironmentId;
@@ -65,6 +70,7 @@ const statusVariant = {
 
 export function ProjectTaskCard({
   task,
+  environmentId,
   projectId,
   provider,
   workspace,
@@ -72,13 +78,17 @@ export function ProjectTaskCard({
   busy,
   onStart,
   onOpenThread,
-  onComplete,
+  onPrepareReview,
+  onOpenReview,
+  onRestore,
+  onUndoRestore,
   onCancel,
   onRemoveWorkspace,
   onEditOwnership,
   onValidateOwnership,
 }: {
   readonly task: OrchestrationTask;
+  readonly environmentId?: EnvironmentId;
   readonly projectId: ProjectId;
   readonly provider: string | undefined;
   readonly workspace: string;
@@ -86,7 +96,10 @@ export function ProjectTaskCard({
   readonly busy: boolean;
   readonly onStart: () => void;
   readonly onOpenThread: () => void;
-  readonly onComplete: () => void;
+  readonly onPrepareReview?: (generation: "provider" | "manual") => void;
+  readonly onOpenReview?: () => void;
+  readonly onRestore?: () => void;
+  readonly onUndoRestore?: () => void;
   readonly onCancel: () => void;
   readonly onRemoveWorkspace?: () => void;
   readonly onEditOwnership: () => void;
@@ -124,10 +137,32 @@ export function ProjectTaskCard({
             </Button>
           ) : null}
           {task.status === "active" ? (
-            <Button size="xs" variant="outline" disabled={busy} onClick={onComplete}>
-              <CheckIcon />
-              Complete
-            </Button>
+            task.reviewSnapshot ? (
+              <Button size="xs" variant="outline" disabled={busy} onClick={onOpenReview}>
+                <CheckIcon />
+                Review handoff
+              </Button>
+            ) : (
+              <>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => onPrepareReview?.("provider")}
+                >
+                  <CheckIcon />
+                  Prepare completion
+                </Button>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => onPrepareReview?.("manual")}
+                >
+                  Manual handoff
+                </Button>
+              </>
+            )
           ) : null}
           {task.status === "draft" || task.status === "active" ? (
             <Button size="xs" variant="ghost" disabled={busy} onClick={onCancel}>
@@ -272,6 +307,31 @@ export function ProjectTaskCard({
           <p className="text-xs text-destructive">{ownership.errorReason}</p>
         ) : null}
       </section>
+      {task.workspace?.status === "ready" && environmentId ? (
+        <TaskChangesPanel environmentId={environmentId} task={task} provider={provider} />
+      ) : null}
+      {task.status === "active" && task.workspace?.status === "ready" ? (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-3">
+          <div>
+            <p className="text-sm font-medium">Restore Task to baseline</p>
+            <p className="text-xs text-muted-foreground">
+              Only this isolated Task workspace is affected.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {(task.restore?.status === "completed" ||
+              (task.restore?.status === "failed" && task.restore.safetyCheckpointRef)) &&
+            onUndoRestore ? (
+              <Button size="xs" variant="outline" disabled={busy} onClick={onUndoRestore}>
+                <Undo2Icon /> Undo restore
+              </Button>
+            ) : null}
+            <Button size="xs" variant="destructive" disabled={busy} onClick={onRestore}>
+              Restore Task to baseline
+            </Button>
+          </div>
+        </section>
+      ) : null}
       {task.workspace?.failureReason ? (
         <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {task.workspace.failureReason}
@@ -390,8 +450,156 @@ export function TaskOwnershipEditor({
   );
 }
 
+function TaskChangesPanel({
+  environmentId,
+  task,
+  provider,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly task: OrchestrationTask;
+  readonly provider: string | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const changes = useEnvironmentQuery(
+    open ? taskEnvironment.changes({ environmentId, input: { taskId: task.id } }) : null,
+  );
+  const fileDiff = useEnvironmentQuery(
+    open && selectedPath
+      ? taskEnvironment.fileDiff({
+          environmentId,
+          input: { taskId: task.id, path: selectedPath },
+        })
+      : null,
+  );
+  const renderable = useMemo(
+    () => getRenderablePatch(fileDiff.data?.patch, `task-diff:${task.id}:${selectedPath ?? ""}`),
+    [fileDiff.data?.patch, selectedPath, task.id],
+  );
+  const items = useMemo(
+    () =>
+      renderable?.kind === "files"
+        ? renderable.files.map((fileDiff, index) => ({
+            id: `${resolveFileDiffPath(fileDiff)}:${index}`,
+            type: "diff" as const,
+            fileDiff,
+            collapsed: false,
+          }))
+        : [],
+    [renderable],
+  );
+  return (
+    <section className="overflow-hidden rounded-lg border border-border/70">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-muted/30"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="font-medium">Task Changes</span>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          {changes.data
+            ? `${changes.data.changeSet.changedFiles} files · +${changes.data.changeSet.additions} / -${changes.data.changeSet.deletions}`
+            : "Base to current workspace"}
+          <ChevronDownIcon className={`size-4 transition-transform ${open ? "rotate-180" : ""}`} />
+        </span>
+      </button>
+      {open ? (
+        <div className="space-y-3 border-t border-border/70 p-3">
+          {changes.error ? <p className="text-xs text-destructive">{changes.error}</p> : null}
+          {changes.isPending ? (
+            <p className="text-xs text-muted-foreground">Inspecting Task state…</p>
+          ) : null}
+          {changes.data ? (
+            <>
+              <dl className="grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
+                <div>
+                  <dt className="text-muted-foreground">Task</dt>
+                  <dd className="truncate">{task.title}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Provider / Thread</dt>
+                  <dd className="truncate font-mono">
+                    {provider ?? "Unassigned"} · {task.threadId ?? "Unassigned"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Workspace</dt>
+                  <dd className="truncate font-mono">{changes.data.changeSet.workspace}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Ownership</dt>
+                  <dd>{task.ownership?.status ?? "Unconfigured"}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Base</dt>
+                  <dd className="truncate font-mono">{changes.data.changeSet.baseCommit}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Current head</dt>
+                  <dd className="truncate font-mono">{changes.data.changeSet.currentHead}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Branch</dt>
+                  <dd className="truncate font-mono">{changes.data.changeSet.branch}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Snapshot</dt>
+                  <dd>{changes.data.snapshotStatus ?? "Not prepared"}</dd>
+                </div>
+              </dl>
+              <div className="grid min-h-64 overflow-hidden rounded-md border border-border/70 md:grid-cols-[18rem_minmax(0,1fr)]">
+                <div className="max-h-96 overflow-auto border-b border-border/70 md:border-r md:border-b-0">
+                  {changes.data.changeSet.files.map((file) => (
+                    <button
+                      key={`${file.previousPath ?? ""}:${file.path}`}
+                      type="button"
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs hover:bg-muted/30 ${selectedPath === file.path ? "bg-muted/50" : ""}`}
+                      onClick={() => setSelectedPath(file.path)}
+                    >
+                      <span className="min-w-0 truncate font-mono">{file.path}</span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {file.changeType}
+                        {file.binary ? " · binary" : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className="min-h-64 overflow-hidden bg-background">
+                  {fileDiff.isPending ? (
+                    <p className="p-4 text-xs text-muted-foreground">Loading file diff…</p>
+                  ) : null}
+                  {fileDiff.error ? (
+                    <p className="p-4 text-xs text-destructive">{fileDiff.error}</p>
+                  ) : null}
+                  {fileDiff.data?.binary ? (
+                    <p className="p-4 text-xs text-muted-foreground">
+                      Binary file. Text diff unavailable.
+                    </p>
+                  ) : null}
+                  {fileDiff.data?.truncated ? (
+                    <p className="p-4 text-xs text-muted-foreground">
+                      This file is too large for an inline patch. Inspect it in the Task workspace.
+                    </p>
+                  ) : null}
+                  {items.length > 0 ? (
+                    <StyledDiffCodeView className="h-96 overflow-auto" items={items} />
+                  ) : selectedPath && !fileDiff.isPending && !fileDiff.data?.binary ? (
+                    <p className="p-4 text-xs text-muted-foreground">
+                      No renderable patch for this file.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function TaskCardWithGitStatus(
-  props: Omit<ComponentProps<typeof ProjectTaskCard>, "gitStatusSummary"> & {
+  props: Omit<ComponentProps<typeof ProjectTaskCard>, "gitStatusSummary" | "environmentId"> & {
     readonly environmentId: EnvironmentId;
   },
 ) {
@@ -414,7 +622,14 @@ function TaskCardWithGitStatus(
       ? `${changedFiles} changed ${changedFiles === 1 ? "file" : "files"}`
       : "Clean";
   })();
-  return <ProjectTaskCard {...cardProps} task={task} gitStatusSummary={gitStatusSummary} />;
+  return (
+    <ProjectTaskCard
+      {...cardProps}
+      environmentId={environmentId}
+      task={task}
+      gitStatusSummary={gitStatusSummary}
+    />
+  );
 }
 
 export function TaskCreateFields({
@@ -517,6 +732,10 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
   const validateOwnership = useAtomCommand(taskEnvironment.validateOwnership, {
     reportFailure: false,
   });
+  const prepareReview = useAtomCommand(taskEnvironment.prepareReview, { reportFailure: false });
+  const updateHandoff = useAtomCommand(taskEnvironment.updateHandoff, { reportFailure: false });
+  const requestRestore = useAtomCommand(taskEnvironment.requestRestore, { reportFailure: false });
+  const undoRestore = useAtomCommand(taskEnvironment.undoRestore, { reportFailure: false });
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const [createOpen, setCreateOpen] = useState(false);
@@ -529,6 +748,17 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
   const [editingRules, setEditingRules] = useState<ReadonlyArray<OwnershipRuleDraft>>([]);
   const [busyTaskId, setBusyTaskId] = useState<TaskId | null>(null);
   const [pendingStartTaskId, setPendingStartTaskId] = useState<TaskId | null>(null);
+  const [pendingReviewTaskId, setPendingReviewTaskId] = useState<TaskId | null>(null);
+  const [reviewTaskId, setReviewTaskId] = useState<TaskId | null>(null);
+  const [restoreTaskId, setRestoreTaskId] = useState<TaskId | null>(null);
+  const [restoreConfirmed, setRestoreConfirmed] = useState(false);
+  const [handoffSummary, setHandoffSummary] = useState("");
+  const [handoffTests, setHandoffTests] = useState("");
+  const [handoffAssumptions, setHandoffAssumptions] = useState("");
+  const [handoffInterfaces, setHandoffInterfaces] = useState("");
+  const [handoffMigrations, setHandoffMigrations] = useState("");
+  const [handoffRisks, setHandoffRisks] = useState("");
+  const [handoffFollowUps, setHandoffFollowUps] = useState("");
 
   const tasks = useMemo(
     () =>
@@ -541,6 +771,9 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
     () => new Map((snapshot?.threads ?? []).map((thread) => [thread.id, thread] as const)),
     [snapshot?.threads],
   );
+  const reviewTask = tasks.find((task) => task.id === reviewTaskId) ?? null;
+  const restoreTask = tasks.find((task) => task.id === restoreTaskId) ?? null;
+  const reviewThread = reviewTask?.threadId ? threadById.get(reviewTask.threadId) : null;
 
   const reportError = (title: string, description: string) => {
     toastManager.add(stackedThreadToast({ type: "error", title, description }));
@@ -700,6 +933,112 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
     }
   }, [pendingStartTaskId, tasks]);
 
+  const openReview = (task: OrchestrationTask) => {
+    if (!task.handoff) return;
+    setReviewTaskId(task.id);
+    setHandoffSummary(task.handoff.summary);
+    setHandoffTests(
+      task.handoff.testsRun.map((test) => `${test.command} :: ${test.result}`).join("\n"),
+    );
+    setHandoffAssumptions(task.handoff.assumptions.join("\n"));
+    setHandoffInterfaces(task.handoff.interfaceChanges.join("\n"));
+    setHandoffMigrations(task.handoff.migrations.join("\n"));
+    setHandoffRisks(task.handoff.knownRisks.join("\n"));
+    setHandoffFollowUps(task.handoff.followUps.join("\n"));
+  };
+
+  useEffect(() => {
+    if (pendingReviewTaskId === null) return;
+    const task = tasks.find((candidate) => candidate.id === pendingReviewTaskId);
+    if (task?.reviewError) {
+      setPendingReviewTaskId(null);
+      setBusyTaskId(null);
+      reportError("Could not prepare Task review", task.reviewError);
+      return;
+    }
+    if (!task?.reviewSnapshot || !task.handoff) return;
+    setPendingReviewTaskId(null);
+    setBusyTaskId(null);
+    openReview(task);
+  }, [pendingReviewTaskId, tasks]);
+
+  const prepareTaskReview = async (task: OrchestrationTask, generation: "provider" | "manual") => {
+    setBusyTaskId(task.id);
+    setPendingReviewTaskId(task.id);
+    const result = await prepareReview({
+      environmentId: project.environmentId,
+      input: { taskId: task.id, generation },
+    });
+    const error = commandError(result);
+    if (error !== null) {
+      setBusyTaskId(null);
+      setPendingReviewTaskId(null);
+      reportError("Could not prepare Task review", error);
+    }
+  };
+
+  const nonEmptyLines = (value: string) =>
+    value
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+  const saveHandoff = async (status: "draft" | "ready") => {
+    if (!reviewTask?.reviewSnapshot || !reviewTask.handoff) return;
+    setBusyTaskId(reviewTask.id);
+    const result = await updateHandoff({
+      environmentId: project.environmentId,
+      input: {
+        taskId: reviewTask.id,
+        snapshotId: reviewTask.reviewSnapshot.id,
+        status,
+        summary: handoffSummary,
+        testsRun: nonEmptyLines(handoffTests).map((line) => {
+          const separator = line.indexOf("::");
+          return separator === -1
+            ? { command: line, result: "Reported without a result", evidence: "reported" as const }
+            : {
+                command: line.slice(0, separator).trim(),
+                result: line.slice(separator + 2).trim() || "Reported without a result",
+                evidence: "reported" as const,
+              };
+        }),
+        assumptions: nonEmptyLines(handoffAssumptions),
+        interfaceChanges: nonEmptyLines(handoffInterfaces),
+        migrations: nonEmptyLines(handoffMigrations),
+        knownRisks: nonEmptyLines(handoffRisks),
+        followUps: nonEmptyLines(handoffFollowUps),
+      },
+    });
+    setBusyTaskId(null);
+    const error = commandError(result);
+    if (error !== null) reportError("Could not save handoff", error);
+  };
+
+  const restoreTaskToBaseline = async () => {
+    if (!restoreTask || !restoreConfirmed) return;
+    setBusyTaskId(restoreTask.id);
+    const result = await requestRestore({
+      environmentId: project.environmentId,
+      input: { taskId: restoreTask.id, restoreId: TaskRestoreId.make(randomUUID()) },
+    });
+    setBusyTaskId(null);
+    const error = commandError(result);
+    if (error !== null) reportError("Could not restore Task", error);
+    else setRestoreTaskId(null);
+  };
+
+  const undoTaskRestore = async (task: OrchestrationTask) => {
+    setBusyTaskId(task.id);
+    const result = await undoRestore({
+      environmentId: project.environmentId,
+      input: { taskId: task.id },
+    });
+    setBusyTaskId(null);
+    const error = commandError(result);
+    if (error !== null) reportError("Could not undo Task restore", error);
+  };
+
   const transitionTask = async (task: OrchestrationTask, transition: "complete" | "cancel") => {
     setBusyTaskId(task.id);
     const command = transition === "complete" ? completeTask : cancelTask;
@@ -806,7 +1145,13 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
                   busy={busy}
                   onStart={() => void startTask(task)}
                   onOpenThread={() => openThread(task)}
-                  onComplete={() => void transitionTask(task, "complete")}
+                  onPrepareReview={(generation) => void prepareTaskReview(task, generation)}
+                  onOpenReview={() => openReview(task)}
+                  onRestore={() => {
+                    setRestoreConfirmed(false);
+                    setRestoreTaskId(task.id);
+                  }}
+                  onUndoRestore={() => void undoTaskRestore(task)}
                   onCancel={() => void transitionTask(task, "cancel")}
                   onRemoveWorkspace={() => void cleanupWorkspace(task)}
                   onEditOwnership={() => editOwnership(task)}
@@ -876,6 +1221,212 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
               onClick={() => void saveOwnership()}
             >
               Save and revalidate
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog open={reviewTask !== null} onOpenChange={(open) => !open && setReviewTaskId(null)}>
+        <DialogPopup className="max-h-[90vh] max-w-3xl overflow-auto">
+          <DialogHeader>
+            <DialogTitle>Task Review</DialogTitle>
+            <DialogDescription>
+              Review immutable Git evidence and edit only the narrative handoff.
+            </DialogDescription>
+          </DialogHeader>
+          {reviewTask?.reviewSnapshot && reviewTask.handoff ? (
+            <DialogPanel className="space-y-4">
+              <div className="grid gap-2 rounded-lg border border-border/70 p-3 text-xs sm:grid-cols-4">
+                <div>
+                  <span className="text-muted-foreground">Changes</span>
+                  <p>{reviewTask.reviewSnapshot.changedFiles} files</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Lines</span>
+                  <p>
+                    +{reviewTask.reviewSnapshot.additions} / -{reviewTask.reviewSnapshot.deletions}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Ownership</span>
+                  <p>Valid</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Snapshot</span>
+                  <p>{reviewTask.reviewSnapshot.status}</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-muted-foreground">Base SHA</span>
+                  <p className="truncate font-mono">{reviewTask.reviewSnapshot.baseCommit}</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-muted-foreground">Snapshot ID</span>
+                  <p className="truncate font-mono">{reviewTask.reviewSnapshot.id}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Provider</span>
+                  <p className="truncate font-mono">
+                    {reviewThread?.session?.providerName ??
+                      reviewThread?.modelSelection.instanceId ??
+                      "Unassigned"}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Thread</span>
+                  <p className="truncate font-mono">{reviewTask.threadId ?? "Unassigned"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Branch</span>
+                  <p className="truncate font-mono">
+                    {reviewTask.workspace?.branch ?? "Unassigned"}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Current head</span>
+                  <p className="truncate font-mono">{reviewTask.reviewSnapshot.branchHead}</p>
+                </div>
+              </div>
+              {reviewTask.reviewSnapshot.status === "stale" ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  This snapshot is stale because the Task changed after capture. Prepare completion
+                  again before completing.
+                </div>
+              ) : null}
+              {reviewTask.handoff.generationError ? (
+                <p className="rounded-lg border border-border/70 p-3 text-xs text-muted-foreground">
+                  Provider generation was unavailable. This manual draft remains tied to the same
+                  immutable snapshot.
+                </p>
+              ) : null}
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Summary</span>
+                <Textarea
+                  rows={6}
+                  value={handoffSummary}
+                  onChange={(event) => setHandoffSummary(event.currentTarget.value)}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Tests run</span>
+                <Textarea
+                  placeholder="command :: result"
+                  value={handoffTests}
+                  onChange={(event) => setHandoffTests(event.currentTarget.value)}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Assumptions</span>
+                <Textarea
+                  placeholder="One item per line"
+                  value={handoffAssumptions}
+                  onChange={(event) => setHandoffAssumptions(event.currentTarget.value)}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Interface changes</span>
+                <Textarea
+                  placeholder="One item per line"
+                  value={handoffInterfaces}
+                  onChange={(event) => setHandoffInterfaces(event.currentTarget.value)}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Migrations</span>
+                <Textarea
+                  placeholder="One item per line"
+                  value={handoffMigrations}
+                  onChange={(event) => setHandoffMigrations(event.currentTarget.value)}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Known risks</span>
+                <Textarea
+                  placeholder="One item per line"
+                  value={handoffRisks}
+                  onChange={(event) => setHandoffRisks(event.currentTarget.value)}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Follow-ups</span>
+                <Textarea
+                  placeholder="One item per line"
+                  value={handoffFollowUps}
+                  onChange={(event) => setHandoffFollowUps(event.currentTarget.value)}
+                />
+              </label>
+            </DialogPanel>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReviewTaskId(null)}>
+              Close
+            </Button>
+            {reviewTask?.reviewSnapshot?.status === "stale" ? (
+              <Button onClick={() => void prepareTaskReview(reviewTask, "provider")}>
+                Prepare again
+              </Button>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  disabled={busyTaskId !== null}
+                  onClick={() => void saveHandoff("draft")}
+                >
+                  Save draft
+                </Button>
+                <Button
+                  disabled={!handoffSummary.trim() || busyTaskId !== null}
+                  onClick={() => void saveHandoff("ready")}
+                >
+                  Mark ready
+                </Button>
+                {reviewTask?.handoff?.status === "ready" ? (
+                  <Button
+                    disabled={busyTaskId !== null}
+                    onClick={() => void transitionTask(reviewTask, "complete")}
+                  >
+                    Complete Task
+                  </Button>
+                ) : null}
+              </>
+            )}
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog open={restoreTask !== null} onOpenChange={(open) => !open && setRestoreTaskId(null)}>
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>Restore Task to Baseline</DialogTitle>
+            <DialogDescription>
+              This action is consequential and applies only to the isolated Task workspace.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            <div className="whitespace-pre-line rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+              {`This restores the Task workspace to its original Task baseline.\n\nOther Tasks and your source checkout are not affected.\n\nA recovery snapshot will be created first.`}
+            </div>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={restoreConfirmed}
+                onChange={(event) => setRestoreConfirmed(event.currentTarget.checked)}
+              />
+              <span>
+                I understand that current Task workspace changes will be replaced by the recorded
+                baseline.
+              </span>
+            </label>
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestoreTaskId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!restoreConfirmed || busyTaskId !== null}
+              onClick={() => void restoreTaskToBaseline()}
+            >
+              Restore Task to Baseline
             </Button>
           </DialogFooter>
         </DialogPopup>

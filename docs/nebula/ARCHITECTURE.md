@@ -103,7 +103,7 @@ Task commands produce persisted Task events. The in-memory projector and `projec
 
 Task does not persist provider-session identity or trust a renderer-supplied workspace path. New Builder Tasks persist a server-resolved source repository, exact base commit, stable Task branch, inherited worktree path, lifecycle state, timestamps, and safe failure details. Execution context is derived as `Task → Thread → provider/session`, while the decider requires the Thread branch/path to equal the ready Task workspace. Existing Threads and pre-isolation Tasks remain valid.
 
-This slice does not create ownership requests, shared-resource locks, Missions, routing, review, or integration behavior.
+This slice does not create ownership requests, shared-resource locks, Missions, routing, an independent Reviewer role, quality gates, or integration behavior.
 
 ### Workspace isolation
 
@@ -132,9 +132,15 @@ The pure ownership evaluator applies deterministic precedence: deny overrides wr
 
 The Task ownership reactor composes the inherited Git executor and compares the Task worktree's complete current state to its recorded immutable base. The comparison includes committed, staged, unstaged, added, modified, deleted, untracked, renamed, and copied paths; both rename paths are evaluated. Ignored files follow Git's existing exclusion semantics. The reactor runs after a Task Thread's checkpoint diff settles, on manual validation, after scope updates, and for active ready Tasks during startup reconciliation.
 
-Rules, current validation state, violation evidence, and timestamps are persisted through Task events and the existing SQLite projection. Completion of an ownership-managed Task first emits a fresh validation request. A valid result and completion are committed together; a violation or inspection error leaves the Task active. Later explicit scope expansion can make current state valid without deleting earlier violation events.
+Rules, current validation state, violation evidence, and timestamps are persisted through Task events and the existing SQLite projection. Completion of an ownership-managed Task requires a current immutable review snapshot and ready handoff, then emits a fresh validation request. A valid result requests a final deterministic snapshot-freshness check before completion; a violation, inspection error, or stale snapshot leaves the Task active. Later explicit scope expansion makes any prior snapshot stale and can make current state valid without deleting earlier violation events.
 
 This is an enforced progression and future integration boundary, not a filesystem sandbox. A provider or external editor can write an unauthorized path; Nebula detects the Git evidence and refuses completion. Filesystem, process, credential, network, provider-permission, and RPC security remain separate and take precedence over Task ownership. There is no atomic lock between validation and later external filesystem changes, so future integration must validate again.
+
+### Task Diff, review handoff, and restore
+
+`TaskChangeSetQuery` is the canonical Git evidence service shared by Task Diff, ownership, review capture, and freshness checks. It captures the complete current tree through the inherited checkpoint store, compares it with the Task's recorded base, preserves rename/copy/binary metadata and line statistics, and loads individual patches only when selected. Immutable review and pre-restore snapshots are hidden Git refs under a Task-scoped namespace.
+
+`TaskReviewReactor` captures review snapshots, routes handoff drafting through the Thread's configured text-generation provider, falls back to an editable manual draft on generation failure, reconciles stale snapshots at startup, and services restore. Git-derived identity and statistics are non-editable facts; provider text is a claim until a human marks the handoff ready. Restore is provider-neutral: it refuses any Task branch present under remote refs, captures and durably records a safety snapshot before reset/clean, changes only the isolated Task workspace, retains provider conversation history, keeps the Task active, and preserves the recovery ref for Undo Restore.
 
 ### Shared resources
 
