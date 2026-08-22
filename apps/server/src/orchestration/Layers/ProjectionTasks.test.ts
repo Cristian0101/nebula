@@ -95,8 +95,91 @@ it.effect("restores Task status and Thread association after a projection restar
           title: "Persistent Task",
           objective: "Survive a runtime restart.",
           role: "builder",
+          ownershipRequired: true,
           createdAt,
           updatedAt: createdAt,
+        },
+      });
+      yield* events.append({
+        type: "task.workspace.ready",
+        eventId: EventId.make("event-task-workspace-ready-restart"),
+        aggregateKind: "task",
+        aggregateId: taskId,
+        occurredAt: activatedAt,
+        commandId: CommandId.make("command-task-workspace-ready-restart"),
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: {
+          taskId,
+          sourceRepository: "/tmp/task-restart-project",
+          baseCommit: "0123456789abcdef",
+          branch: "nebula/manual/task-restart",
+          path: "/tmp/task-restart-worktree",
+          createdAt: activatedAt,
+          updatedAt: activatedAt,
+        },
+      });
+      yield* events.append({
+        type: "task.ownership-updated",
+        eventId: EventId.make("event-task-ownership-restart"),
+        aggregateKind: "task",
+        aggregateId: taskId,
+        occurredAt: activatedAt,
+        commandId: CommandId.make("command-task-ownership-restart"),
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: {
+          taskId,
+          rules: [
+            {
+              id: "frontend",
+              access: "write",
+              pattern: "src/frontend/**",
+              reason: null,
+              createdAt,
+            },
+          ],
+          updatedAt: activatedAt,
+        },
+      });
+      yield* events.append({
+        type: "task.ownership-validation-requested",
+        eventId: EventId.make("event-task-validation-requested-restart"),
+        aggregateKind: "task",
+        aggregateId: taskId,
+        occurredAt: activatedAt,
+        commandId: CommandId.make("command-task-validation-requested-restart"),
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: { taskId, requestCompletion: false, updatedAt: activatedAt },
+      });
+      yield* events.append({
+        type: "task.ownership-validated",
+        eventId: EventId.make("event-task-validated-restart"),
+        aggregateKind: "task",
+        aggregateId: taskId,
+        occurredAt: activatedAt,
+        commandId: CommandId.make("command-task-validated-restart"),
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: {
+          taskId,
+          status: "violation",
+          changedPathCount: 1,
+          violations: [
+            {
+              path: "package.json",
+              changeType: "modified",
+              reason: "unclassified",
+              matchedRules: [],
+            },
+          ],
+          validatedAt: activatedAt,
+          updatedAt: activatedAt,
         },
       });
       yield* events.append({
@@ -137,6 +220,9 @@ it.effect("restores Task status and Thread association after a projection restar
         readonly status: string;
         readonly threadId: string | null;
         readonly workspace: string;
+        readonly ownershipRules: string;
+        readonly ownershipStatus: string | null;
+        readonly ownershipViolations: string;
       }>`
         SELECT
           task.task_id AS "taskId",
@@ -145,6 +231,9 @@ it.effect("restores Task status and Thread association after a projection restar
           task.status,
           task.thread_id AS "threadId",
           COALESCE(thread.worktree_path, project.workspace_root) AS workspace
+          , task.ownership_rules_json AS "ownershipRules"
+          , task.ownership_status AS "ownershipStatus"
+          , task.ownership_violations_json AS "ownershipViolations"
         FROM projection_tasks AS task
         JOIN projection_projects AS project ON project.project_id = task.project_id
         LEFT JOIN projection_threads AS thread ON thread.thread_id = task.thread_id
@@ -160,6 +249,11 @@ it.effect("restores Task status and Thread association after a projection restar
         status: "active",
         threadId,
         workspace: "/tmp/task-restart-project",
+        ownershipRules:
+          '[{"id":"frontend","pattern":"src/frontend/**","access":"write","reason":null,"createdAt":"2026-08-22T12:00:00.000Z"}]',
+        ownershipStatus: "violation",
+        ownershipViolations:
+          '[{"path":"package.json","changeType":"modified","reason":"unclassified","matchedRules":[]}]',
       },
     ]);
   }).pipe(

@@ -19,6 +19,8 @@ This directory is the durable product and architecture source of truth for Nebul
 
 Nebula product docs describe what the product is and where it is going. Architecture docs distinguish inherited behavior from target behavior. The runtime map records what the current code actually does. The extension contract determines where Nebula may attach without creating competing systems.
 
+The current implemented safety boundary combines one Git worktree per writable Builder Task with durable repository-relative write, read-only, and deny ownership rules. Nebula validates the Task's complete change set from its recorded base commit, including untracked files and both sides of renames, and blocks completion while violations or validation errors remain.
+
 ## Source hierarchy
 
 When sources disagree, use this order:

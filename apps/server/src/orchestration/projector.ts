@@ -27,6 +27,10 @@ import {
   TaskWorkspaceReadyPayload,
   TaskWorkspaceRemovedPayload,
   TaskWorkspaceRemoveRequestedPayload,
+  TaskOwnershipUpdatedPayload,
+  TaskOwnershipValidationRequestedPayload,
+  TaskOwnershipValidatedPayload,
+  TaskOwnershipValidationFailedPayload,
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
@@ -312,6 +316,19 @@ export function projectEvent(
               completedAt: null,
               cancelledAt: null,
               workspace: null,
+              ownership:
+                payload.ownershipRequired === true
+                  ? {
+                      required: true,
+                      rules: [],
+                      status: "unconfigured" as const,
+                      validatedAt: null,
+                      changedPathCount: 0,
+                      violations: [],
+                      errorReason: null,
+                      updatedAt: payload.updatedAt,
+                    }
+                  : null,
             },
           ],
         })),
@@ -590,6 +607,113 @@ export function projectEvent(
                     status: "ready" as const,
                     failureCode: payload.failureCode,
                     failureReason: payload.failureReason,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.ownership-updated":
+      return decodeForEvent(TaskOwnershipUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  ownership: {
+                    required: task.ownership?.required ?? false,
+                    rules: payload.rules,
+                    status: "pending" as const,
+                    validatedAt: task.ownership?.validatedAt ?? null,
+                    changedPathCount: task.ownership?.changedPathCount ?? 0,
+                    violations: task.ownership?.violations ?? [],
+                    errorReason: null,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.ownership-validation-requested":
+      return decodeForEvent(
+        TaskOwnershipValidationRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.ownership != null
+              ? {
+                  ...task,
+                  ownership: {
+                    ...task.ownership,
+                    status: "pending" as const,
+                    errorReason: null,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.ownership-validated":
+      return decodeForEvent(
+        TaskOwnershipValidatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.ownership != null
+              ? {
+                  ...task,
+                  ownership: {
+                    ...task.ownership,
+                    status: payload.status,
+                    validatedAt: payload.validatedAt,
+                    changedPathCount: payload.changedPathCount,
+                    violations: payload.violations,
+                    errorReason: null,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.ownership-validation-failed":
+      return decodeForEvent(
+        TaskOwnershipValidationFailedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.ownership != null
+              ? {
+                  ...task,
+                  ownership: {
+                    ...task.ownership,
+                    status: "error" as const,
+                    validatedAt: payload.validatedAt,
+                    errorReason: payload.failureReason,
                     updatedAt: payload.updatedAt,
                   },
                   updatedAt: payload.updatedAt,

@@ -99,7 +99,7 @@ Task commands produce persisted Task events. The in-memory projector and `projec
 
 Task does not persist provider-session identity or trust a renderer-supplied workspace path. New Builder Tasks persist a server-resolved source repository, exact base commit, stable Task branch, inherited worktree path, lifecycle state, timestamps, and safe failure details. Execution context is derived as `Task → Thread → provider/session`, while the decider requires the Thread branch/path to equal the ready Task workspace. Existing Threads and pre-isolation Tasks remain valid.
 
-This slice does not create ownership rules, shared-resource locks, Missions, routing, review, or integration behavior.
+This slice does not create ownership requests, shared-resource locks, Missions, routing, review, or integration behavior.
 
 ### Workspace isolation
 
@@ -111,9 +111,9 @@ Startup reconciliation adopts a matching worktree left after a crash, fails an i
 
 They do not prevent a subprocess from accessing other filesystem paths, credentials, network resources, or production systems. Provider permissions, RPC authorization, filesystem policy, and user approval remain separate concerns.
 
-### Ownership
+### Ownership enforcement
 
-Tasks should support mechanically validated path ownership, for example:
+Writable Builder Tasks created after the ownership migration require explicit repository-relative ownership before workspace preparation or activation. Rules use write, read-only, and deny access, for example:
 
 ```yaml
 owns:
@@ -124,7 +124,13 @@ denies:
   - pnpm-lock.yaml
 ```
 
-The runtime must compare actual changed paths against the effective rules before approval or integration. Prompts may explain ownership to a model, but prompts are not enforcement.
+The pure ownership evaluator applies deterministic precedence: deny overrides write; write authorizes modification; read-only matches and unmatched paths are violations. `**` is supported only as an explicit entire-repository write choice. Patterns reject absolute paths, URI forms, NULs, empty segments, and repository traversal; matching remains case-sensitive and follows Git-style forward-slash paths.
+
+The Task ownership reactor composes the inherited Git executor and compares the Task worktree's complete current state to its recorded immutable base. The comparison includes committed, staged, unstaged, added, modified, deleted, untracked, renamed, and copied paths; both rename paths are evaluated. Ignored files follow Git's existing exclusion semantics. The reactor runs after a Task Thread's checkpoint diff settles, on manual validation, after scope updates, and for active ready Tasks during startup reconciliation.
+
+Rules, current validation state, violation evidence, and timestamps are persisted through Task events and the existing SQLite projection. Completion of an ownership-managed Task first emits a fresh validation request. A valid result and completion are committed together; a violation or inspection error leaves the Task active. Later explicit scope expansion can make current state valid without deleting earlier violation events.
+
+This is an enforced progression and future integration boundary, not a filesystem sandbox. A provider or external editor can write an unauthorized path; Nebula detects the Git evidence and refuses completion. Filesystem, process, credential, network, provider-permission, and RPC security remain separate and take precedence over Task ownership. There is no atomic lock between validation and later external filesystem changes, so future integration must validate again.
 
 ### Shared resources
 
@@ -152,10 +158,10 @@ Never integrate directly into target `main` by default. Integration must verify 
 
 ## Future
 
-After the explicit Task and isolated workspace lifecycle are proven, future modules may add:
+After the explicit Task, isolated workspace, and ownership lifecycle are proven, future modules may add:
 
 - Mission composition and task dependencies;
-- ownership prediction and enforcement;
+- ownership prediction and agent-generated scope requests;
 - shared-resource locks;
 - structured handoffs;
 - independent review and quality gates;

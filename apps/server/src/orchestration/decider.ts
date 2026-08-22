@@ -24,6 +24,7 @@ import {
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
+import { validateOwnershipRules } from "./taskOwnership.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -391,6 +392,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           title: command.title,
           objective: command.objective,
           role: command.role,
+          ownershipRequired: command.role === "builder",
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -428,6 +430,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       if (task.role === "builder") {
+        if (
+          task.ownership?.required === true &&
+          !task.ownership.rules.some((rule) => rule.access === "write")
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Builder Task '${command.taskId}' requires explicit write ownership before binding a thread.`,
+          });
+        }
         if (task.workspace?.status !== "ready" || task.workspace.path === null) {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
@@ -482,6 +493,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       if (task.role === "builder") {
         if (
+          task.ownership?.required === true &&
+          !task.ownership.rules.some((rule) => rule.access === "write")
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Builder Task '${command.taskId}' requires explicit write ownership before activation.`,
+          });
+        }
+        if (
           task.workspace?.status !== "ready" ||
           task.workspace.path === null ||
           thread.worktreePath !== task.workspace.path ||
@@ -529,6 +549,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Only an active Task can be completed; '${command.taskId}' is '${task.status}'.`,
         });
       }
+      if (task.ownership?.required === true) {
+        if (!task.ownership.rules.some((rule) => rule.access === "write")) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Task '${command.taskId}' has no configured write ownership.`,
+          });
+        }
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: "task",
+            aggregateId: command.taskId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "task.ownership-validation-requested",
+          payload: {
+            taskId: command.taskId,
+            requestCompletion: true,
+            updatedAt: command.createdAt,
+          },
+        };
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "task",
@@ -569,12 +611,160 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "task.ownership.set": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.status === "completed" || task.status === "cancelled") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Terminal Task '${command.taskId}' ownership cannot be changed.`,
+        });
+      }
+      yield* Effect.try({
+        try: () => validateOwnershipRules(command.rules),
+        catch: (error) =>
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: error instanceof Error ? error.message : "Ownership rules are invalid.",
+          }),
+      });
+      if (
+        task.ownership?.required === true &&
+        !command.rules.some((rule) => rule.access === "write")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Builder Task '${command.taskId}' requires at least one write rule.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.ownership-updated",
+        payload: { taskId: command.taskId, rules: command.rules, updatedAt: command.createdAt },
+      };
+    }
+
+    case "task.ownership.validate": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.ownership?.required !== true || task.ownership.rules.length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' does not have configured ownership.`,
+        });
+      }
+      if (
+        task.workspace?.status !== "ready" ||
+        task.workspace.path === null ||
+        task.workspace.baseCommit === null
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' requires a ready workspace before ownership validation.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.ownership-validation-requested",
+        payload: { taskId: command.taskId, requestCompletion: false, updatedAt: command.createdAt },
+      };
+    }
+
+    case "task.ownership.validated": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.ownership?.status !== "pending") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' has no pending ownership validation.`,
+        });
+      }
+      const validatedEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "task" as const,
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.ownership-validated" as const,
+        payload: {
+          taskId: command.taskId,
+          status: command.violations.length === 0 ? ("valid" as const) : ("violation" as const),
+          changedPathCount: command.changedPathCount,
+          violations: command.violations,
+          validatedAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+      if (!command.requestCompletion || command.violations.length > 0 || task.status !== "active") {
+        return validatedEvent;
+      }
+      return [
+        validatedEvent,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "task",
+            aggregateId: command.taskId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "task.completed" as const,
+          payload: {
+            taskId: command.taskId,
+            completedAt: command.createdAt,
+            updatedAt: command.createdAt,
+          },
+        },
+      ];
+    }
+
+    case "task.ownership.validation-failed": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.ownership?.status !== "pending") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' has no pending ownership validation.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.ownership-validation-failed",
+        payload: {
+          taskId: command.taskId,
+          failureReason: command.failureReason,
+          validatedAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
     case "task.workspace.prepare": {
       const task = yield* requireTask({ readModel, command, taskId: command.taskId });
       if (task.role !== "builder" || task.status !== "draft" || task.threadId !== null) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Only an unbound draft Builder Task can prepare an isolated workspace.`,
+        });
+      }
+      if (
+        task.ownership?.required === true &&
+        !task.ownership.rules.some((rule) => rule.access === "write")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Builder Task '${command.taskId}' requires explicit write ownership before workspace preparation.`,
         });
       }
       if (task.workspace?.status === "preparing" || task.workspace?.status === "ready") {

@@ -1,5 +1,15 @@
 # Nebula changelog
 
+## Unreleased — Task ownership engine
+
+- Added durable repository-relative write, read-only, and deny rules to new writable Builder Tasks.
+- Added fail-closed ownership evaluation with deny precedence, unclassified and read-only violations, untracked-file coverage, and both-side rename validation.
+- Added automatic post-checkpoint validation, manual validation, scope editing with revalidation, persisted evidence, and startup reconciliation.
+- Added a fresh-validation completion gate: violations or Git inspection errors leave the Task active while the provider Thread remains usable for remediation.
+- Added a compact ownership editor, explicit Entire Repository choice, validation state, and violation evidence to the existing project Task surface.
+- Preserved pre-ownership Tasks as Legacy / Unconfigured without retroactive violations.
+- Ownership is an enforced progression boundary, not an OS, process, credential, or network sandbox. Shared locks, ownership requests, review, integration, Mission, and Swarm remain deferred.
+
 ## Unreleased
 
 ### Task workspace isolation

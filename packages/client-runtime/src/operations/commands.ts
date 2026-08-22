@@ -38,6 +38,8 @@ export type CompleteTaskInput = CommandInput<"task.complete">;
 export type CancelTaskInput = CommandInput<"task.cancel">;
 export type PrepareTaskWorkspaceInput = CommandInput<"task.workspace.prepare">;
 export type RemoveTaskWorkspaceInput = CommandInput<"task.workspace.remove">;
+export type SetTaskOwnershipInput = CommandInput<"task.ownership.set">;
+export type ValidateTaskOwnershipInput = CommandInput<"task.ownership.validate">;
 export type CreateThreadInput = CommandInput<"thread.create">;
 export type DeleteThreadInput = CommandInput<"thread.delete">;
 export type ArchiveThreadInput = CommandInput<"thread.archive">;
@@ -173,6 +175,19 @@ export const removeTaskWorkspace: (input: RemoveTaskWorkspaceInput) => CommandEf
   const metadata = yield* timestampedCommandMetadata(input);
   return yield* dispatch({ ...input, type: "task.workspace.remove", ...metadata });
 });
+
+export const setTaskOwnership: (input: SetTaskOwnershipInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.setTaskOwnership",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.ownership.set", ...metadata });
+});
+
+export const validateTaskOwnership: (input: ValidateTaskOwnershipInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.validateTaskOwnership")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "task.ownership.validate", ...metadata });
+  });
 
 export const createThread: (input: CreateThreadInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.createThread",

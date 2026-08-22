@@ -24,6 +24,9 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         , workspace_status, workspace_source_repository, workspace_base_commit,
         workspace_branch, workspace_path, workspace_created_at, workspace_removed_at,
         workspace_failure_code, workspace_failure_reason, workspace_updated_at
+        , ownership_required, ownership_rules_json, ownership_status, ownership_validated_at,
+        ownership_changed_path_count, ownership_violations_json, ownership_error_reason,
+        ownership_updated_at
       ) VALUES (
         ${row.taskId}, ${row.projectId}, ${row.title}, ${row.objective}, ${row.role}, ${row.status},
         ${row.threadId}, ${row.createdAt}, ${row.updatedAt}, ${row.activatedAt},
@@ -32,6 +35,9 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         ${row.workspaceBranch}, ${row.workspacePath}, ${row.workspaceCreatedAt},
         ${row.workspaceRemovedAt}, ${row.workspaceFailureCode}, ${row.workspaceFailureReason},
         ${row.workspaceUpdatedAt}
+        , ${row.ownershipRequired}, ${row.ownershipRulesJson}, ${row.ownershipStatus},
+        ${row.ownershipValidatedAt}, ${row.ownershipChangedPathCount},
+        ${row.ownershipViolationsJson}, ${row.ownershipErrorReason}, ${row.ownershipUpdatedAt}
       )
       ON CONFLICT (task_id) DO UPDATE SET
         project_id = excluded.project_id,
@@ -55,6 +61,14 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         , workspace_failure_code = excluded.workspace_failure_code
         , workspace_failure_reason = excluded.workspace_failure_reason
         , workspace_updated_at = excluded.workspace_updated_at
+        , ownership_required = excluded.ownership_required
+        , ownership_rules_json = excluded.ownership_rules_json
+        , ownership_status = excluded.ownership_status
+        , ownership_validated_at = excluded.ownership_validated_at
+        , ownership_changed_path_count = excluded.ownership_changed_path_count
+        , ownership_violations_json = excluded.ownership_violations_json
+        , ownership_error_reason = excluded.ownership_error_reason
+        , ownership_updated_at = excluded.ownership_updated_at
     `,
   });
 
@@ -81,6 +95,14 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
     , workspace_failure_code AS "workspaceFailureCode"
     , workspace_failure_reason AS "workspaceFailureReason"
     , workspace_updated_at AS "workspaceUpdatedAt"
+    , ownership_required AS "ownershipRequired"
+    , ownership_rules_json AS "ownershipRulesJson"
+    , ownership_status AS "ownershipStatus"
+    , ownership_validated_at AS "ownershipValidatedAt"
+    , ownership_changed_path_count AS "ownershipChangedPathCount"
+    , ownership_violations_json AS "ownershipViolationsJson"
+    , ownership_error_reason AS "ownershipErrorReason"
+    , ownership_updated_at AS "ownershipUpdatedAt"
   `;
 
   const getRow = SqlSchema.findOneOption({

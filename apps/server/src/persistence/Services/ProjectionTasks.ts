@@ -3,6 +3,7 @@ import {
   NebulaTaskRole,
   NebulaTaskStatus,
   NebulaTaskWorkspaceStatus,
+  TaskOwnershipValidationStatus,
   ProjectId,
   TaskId,
   ThreadId,
@@ -37,6 +38,14 @@ export const ProjectionTask = Schema.Struct({
   workspaceFailureCode: Schema.NullOr(Schema.String),
   workspaceFailureReason: Schema.NullOr(Schema.String),
   workspaceUpdatedAt: Schema.NullOr(IsoDateTime),
+  ownershipRequired: Schema.Number,
+  ownershipRulesJson: Schema.String,
+  ownershipStatus: Schema.NullOr(TaskOwnershipValidationStatus),
+  ownershipValidatedAt: Schema.NullOr(IsoDateTime),
+  ownershipChangedPathCount: Schema.Number,
+  ownershipViolationsJson: Schema.String,
+  ownershipErrorReason: Schema.NullOr(Schema.String),
+  ownershipUpdatedAt: Schema.NullOr(IsoDateTime),
 });
 export type ProjectionTask = typeof ProjectionTask.Type;
 

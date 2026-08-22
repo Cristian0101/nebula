@@ -84,6 +84,10 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "task.workspace.missing":
     case "task.workspace.removed":
     case "task.workspace.cleanup-failed":
+    case "task.ownership.set":
+    case "task.ownership.validate":
+    case "task.ownership.validated":
+    case "task.ownership.validation-failed":
       return {
         aggregateKind: "task",
         aggregateId: command.taskId,
