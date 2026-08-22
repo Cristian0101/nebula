@@ -132,16 +132,36 @@ it.effect("restores Task status and Thread association after a projection restar
       yield* pipeline.bootstrap;
       return yield* sql<{
         readonly taskId: string;
+        readonly title: string;
+        readonly objective: string;
         readonly status: string;
         readonly threadId: string | null;
+        readonly workspace: string;
       }>`
-        SELECT task_id AS "taskId", status, thread_id AS "threadId"
-        FROM projection_tasks
-        WHERE task_id = ${taskId}
+        SELECT
+          task.task_id AS "taskId",
+          task.title,
+          task.objective,
+          task.status,
+          task.thread_id AS "threadId",
+          COALESCE(thread.worktree_path, project.workspace_root) AS workspace
+        FROM projection_tasks AS task
+        JOIN projection_projects AS project ON project.project_id = task.project_id
+        LEFT JOIN projection_threads AS thread ON thread.thread_id = task.thread_id
+        WHERE task.task_id = ${taskId}
       `;
     }).pipe(Effect.provide(projectionLayer));
 
-    assert.deepEqual(rows, [{ taskId: "task-restart", status: "active", threadId }]);
+    assert.deepEqual(rows, [
+      {
+        taskId: "task-restart",
+        title: "Persistent Task",
+        objective: "Survive a runtime restart.",
+        status: "active",
+        threadId,
+        workspace: "/tmp/task-restart-project",
+      },
+    ]);
   }).pipe(
     Effect.provide(
       Layer.provideMerge(
