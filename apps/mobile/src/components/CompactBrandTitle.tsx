@@ -6,7 +6,6 @@ import type {
 import { Platform, View } from "react-native";
 
 import { AppText as Text } from "./AppText";
-import { T3Wordmark } from "./T3Wordmark";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
 import { useThemeColor } from "../lib/useThemeColor";
@@ -45,7 +44,7 @@ export function CompactBrandTitle(
   return (
     <View
       aria-level={1}
-      accessibilityLabel="T3 Code, Threads"
+      accessibilityLabel="Nebula, Threads"
       accessible
       role="heading"
       style={{
@@ -55,16 +54,15 @@ export function CompactBrandTitle(
         marginLeft: titleOffset,
       }}
     >
-      <T3Wordmark color={iconColor} height={15} />
       <Text
         style={{
-          color: mutedColor,
+          color: iconColor,
           fontFamily: "DMSans-Medium",
-          fontSize: 21,
-          letterSpacing: -0.5,
+          fontSize: 18,
+          letterSpacing: 0.3,
         }}
       >
-        Code
+        Nebula
       </Text>
       <View
         style={{

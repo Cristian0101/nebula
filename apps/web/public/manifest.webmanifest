@@ -3,8 +3,10 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#161616",
-  "theme_color": "#161616",
+  "name": "Nebula",
+  "short_name": "Nebula",
+  "background_color": "#020F27",
+  "theme_color": "#020F27",
   "icons": [
     {
       "src": "/favicon-32x32.png",

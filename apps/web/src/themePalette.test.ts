@@ -30,6 +30,7 @@ import {
   EMBER_THEME,
   GROVE_THEME,
   IRIS_THEME,
+  NEBULA_THEME,
   OCEAN_THEME,
   updateCustomTheme,
   CUSTOM_THEMES_STORAGE_KEY,
@@ -430,6 +431,23 @@ describe("theme files", () => {
       );
       expect(contrastRatio(colors.sidebarForeground, colors.sidebar)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(colors.accentForeground, colors.accent)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("ships Nebula as a dual-mode, contrast-safe built-in", () => {
+    expect(getThemeDefinition(NEBULA_THEME.id)).toBe(NEBULA_THEME);
+    expect(getThemeModes(NEBULA_THEME)).toEqual(["light", "dark"]);
+    expect(themeAllowsSidebarArtwork(NEBULA_THEME.id)).toBe(false);
+
+    for (const mode of ["light", "dark"] as const) {
+      const colors = getThemeColorsForMode(NEBULA_THEME, mode)!;
+      expect(contrastRatio(colors.text, colors.canvas)).toBeGreaterThanOrEqual(7);
+      expect(contrastRatio(colors.textMuted, colors.canvas)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(colors.accentForeground, colors.accent)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(colors.sidebarForeground, colors.sidebar)).toBeGreaterThanOrEqual(7);
+      expect(contrastRatio(colors.messageForeground, colors.messageSurface)).toBeGreaterThanOrEqual(
+        7,
+      );
     }
   });
 

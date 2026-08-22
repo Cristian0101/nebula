@@ -1,4 +1,4 @@
-export const GITHUB_REPOSITORY_URL = "https://github.com/pingdotgg/t3code";
+export const GITHUB_REPOSITORY_URL = "https://github.com/Cristian0101/nebula";
 
 export const IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824";
