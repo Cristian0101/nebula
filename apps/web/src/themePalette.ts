@@ -6,6 +6,7 @@ import {
   EMBER_THEME,
   GROVE_THEME,
   IRIS_THEME,
+  NEBULA_THEME,
   OCEAN_THEME,
   T3_CHAT_THEME,
   THEME_COLOR_ROLES,
@@ -16,11 +17,21 @@ import {
   type ThemeVariants,
 } from "@t3tools/shared/themePalettes";
 
-export { EMBER_THEME, GROVE_THEME, IRIS_THEME, OCEAN_THEME, T3_CHAT_THEME, THEME_COLOR_ROLES };
+export {
+  EMBER_THEME,
+  GROVE_THEME,
+  IRIS_THEME,
+  NEBULA_THEME,
+  OCEAN_THEME,
+  T3_CHAT_THEME,
+  THEME_COLOR_ROLES,
+};
 export type { ThemeAppearance, ThemeColorRole, ThemeColors, ThemeDefinition, ThemeVariants };
 
 export const T3_CHAT_THEME_ID = "t3-chat" as const;
 export const T3_CHAT_THEME_LABEL = "T3 Chat";
+export const NEBULA_THEME_ID = "nebula" as const;
+export const NEBULA_THEME_LABEL = "Nebula";
 export const GROVE_THEME_ID = "grove" as const;
 export const GROVE_THEME_LABEL = "Grove";
 export const OCEAN_THEME_ID = "ocean" as const;
@@ -60,6 +71,7 @@ const RESERVED_THEME_IDS = new Set([
   "system",
   "light",
   "dark",
+  NEBULA_THEME_ID,
   T3_CHAT_THEME_ID,
   GROVE_THEME_ID,
   OCEAN_THEME_ID,

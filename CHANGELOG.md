@@ -9,3 +9,4 @@ This project follows a lightweight, [Keep a Changelog](https://keepachangelog.co
 - Nebula open-source repository foundation.
 - Upstream tracking documentation.
 - Architecture decision record framework.
+- Nebula visual foundation, built-in light and dark theme, and product-shell identity.

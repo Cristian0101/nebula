@@ -13,8 +13,8 @@ interface Props {
 }
 
 const {
-  title = "T3 Code",
-  description = "T3 Code — The open-source control plane for coding agents.",
+  title = "Nebula",
+  description = "Nebula — Your coding agents. One engineering team.",
   pageClass,
 } = Astro.props;
 ---
@@ -40,8 +40,9 @@ const {
     <div class:list={["page", pageClass]}>
       <nav class="nav">
         <div class="nav-inner">
-          <a href="/" class="nav-brand" aria-label="T3 Code home">
-            <span class="nav-brand-name">T3 Code</span>
+          <a href="/" class="nav-brand" aria-label="Nebula home">
+            <span class="nav-brand-mark" aria-hidden="true">✦</span>
+            <span class="nav-brand-name">Nebula</span>
           </a>
           <div class="nav-right">
             <a
@@ -49,7 +50,7 @@ const {
               href={GITHUB_REPOSITORY_URL}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`Star T3 Code on GitHub — ${MARKETING_STATS.githubStars} stars`}
+              aria-label={`Star Nebula on GitHub — ${MARKETING_STATS.githubStars} stars`}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M12 2.3l2.9 5.88 6.49.94-4.7 4.58 1.11 6.47L12 17.12l-5.8 3.05 1.11-6.47-4.7-4.58 6.49-.94L12 2.3z"/>
@@ -68,7 +69,7 @@ const {
         <div class="footer-inner">
           <div class="footer-brand">
             <img src="/icon.webp" alt="" />
-            <span>&copy; {new Date().getFullYear()} T3 Tools Inc · MIT licensed</span>
+            <span>&copy; {new Date().getFullYear()} Kaizora Labs · Built on T3 Code · MIT licensed</span>
           </div>
           <div class="footer-links">
             <a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
@@ -99,18 +100,18 @@ const {
 
 <style is:global>
   :root {
-    --bg: #09090b;
-    --bg-elev: #0c0c0e;
-    --bg-card: #111113;
-    --fg: #fafafa;
-    --fg-muted: #a1a1aa;
-    --fg-dim: #71717a;
-    --fg-faint: #52525b;
+    --bg: #020f27;
+    --bg-elev: #061427;
+    --bg-card: #0a182b;
+    --fg: #f7f8fc;
+    --fg-muted: #a8b2c2;
+    --fg-dim: #7f8da3;
+    --fg-faint: #5c6675;
     --border: rgba(255, 255, 255, 0.08);
     --border-strong: rgba(255, 255, 255, 0.14);
-    --accent-h: 250;
-    --accent: oklch(0.68 0.17 var(--accent-h));
-    --accent-dim: oklch(0.68 0.17 var(--accent-h) / 0.15);
+    --accent-h: 32;
+    --accent: #ff654a;
+    --accent-dim: rgb(255 101 74 / 0.15);
     --ok: oklch(0.72 0.16 150);
     --warn: oklch(0.76 0.15 75);
     --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
@@ -211,9 +212,15 @@ const {
   }
 
   .btn-primary {
-    background: var(--fg);
-    color: #09090b;
+    background: var(--accent);
+    color: var(--bg);
     font-weight: 600;
+  }
+
+  .nav-brand-mark {
+    color: var(--accent);
+    font-size: 18px;
+    line-height: 1;
   }
 
   .btn-primary:hover {
