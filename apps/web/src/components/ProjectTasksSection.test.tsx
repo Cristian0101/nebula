@@ -21,6 +21,18 @@ function task(status: OrchestrationTask["status"]): OrchestrationTask {
     activatedAt: status === "active" ? "2026-08-22T12:01:00.000Z" : null,
     completedAt: status === "completed" ? "2026-08-22T12:05:00.000Z" : null,
     cancelledAt: status === "cancelled" ? "2026-08-22T12:05:00.000Z" : null,
+    workspace: {
+      status: "ready",
+      sourceRepository: "/repo",
+      baseCommit: "0123456789abcdef",
+      branch: `nebula/manual/task-${status}`,
+      path: `/worktrees/task-${status}`,
+      createdAt: "2026-08-22T12:00:30.000Z",
+      removedAt: null,
+      failureCode: null,
+      failureReason: null,
+      updatedAt: "2026-08-22T12:00:30.000Z",
+    },
   };
 }
 
@@ -53,6 +65,7 @@ function card(currentTask: OrchestrationTask, actions = {}) {
     projectId,
     provider: "codex",
     workspace: "/repo",
+    gitStatusSummary: "Clean",
     busy: false,
     onStart: () => undefined,
     onOpenThread: () => undefined,
@@ -73,6 +86,10 @@ describe("ProjectTaskCard", () => {
     expect(html).toContain("thread-1");
     expect(html).toContain("codex");
     expect(html).toContain("/repo");
+    expect(html).toContain("nebula/manual/task-active");
+    expect(html).toContain("0123456789ab");
+    expect(html).toContain("Git status");
+    expect(html).toContain("Clean");
   });
 
   it("offers start and cancel for a draft Task", () => {
@@ -101,12 +118,16 @@ describe("ProjectTaskCard", () => {
   });
 
   it("keeps a completed Task inspectable without terminal mutation actions", () => {
-    const tree = card(task("completed"));
+    const onRemoveWorkspace = vi.fn();
+    const tree = card(task("completed"), { onRemoveWorkspace });
     const text = textOf(tree);
     expect(text).toContain("Completed");
     expect(text).toContain("Open Thread");
     expect(findAction(tree, "Complete")).toBeUndefined();
     expect(findAction(tree, "Cancel")).toBeUndefined();
+    findAction(tree, "Remove workspace")?.();
+    expect(onRemoveWorkspace).toHaveBeenCalledOnce();
+    expect(text).toContain("The Task branch and committed work are preserved.");
   });
 });
 

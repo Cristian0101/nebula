@@ -76,6 +76,14 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "task.activate":
     case "task.complete":
     case "task.cancel":
+    case "task.workspace.prepare":
+    case "task.workspace.remove":
+    case "task.workspace.preparation-started":
+    case "task.workspace.ready":
+    case "task.workspace.failed":
+    case "task.workspace.missing":
+    case "task.workspace.removed":
+    case "task.workspace.cleanup-failed":
       return {
         aggregateKind: "task",
         aggregateId: command.taskId,

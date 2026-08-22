@@ -13,6 +13,7 @@ This directory is the durable product and architecture source of truth for Nebul
 | [Runtime map](RUNTIME_MAP.md)               | Evidence-based map of the inherited T3 Code repository.                                      |
 | [Extension contract](EXTENSION_CONTRACT.md) | Canonical attachment points, divergence budget, ADR review, and first module recommendation. |
 | [Design system](DESIGN_SYSTEM.md)           | Canonical visual identity, palette, theme behavior, accessibility, and asset status.         |
+| [Changelog](CHANGELOG.md)                   | Shipped and unreleased Nebula product behavior changes.                                      |
 | [ADRs](../adr/)                             | Accepted architecture decisions.                                                             |
 | [Upstream tracking](../../UPSTREAM.md)      | Fork baseline, attribution, sync strategy, and known divergence.                             |
 

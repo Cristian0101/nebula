@@ -263,6 +263,30 @@ export type NebulaTaskRole = typeof NebulaTaskRole.Type;
 export const NebulaTaskStatus = Schema.Literals(["draft", "active", "completed", "cancelled"]);
 export type NebulaTaskStatus = typeof NebulaTaskStatus.Type;
 
+export const NebulaTaskWorkspaceStatus = Schema.Literals([
+  "preparing",
+  "ready",
+  "failed",
+  "missing",
+  "removing",
+  "removed",
+]);
+export type NebulaTaskWorkspaceStatus = typeof NebulaTaskWorkspaceStatus.Type;
+
+export const NebulaTaskWorkspace = Schema.Struct({
+  status: NebulaTaskWorkspaceStatus,
+  sourceRepository: Schema.NullOr(TrimmedNonEmptyString),
+  baseCommit: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  path: Schema.NullOr(TrimmedNonEmptyString),
+  createdAt: Schema.NullOr(IsoDateTime),
+  removedAt: Schema.NullOr(IsoDateTime),
+  failureCode: Schema.NullOr(TrimmedNonEmptyString),
+  failureReason: Schema.NullOr(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+export type NebulaTaskWorkspace = typeof NebulaTaskWorkspace.Type;
+
 export const OrchestrationTask = Schema.Struct({
   id: TaskId,
   projectId: ProjectId,
@@ -276,6 +300,9 @@ export const OrchestrationTask = Schema.Struct({
   activatedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   cancelledAt: Schema.NullOr(IsoDateTime),
+  // Null is the explicit compatibility state for Tasks created before
+  // per-Task workspaces shipped.
+  workspace: Schema.optional(Schema.NullOr(NebulaTaskWorkspace)),
 });
 export type OrchestrationTask = typeof OrchestrationTask.Type;
 
@@ -723,6 +750,20 @@ const TaskCancelCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const TaskWorkspacePrepareCommand = Schema.Struct({
+  type: Schema.Literal("task.workspace.prepare"),
+  commandId: CommandId,
+  taskId: TaskId,
+  createdAt: IsoDateTime,
+});
+
+const TaskWorkspaceRemoveCommand = Schema.Struct({
+  type: Schema.Literal("task.workspace.remove"),
+  commandId: CommandId,
+  taskId: TaskId,
+  createdAt: IsoDateTime,
+});
+
 const ProjectMetaUpdateCommand = Schema.Struct({
   type: Schema.Literal("project.meta.update"),
   commandId: CommandId,
@@ -997,6 +1038,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   TaskActivateCommand,
   TaskCompleteCommand,
   TaskCancelCommand,
+  TaskWorkspacePrepareCommand,
+  TaskWorkspaceRemoveCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -1030,6 +1073,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   TaskActivateCommand,
   TaskCompleteCommand,
   TaskCancelCommand,
+  TaskWorkspacePrepareCommand,
+  TaskWorkspaceRemoveCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -1126,7 +1171,67 @@ const ThreadTitleRegenerationCompleteCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
 });
 
+const TaskWorkspacePreparationStartedCommand = Schema.Struct({
+  type: Schema.Literal("task.workspace.preparation-started"),
+  commandId: CommandId,
+  taskId: TaskId,
+  sourceRepository: TrimmedNonEmptyString,
+  baseCommit: TrimmedNonEmptyString,
+  branch: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const TaskWorkspaceReadyCommand = Schema.Struct({
+  type: Schema.Literal("task.workspace.ready"),
+  commandId: CommandId,
+  taskId: TaskId,
+  sourceRepository: TrimmedNonEmptyString,
+  baseCommit: TrimmedNonEmptyString,
+  branch: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const TaskWorkspaceFailedCommand = Schema.Struct({
+  type: Schema.Literal("task.workspace.failed"),
+  commandId: CommandId,
+  taskId: TaskId,
+  failureCode: TrimmedNonEmptyString,
+  failureReason: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const TaskWorkspaceMissingCommand = Schema.Struct({
+  type: Schema.Literal("task.workspace.missing"),
+  commandId: CommandId,
+  taskId: TaskId,
+  failureReason: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const TaskWorkspaceRemovedCommand = Schema.Struct({
+  type: Schema.Literal("task.workspace.removed"),
+  commandId: CommandId,
+  taskId: TaskId,
+  createdAt: IsoDateTime,
+});
+
+const TaskWorkspaceCleanupFailedCommand = Schema.Struct({
+  type: Schema.Literal("task.workspace.cleanup-failed"),
+  commandId: CommandId,
+  taskId: TaskId,
+  failureCode: TrimmedNonEmptyString,
+  failureReason: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
+  TaskWorkspacePreparationStartedCommand,
+  TaskWorkspaceReadyCommand,
+  TaskWorkspaceFailedCommand,
+  TaskWorkspaceMissingCommand,
+  TaskWorkspaceRemovedCommand,
+  TaskWorkspaceCleanupFailedCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
@@ -1153,6 +1258,14 @@ export const OrchestrationEventType = Schema.Literals([
   "task.activated",
   "task.completed",
   "task.cancelled",
+  "task.workspace.prepare-requested",
+  "task.workspace.preparation-started",
+  "task.workspace.ready",
+  "task.workspace.failed",
+  "task.workspace.missing",
+  "task.workspace.remove-requested",
+  "task.workspace.removed",
+  "task.workspace.cleanup-failed",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -1247,6 +1360,60 @@ export const OrchestrationTaskCompletedPayload = Schema.Struct({
 export const OrchestrationTaskCancelledPayload = Schema.Struct({
   taskId: TaskId,
   cancelledAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskWorkspacePrepareRequestedPayload = Schema.Struct({
+  taskId: TaskId,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskWorkspacePreparationStartedPayload = Schema.Struct({
+  taskId: TaskId,
+  sourceRepository: TrimmedNonEmptyString,
+  baseCommit: TrimmedNonEmptyString,
+  branch: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskWorkspaceReadyPayload = Schema.Struct({
+  taskId: TaskId,
+  sourceRepository: TrimmedNonEmptyString,
+  baseCommit: TrimmedNonEmptyString,
+  branch: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskWorkspaceFailedPayload = Schema.Struct({
+  taskId: TaskId,
+  failureCode: TrimmedNonEmptyString,
+  failureReason: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskWorkspaceMissingPayload = Schema.Struct({
+  taskId: TaskId,
+  failureReason: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskWorkspaceRemoveRequestedPayload = Schema.Struct({
+  taskId: TaskId,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskWorkspaceRemovedPayload = Schema.Struct({
+  taskId: TaskId,
+  removedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskWorkspaceCleanupFailedPayload = Schema.Struct({
+  taskId: TaskId,
+  failureCode: TrimmedNonEmptyString,
+  failureReason: TrimmedNonEmptyString,
   updatedAt: IsoDateTime,
 });
 
@@ -1508,6 +1675,46 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("task.cancelled"),
     payload: OrchestrationTaskCancelledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.workspace.prepare-requested"),
+    payload: OrchestrationTaskWorkspacePrepareRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.workspace.preparation-started"),
+    payload: OrchestrationTaskWorkspacePreparationStartedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.workspace.ready"),
+    payload: OrchestrationTaskWorkspaceReadyPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.workspace.failed"),
+    payload: OrchestrationTaskWorkspaceFailedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.workspace.missing"),
+    payload: OrchestrationTaskWorkspaceMissingPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.workspace.remove-requested"),
+    payload: OrchestrationTaskWorkspaceRemoveRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.workspace.removed"),
+    payload: OrchestrationTaskWorkspaceRemovedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.workspace.cleanup-failed"),
+    payload: OrchestrationTaskWorkspaceCleanupFailedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

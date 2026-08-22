@@ -36,6 +36,8 @@ export type BindTaskThreadInput = CommandInput<"task.bind-thread">;
 export type ActivateTaskInput = CommandInput<"task.activate">;
 export type CompleteTaskInput = CommandInput<"task.complete">;
 export type CancelTaskInput = CommandInput<"task.cancel">;
+export type PrepareTaskWorkspaceInput = CommandInput<"task.workspace.prepare">;
+export type RemoveTaskWorkspaceInput = CommandInput<"task.workspace.remove">;
 export type CreateThreadInput = CommandInput<"thread.create">;
 export type DeleteThreadInput = CommandInput<"thread.delete">;
 export type ArchiveThreadInput = CommandInput<"thread.archive">;
@@ -156,6 +158,20 @@ export const cancelTask: (input: CancelTaskInput) => CommandEffect = Effect.fn(
 )(function* (input) {
   const metadata = yield* timestampedCommandMetadata(input);
   return yield* dispatch({ ...input, type: "task.cancel", ...metadata });
+});
+
+export const prepareTaskWorkspace: (input: PrepareTaskWorkspaceInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.prepareTaskWorkspace",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.workspace.prepare", ...metadata });
+});
+
+export const removeTaskWorkspace: (input: RemoveTaskWorkspaceInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.removeTaskWorkspace",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.workspace.remove", ...metadata });
 });
 
 export const createThread: (input: CreateThreadInput) => CommandEffect = Effect.fn(

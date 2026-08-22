@@ -564,6 +564,14 @@ const makeWsRpcLayer = (
           case "task.activated":
           case "task.completed":
           case "task.cancelled":
+          case "task.workspace.prepare-requested":
+          case "task.workspace.preparation-started":
+          case "task.workspace.ready":
+          case "task.workspace.failed":
+          case "task.workspace.missing":
+          case "task.workspace.remove-requested":
+          case "task.workspace.removed":
+          case "task.workspace.cleanup-failed":
             return taskUpsert(event.payload.taskId, event.sequence);
           case "thread.deleted":
           case "thread.archived":

@@ -122,7 +122,7 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         projectId: projectA,
         title: "Persistent task",
         objective: "Prove the Task lifecycle.",
-        role: "builder",
+        role: "reviewer",
         createdAt: now,
       });
       expect(model.tasks?.[0]?.status).toBe("draft");
@@ -175,7 +175,7 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         projectId: projectA,
         title: "Scoped task",
         objective: "Stay inside one project.",
-        role: "builder",
+        role: "reviewer",
         createdAt: now,
       });
 
@@ -214,7 +214,7 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         projectId: projectA,
         title: `Task ${id}`,
         objective: "Keep Task and Thread identity unambiguous.",
-        role: "builder",
+        role: "reviewer",
         createdAt: now,
       });
       model = yield* applyCommand(model, create(taskId, "create-task-once"));
@@ -262,7 +262,7 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         projectId: projectA,
         title: "Cancellable active task",
         objective: "Keep inherited execution history intact.",
-        role: "builder",
+        role: "reviewer",
         createdAt: now,
       });
       model = yield* applyCommand(model, {
@@ -289,6 +289,138 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
       expect(
         model.threads.some((thread) => thread.id === threadA && thread.deletedAt === null),
       ).toBe(true);
+    }),
+  );
+
+  it.effect("requires a ready workspace and exact Thread binding for Builder Tasks", () =>
+    Effect.gen(function* () {
+      let model = yield* seedReadModel;
+      model = yield* applyCommand(model, {
+        type: "task.create",
+        commandId: CommandId.make("create-isolated-builder"),
+        taskId,
+        projectId: projectA,
+        title: "Isolated builder",
+        objective: "Write only inside a dedicated worktree.",
+        role: "builder",
+        createdAt: now,
+      });
+
+      const premature = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            type: "task.bind-thread",
+            commandId: CommandId.make("premature-bind"),
+            taskId,
+            threadId: threadA,
+            createdAt: now,
+          },
+        }),
+      );
+      expect(premature.message).toContain("ready isolated workspace");
+
+      model = yield* applyCommand(model, {
+        type: "task.workspace.prepare",
+        commandId: CommandId.make("prepare-workspace"),
+        taskId,
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.workspace.preparation-started",
+        commandId: CommandId.make("record-baseline"),
+        taskId,
+        sourceRepository: "/tmp/project-a",
+        baseCommit: "0123456789abcdef",
+        branch: "nebula/manual/task1-isolated-builder",
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.workspace.ready",
+        commandId: CommandId.make("workspace-ready"),
+        taskId,
+        sourceRepository: "/tmp/project-a",
+        baseCommit: "0123456789abcdef",
+        branch: "nebula/manual/task1-isolated-builder",
+        path: "/tmp/worktrees/task-1",
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]?.workspace).toMatchObject({
+        status: "ready",
+        baseCommit: "0123456789abcdef",
+      });
+
+      const isolatedThread = ThreadId.make("isolated-thread");
+      model = yield* applyCommand(model, {
+        type: "thread.create",
+        commandId: CommandId.make("create-isolated-thread"),
+        threadId: isolatedThread,
+        projectId: projectA,
+        title: "Isolated builder",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: "nebula/manual/task1-isolated-builder",
+        worktreePath: "/tmp/worktrees/task-1",
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.bind-thread",
+        commandId: CommandId.make("bind-isolated"),
+        taskId,
+        threadId: isolatedThread,
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.activate",
+        commandId: CommandId.make("activate-isolated"),
+        taskId,
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]).toMatchObject({
+        status: "active",
+        threadId: isolatedThread,
+        workspace: { path: "/tmp/worktrees/task-1" },
+      });
+
+      const activeCleanupFailure = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            type: "task.workspace.remove",
+            commandId: CommandId.make("remove-active-workspace"),
+            taskId,
+            createdAt: now,
+          },
+        }),
+      );
+      expect(activeCleanupFailure.message).toContain("terminal Task");
+
+      model = yield* applyCommand(model, {
+        type: "task.complete",
+        commandId: CommandId.make("complete-isolated"),
+        taskId,
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.workspace.remove",
+        commandId: CommandId.make("remove-isolated-workspace"),
+        taskId,
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]?.workspace?.status).toBe("removing");
+      model = yield* applyCommand(model, {
+        type: "task.workspace.cleanup-failed",
+        commandId: CommandId.make("dirty-workspace-retained"),
+        taskId,
+        failureCode: "dirty-workspace",
+        failureReason: "Workspace has uncommitted changes.",
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]?.workspace).toMatchObject({
+        status: "ready",
+        failureCode: "dirty-workspace",
+      });
     }),
   );
 });

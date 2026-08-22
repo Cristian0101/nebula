@@ -427,6 +427,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Thread '${command.threadId}' is already bound to Task '${existingBinding.id}'.`,
         });
       }
+      if (task.role === "builder") {
+        if (task.workspace?.status !== "ready" || task.workspace.path === null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Builder Task '${command.taskId}' requires a ready isolated workspace before binding a thread.`,
+          });
+        }
+        if (
+          thread.worktreePath !== task.workspace.path ||
+          thread.branch !== task.workspace.branch
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Thread '${command.threadId}' does not match Task '${command.taskId}' workspace identity.`,
+          });
+        }
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "task",
@@ -462,6 +479,31 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           commandType: command.type,
           detail: `Task '${command.taskId}' no longer has valid project and thread execution context.`,
         });
+      }
+      if (task.role === "builder") {
+        if (
+          task.workspace?.status !== "ready" ||
+          task.workspace.path === null ||
+          thread.worktreePath !== task.workspace.path ||
+          thread.branch !== task.workspace.branch
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Builder Task '${command.taskId}' cannot activate outside its ready isolated workspace.`,
+          });
+        }
+        const conflictingTask = (readModel.tasks ?? []).find(
+          (candidate) =>
+            candidate.id !== task.id &&
+            (candidate.status === "draft" || candidate.status === "active") &&
+            candidate.workspace?.path === task.workspace?.path,
+        );
+        if (conflictingTask !== undefined) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Task workspace '${task.workspace.path}' is already owned by Task '${conflictingTask.id}'.`,
+          });
+        }
       }
       return {
         ...(yield* withEventBase({
@@ -522,6 +564,214 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           taskId: command.taskId,
           cancelledAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.workspace.prepare": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.role !== "builder" || task.status !== "draft" || task.threadId !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Only an unbound draft Builder Task can prepare an isolated workspace.`,
+        });
+      }
+      if (task.workspace?.status === "preparing" || task.workspace?.status === "ready") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' workspace is already '${task.workspace.status}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.workspace.prepare-requested",
+        payload: { taskId: command.taskId, updatedAt: command.createdAt },
+      };
+    }
+
+    case "task.workspace.preparation-started": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.workspace?.status !== "preparing") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' is not preparing a workspace.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.workspace.preparation-started",
+        payload: {
+          taskId: command.taskId,
+          sourceRepository: command.sourceRepository,
+          baseCommit: command.baseCommit,
+          branch: command.branch,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.workspace.ready": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.workspace?.status !== "preparing") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' is not preparing a workspace.`,
+        });
+      }
+      const conflict = (readModel.tasks ?? []).find(
+        (candidate) =>
+          candidate.id !== task.id &&
+          candidate.workspace?.path === command.path &&
+          candidate.workspace.status !== "removed",
+      );
+      if (conflict !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Workspace '${command.path}' already belongs to Task '${conflict.id}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.workspace.ready",
+        payload: {
+          taskId: command.taskId,
+          sourceRepository: command.sourceRepository,
+          baseCommit: command.baseCommit,
+          branch: command.branch,
+          path: command.path,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.workspace.failed": {
+      yield* requireTask({ readModel, command, taskId: command.taskId });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.workspace.failed",
+        payload: {
+          taskId: command.taskId,
+          failureCode: command.failureCode,
+          failureReason: command.failureReason,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.workspace.missing": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.workspace?.status !== "ready") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Only a ready workspace can become missing.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.workspace.missing",
+        payload: {
+          taskId: command.taskId,
+          failureReason: command.failureReason,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.workspace.remove": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (
+        (task.status !== "completed" && task.status !== "cancelled") ||
+        task.workspace == null ||
+        task.workspace.status === "removed"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Only a terminal Task with a retained workspace can remove it.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.workspace.remove-requested",
+        payload: { taskId: command.taskId, updatedAt: command.createdAt },
+      };
+    }
+
+    case "task.workspace.removed": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.workspace?.status !== "removing") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' workspace is not being removed.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.workspace.removed",
+        payload: {
+          taskId: command.taskId,
+          removedAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.workspace.cleanup-failed": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.workspace?.status !== "removing") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' workspace is not being removed.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.workspace.cleanup-failed",
+        payload: {
+          taskId: command.taskId,
+          failureCode: command.failureCode,
+          failureReason: command.failureReason,
           updatedAt: command.createdAt,
         },
       };

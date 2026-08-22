@@ -8,11 +8,15 @@ import {
   cancelTask,
   completeTask,
   createTask,
+  prepareTaskWorkspace,
+  removeTaskWorkspace,
   type ActivateTaskInput,
   type BindTaskThreadInput,
   type CancelTaskInput,
   type CompleteTaskInput,
   type CreateTaskInput,
+  type PrepareTaskWorkspaceInput,
+  type RemoveTaskWorkspaceInput,
 } from "../operations/commands.ts";
 import { createAtomCommandScheduler, createEnvironmentCommand } from "./runtime.ts";
 
@@ -22,6 +26,8 @@ export type {
   CancelTaskInput,
   CompleteTaskInput,
   CreateTaskInput,
+  PrepareTaskWorkspaceInput,
+  RemoveTaskWorkspaceInput,
 };
 
 export function createTaskEnvironmentAtoms<R, E>(
@@ -61,6 +67,18 @@ export function createTaskEnvironmentAtoms<R, E>(
     cancel: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:task:cancel",
       execute: cancelTask,
+      scheduler,
+      concurrency,
+    }),
+    prepareWorkspace: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:task:workspace:prepare",
+      execute: prepareTaskWorkspace,
+      scheduler,
+      concurrency,
+    }),
+    removeWorkspace: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:task:workspace:remove",
+      execute: removeTaskWorkspace,
       scheduler,
       concurrency,
     }),

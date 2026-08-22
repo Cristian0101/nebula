@@ -83,8 +83,11 @@ The current repository already provides:
 - durable Nebula Tasks scoped to a Project, with draft, active, completed, and cancelled lifecycle state;
 - optional one-to-one Task binding to an inherited Thread and its provider/session context; and
 - a compact project Task surface for creating, starting, opening, completing, and cancelling Tasks.
+- one durable Git worktree per started writable Builder Task, captured from the clean source checkout's exact `HEAD` commit;
+- durable workspace preparation, ready, failed, missing, removal, and cleanup-failure state; and
+- explicit, dirty-safe worktree cleanup after a Task reaches a terminal state.
 
-The current repository does **not** yet provide automatic Task worktrees or branches, ownership policy, deterministic swarm, Mission planning, review automation, or integration queues.
+The current repository does **not** yet provide path ownership policy, shared-resource locks, deterministic swarm, Mission planning, review automation, or integration queues.
 
 ### ROADMAP v0.1 — Command Deck
 
@@ -103,7 +106,7 @@ Build toward:
 - configure providers; and
 - apply the Nebula design system.
 
-The first slice now implements one explicit Task tied to one inherited thread/provider session and one inherited workspace. Multi-agent automation remains out of scope.
+The current slice implements one explicit Task tied to one inherited thread/provider session. A new Builder Task prepares an isolated inherited Git worktree before its Thread is created; pre-isolation Tasks remain readable and keep their prior shared-workspace behavior. Multi-agent automation remains out of scope.
 
 ### ROADMAP v0.2 — Deterministic Swarm
 

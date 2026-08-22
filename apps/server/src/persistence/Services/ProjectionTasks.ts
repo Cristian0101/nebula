@@ -2,6 +2,7 @@ import {
   IsoDateTime,
   NebulaTaskRole,
   NebulaTaskStatus,
+  NebulaTaskWorkspaceStatus,
   ProjectId,
   TaskId,
   ThreadId,
@@ -26,6 +27,16 @@ export const ProjectionTask = Schema.Struct({
   activatedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   cancelledAt: Schema.NullOr(IsoDateTime),
+  workspaceStatus: Schema.NullOr(NebulaTaskWorkspaceStatus),
+  workspaceSourceRepository: Schema.NullOr(Schema.String),
+  workspaceBaseCommit: Schema.NullOr(Schema.String),
+  workspaceBranch: Schema.NullOr(Schema.String),
+  workspacePath: Schema.NullOr(Schema.String),
+  workspaceCreatedAt: Schema.NullOr(IsoDateTime),
+  workspaceRemovedAt: Schema.NullOr(IsoDateTime),
+  workspaceFailureCode: Schema.NullOr(Schema.String),
+  workspaceFailureReason: Schema.NullOr(Schema.String),
+  workspaceUpdatedAt: Schema.NullOr(IsoDateTime),
 });
 export type ProjectionTask = typeof ProjectionTask.Type;
 
