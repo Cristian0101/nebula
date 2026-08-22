@@ -97,13 +97,15 @@ Nebula now implements Task identity and lifecycle through the inherited orchestr
 
 Task commands produce persisted Task events. The in-memory projector and `projection_tasks` relational projector apply those events inside the inherited SQLite transaction and replay model. Task rows are included in the existing shell snapshot/subscription and shared client cache. The project Task UI composes canonical Thread creation and provider turn dispatch instead of duplicating either runtime.
 
-Task does not persist provider-session identity or a renderer-supplied workspace path. Execution context is derived as `Task → Thread → provider/session` and `Task → Thread worktree path or Project workspace root`. Existing Threads remain valid without a Task.
+Task does not persist provider-session identity or trust a renderer-supplied workspace path. New Builder Tasks persist a server-resolved source repository, exact base commit, stable Task branch, inherited worktree path, lifecycle state, timestamps, and safe failure details. Execution context is derived as `Task → Thread → provider/session`, while the decider requires the Thread branch/path to equal the ready Task workspace. Existing Threads and pre-isolation Tasks remain valid.
 
-This slice does not create Task worktrees, branches, ownership rules, Missions, routing, review, or integration behavior.
+This slice does not create ownership rules, shared-resource locks, Missions, routing, review, or integration behavior.
 
 ### Workspace isolation
 
-Future concurrent writable tasks should use one Git worktree per writable task. The worktree must be tied to a stable task ID, declared branch, base revision, effective path, and cleanup state. Read-only analysis can reuse a checkout when no write capability is granted.
+Concurrent writable Builder Tasks use one Git worktree per Task. Start first persists preparation intent, then the Task workspace reactor validates a clean Git source checkout, records exact `HEAD`, derives `nebula/manual/<stable-task-id>-<slug>`, and delegates creation to the inherited Git workflow service with its canonical worktree location. The ready event is persisted before Thread creation. Read-only roles continue to use inherited shared-workspace behavior.
+
+Startup reconciliation adopts a matching worktree left after a crash, fails an interrupted preparation whose baseline was never recorded, marks a ready record `missing` when its directory disappears, and resumes an interrupted explicit removal. Cleanup is terminal-only, never forced, refuses dirty worktrees, removes only the worktree, and preserves the Task branch.
 
 > Git worktrees provide source-control isolation, not OS security sandboxing.
 

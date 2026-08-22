@@ -11,14 +11,23 @@ import type {
   TaskId,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { CheckIcon, CircleSlash2Icon, ExternalLinkIcon, PlayIcon, PlusIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  CheckIcon,
+  CircleSlash2Icon,
+  ExternalLinkIcon,
+  PlayIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react";
+import { type ComponentProps, useEffect, useMemo, useState } from "react";
 
 import { newMessageId, newTaskId, newThreadId } from "../lib/utils";
 import { environmentSnapshotAtom } from "../state/shell";
 import { taskEnvironment } from "../state/tasks";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
+import { useEnvironmentQuery } from "../state/query";
+import { vcsEnvironment } from "../state/vcs";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import {
@@ -54,21 +63,25 @@ export function ProjectTaskCard({
   projectId,
   provider,
   workspace,
+  gitStatusSummary,
   busy,
   onStart,
   onOpenThread,
   onComplete,
   onCancel,
+  onRemoveWorkspace,
 }: {
   readonly task: OrchestrationTask;
   readonly projectId: ProjectId;
   readonly provider: string | undefined;
   readonly workspace: string;
+  readonly gitStatusSummary: string;
   readonly busy: boolean;
   readonly onStart: () => void;
   readonly onOpenThread: () => void;
   readonly onComplete: () => void;
   readonly onCancel: () => void;
+  readonly onRemoveWorkspace?: () => void;
 }) {
   return (
     <article className="space-y-3 px-4 py-3">
@@ -89,7 +102,7 @@ export function ProjectTaskCard({
           {task.status === "draft" ? (
             <Button size="xs" disabled={busy} onClick={onStart}>
               <PlayIcon />
-              Start
+              {task.workspace?.status === "preparing" ? "Preparing workspace…" : "Start"}
             </Button>
           ) : null}
           {task.threadId !== null ? (
@@ -108,6 +121,19 @@ export function ProjectTaskCard({
             <Button size="xs" variant="ghost" disabled={busy} onClick={onCancel}>
               <CircleSlash2Icon />
               Cancel
+            </Button>
+          ) : null}
+          {(task.status === "completed" || task.status === "cancelled") &&
+          task.workspace != null &&
+          task.workspace.status !== "removed" ? (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={busy || task.workspace.status === "removing"}
+              onClick={onRemoveWorkspace}
+            >
+              <Trash2Icon />
+              Remove workspace
             </Button>
           ) : null}
         </div>
@@ -129,6 +155,24 @@ export function ProjectTaskCard({
           <dt className="text-foreground/70">Workspace</dt>
           <dd className="truncate font-mono">{workspace}</dd>
         </div>
+        <div className="min-w-0">
+          <dt className="text-foreground/70">Workspace state</dt>
+          <dd className="truncate font-mono">{task.workspace?.status ?? "Legacy shared"}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-foreground/70">Branch</dt>
+          <dd className="truncate font-mono">{task.workspace?.branch ?? "Not isolated"}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-foreground/70">Base commit</dt>
+          <dd className="truncate font-mono">
+            {task.workspace?.baseCommit?.slice(0, 12) ?? "Not recorded"}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-foreground/70">Git status</dt>
+          <dd className="truncate font-mono">{gitStatusSummary}</dd>
+        </div>
         <div>
           <dt className="text-foreground/70">Created</dt>
           <dd>{new Date(task.createdAt).toLocaleString()}</dd>
@@ -138,8 +182,48 @@ export function ProjectTaskCard({
           <dd>{new Date(task.updatedAt).toLocaleString()}</dd>
         </div>
       </dl>
+      {task.workspace?.failureReason ? (
+        <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          {task.workspace.failureReason}
+        </p>
+      ) : null}
+      {(task.status === "completed" || task.status === "cancelled") &&
+      task.workspace != null &&
+      task.workspace.status !== "removed" ? (
+        <p className="text-xs text-muted-foreground">
+          Remove workspace deletes only the local worktree. The Task branch and committed work are
+          preserved.
+        </p>
+      ) : null}
     </article>
   );
+}
+
+function TaskCardWithGitStatus(
+  props: Omit<ComponentProps<typeof ProjectTaskCard>, "gitStatusSummary"> & {
+    readonly environmentId: EnvironmentId;
+  },
+) {
+  const { environmentId, task, ...cardProps } = props;
+  const statusQuery = useEnvironmentQuery(
+    task.workspace?.status === "ready" && task.workspace.path
+      ? vcsEnvironment.status({ environmentId, input: { cwd: task.workspace.path } })
+      : null,
+  );
+  const gitStatusSummary = (() => {
+    if (!task.workspace) return "Shared / legacy";
+    if (task.workspace.status === "removed") return "Worktree removed";
+    if (task.workspace.status === "missing") return "Worktree missing";
+    if (task.workspace.status === "failed") return "Unavailable";
+    if (task.workspace.status === "preparing") return "Pending";
+    if (!statusQuery.data) return "Checking…";
+    if (!statusQuery.data.isRepo) return "Not a Git repository";
+    const changedFiles = statusQuery.data.workingTree.files.length;
+    return statusQuery.data.hasWorkingTreeChanges
+      ? `${changedFiles} changed ${changedFiles === 1 ? "file" : "files"}`
+      : "Clean";
+  })();
+  return <ProjectTaskCard {...cardProps} task={task} gitStatusSummary={gitStatusSummary} />;
 }
 
 export function TaskCreateFields({
@@ -184,12 +268,17 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
   const activateTask = useAtomCommand(taskEnvironment.activate, { reportFailure: false });
   const completeTask = useAtomCommand(taskEnvironment.complete, { reportFailure: false });
   const cancelTask = useAtomCommand(taskEnvironment.cancel, { reportFailure: false });
+  const prepareWorkspace = useAtomCommand(taskEnvironment.prepareWorkspace, {
+    reportFailure: false,
+  });
+  const removeWorkspace = useAtomCommand(taskEnvironment.removeWorkspace, { reportFailure: false });
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [objective, setObjective] = useState("");
   const [busyTaskId, setBusyTaskId] = useState<TaskId | null>(null);
+  const [pendingStartTaskId, setPendingStartTaskId] = useState<TaskId | null>(null);
 
   const tasks = useMemo(
     () =>
@@ -234,15 +323,14 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
     setCreateOpen(false);
   };
 
-  const startTask = async (task: OrchestrationTask) => {
-    if (project.defaultModelSelection === null) {
-      reportError(
-        "Choose a default model",
-        "Set this project's default provider and model before starting a Task.",
-      );
+  const launchReadyTask = async (task: OrchestrationTask) => {
+    if (
+      project.defaultModelSelection === null ||
+      task.workspace?.status !== "ready" ||
+      task.workspace.path === null ||
+      task.workspace.branch === null
+    )
       return;
-    }
-    setBusyTaskId(task.id);
     const threadId = newThreadId();
     const createResult = await createThread({
       environmentId: project.environmentId,
@@ -253,8 +341,8 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
         modelSelection: project.defaultModelSelection,
         runtimeMode: "full-access",
         interactionMode: "default",
-        branch: null,
-        worktreePath: null,
+        branch: task.workspace.branch,
+        worktreePath: task.workspace.path,
       },
     });
     let error = commandError(createResult);
@@ -310,6 +398,49 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
     });
   };
 
+  const startTask = async (task: OrchestrationTask) => {
+    if (project.defaultModelSelection === null) {
+      reportError(
+        "Choose a default model",
+        "Set this project's default provider and model before starting a Task.",
+      );
+      return;
+    }
+    setBusyTaskId(task.id);
+    if (task.workspace?.status === "ready") {
+      await launchReadyTask(task);
+      return;
+    }
+    setPendingStartTaskId(task.id);
+    const result = await prepareWorkspace({
+      environmentId: project.environmentId,
+      input: { taskId: task.id },
+    });
+    const error = commandError(result);
+    if (error !== null) {
+      setPendingStartTaskId(null);
+      setBusyTaskId(null);
+      reportError("Could not prepare Task workspace", error);
+    }
+  };
+
+  useEffect(() => {
+    if (pendingStartTaskId === null) return;
+    const task = tasks.find((candidate) => candidate.id === pendingStartTaskId);
+    if (!task?.workspace) return;
+    if (task.workspace.status === "ready") {
+      setPendingStartTaskId(null);
+      void launchReadyTask(task);
+    } else if (task.workspace.status === "failed" || task.workspace.status === "missing") {
+      setPendingStartTaskId(null);
+      setBusyTaskId(null);
+      reportError(
+        "Could not prepare Task workspace",
+        task.workspace.failureReason ?? "Workspace preparation failed.",
+      );
+    }
+  }, [pendingStartTaskId, tasks]);
+
   const transitionTask = async (task: OrchestrationTask, transition: "complete" | "cancel") => {
     setBusyTaskId(task.id);
     const command = transition === "complete" ? completeTask : cancelTask;
@@ -328,6 +459,17 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
       to: "/$environmentId/$threadId",
       params: { environmentId: project.environmentId, threadId: task.threadId },
     });
+  };
+
+  const cleanupWorkspace = async (task: OrchestrationTask) => {
+    setBusyTaskId(task.id);
+    const result = await removeWorkspace({
+      environmentId: project.environmentId,
+      input: { taskId: task.id },
+    });
+    setBusyTaskId(null);
+    const error = commandError(result);
+    if (error !== null) reportError("Could not remove Task workspace", error);
   };
 
   return (
@@ -352,11 +494,13 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
               const thread =
                 task.threadId === null ? null : (threadById.get(task.threadId) ?? null);
               const provider = thread?.session?.providerName ?? thread?.modelSelection.instanceId;
-              const workspace = thread?.worktreePath ?? project.workspaceRoot;
+              const workspace =
+                task.workspace?.path ?? thread?.worktreePath ?? project.workspaceRoot;
               const busy = busyTaskId === task.id;
               return (
-                <ProjectTaskCard
+                <TaskCardWithGitStatus
                   key={task.id}
+                  environmentId={project.environmentId}
                   task={task}
                   projectId={project.id}
                   provider={provider}
@@ -366,6 +510,7 @@ export function ProjectTasksSection({ project }: { project: ProjectTaskContext }
                   onOpenThread={() => openThread(task)}
                   onComplete={() => void transitionTask(task, "complete")}
                   onCancel={() => void transitionTask(task, "cancel")}
+                  onRemoveWorkspace={() => void cleanupWorkspace(task)}
                 />
               );
             })}

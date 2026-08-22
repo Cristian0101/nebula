@@ -573,6 +573,16 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               activatedAt: null,
               completedAt: null,
               cancelledAt: null,
+              workspaceStatus: null,
+              workspaceSourceRepository: null,
+              workspaceBaseCommit: null,
+              workspaceBranch: null,
+              workspacePath: null,
+              workspaceCreatedAt: null,
+              workspaceRemovedAt: null,
+              workspaceFailureCode: null,
+              workspaceFailureReason: null,
+              workspaceUpdatedAt: null,
             });
             return;
           case "task.thread-bound":
@@ -607,6 +617,108 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 ...row,
                 status: "cancelled",
                 cancelledAt: event.payload.cancelledAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            }
+            return;
+          }
+          case "task.workspace.prepare-requested":
+          case "task.workspace.preparation-started":
+          case "task.workspace.ready":
+          case "task.workspace.failed":
+          case "task.workspace.missing":
+          case "task.workspace.remove-requested":
+          case "task.workspace.removed":
+          case "task.workspace.cleanup-failed": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            const row = existing.value;
+            if (event.type === "task.workspace.prepare-requested") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                workspaceStatus: "preparing",
+                workspaceSourceRepository: null,
+                workspaceBaseCommit: null,
+                workspaceBranch: null,
+                workspacePath: null,
+                workspaceCreatedAt: null,
+                workspaceRemovedAt: null,
+                workspaceFailureCode: null,
+                workspaceFailureReason: null,
+                workspaceUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            } else if (event.type === "task.workspace.preparation-started") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                workspaceStatus: "preparing",
+                workspaceSourceRepository: event.payload.sourceRepository,
+                workspaceBaseCommit: event.payload.baseCommit,
+                workspaceBranch: event.payload.branch,
+                workspaceFailureCode: null,
+                workspaceFailureReason: null,
+                workspaceUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            } else if (event.type === "task.workspace.ready") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                workspaceStatus: "ready",
+                workspaceSourceRepository: event.payload.sourceRepository,
+                workspaceBaseCommit: event.payload.baseCommit,
+                workspaceBranch: event.payload.branch,
+                workspacePath: event.payload.path,
+                workspaceCreatedAt: event.payload.createdAt,
+                workspaceRemovedAt: null,
+                workspaceFailureCode: null,
+                workspaceFailureReason: null,
+                workspaceUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            } else if (event.type === "task.workspace.failed") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                workspaceStatus: "failed",
+                workspaceFailureCode: event.payload.failureCode,
+                workspaceFailureReason: event.payload.failureReason,
+                workspaceUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            } else if (event.type === "task.workspace.missing") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                workspaceStatus: "missing",
+                workspaceFailureCode: "workspace-missing",
+                workspaceFailureReason: event.payload.failureReason,
+                workspaceUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            } else if (event.type === "task.workspace.remove-requested") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                workspaceStatus: "removing",
+                workspaceFailureCode: null,
+                workspaceFailureReason: null,
+                workspaceUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            } else if (event.type === "task.workspace.removed") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                workspaceStatus: "removed",
+                workspaceRemovedAt: event.payload.removedAt,
+                workspaceFailureCode: null,
+                workspaceFailureReason: null,
+                workspaceUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            } else {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                workspaceStatus: "ready",
+                workspaceFailureCode: event.payload.failureCode,
+                workspaceFailureReason: event.payload.failureReason,
+                workspaceUpdatedAt: event.payload.updatedAt,
                 updatedAt: event.payload.updatedAt,
               });
             }

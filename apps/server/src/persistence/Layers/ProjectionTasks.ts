@@ -21,10 +21,17 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
       INSERT INTO projection_tasks (
         task_id, project_id, title, objective, role, status, thread_id,
         created_at, updated_at, activated_at, completed_at, cancelled_at
+        , workspace_status, workspace_source_repository, workspace_base_commit,
+        workspace_branch, workspace_path, workspace_created_at, workspace_removed_at,
+        workspace_failure_code, workspace_failure_reason, workspace_updated_at
       ) VALUES (
         ${row.taskId}, ${row.projectId}, ${row.title}, ${row.objective}, ${row.role}, ${row.status},
         ${row.threadId}, ${row.createdAt}, ${row.updatedAt}, ${row.activatedAt},
         ${row.completedAt}, ${row.cancelledAt}
+        , ${row.workspaceStatus}, ${row.workspaceSourceRepository}, ${row.workspaceBaseCommit},
+        ${row.workspaceBranch}, ${row.workspacePath}, ${row.workspaceCreatedAt},
+        ${row.workspaceRemovedAt}, ${row.workspaceFailureCode}, ${row.workspaceFailureReason},
+        ${row.workspaceUpdatedAt}
       )
       ON CONFLICT (task_id) DO UPDATE SET
         project_id = excluded.project_id,
@@ -38,6 +45,16 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         activated_at = excluded.activated_at,
         completed_at = excluded.completed_at,
         cancelled_at = excluded.cancelled_at
+        , workspace_status = excluded.workspace_status
+        , workspace_source_repository = excluded.workspace_source_repository
+        , workspace_base_commit = excluded.workspace_base_commit
+        , workspace_branch = excluded.workspace_branch
+        , workspace_path = excluded.workspace_path
+        , workspace_created_at = excluded.workspace_created_at
+        , workspace_removed_at = excluded.workspace_removed_at
+        , workspace_failure_code = excluded.workspace_failure_code
+        , workspace_failure_reason = excluded.workspace_failure_reason
+        , workspace_updated_at = excluded.workspace_updated_at
     `,
   });
 
@@ -54,6 +71,16 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
     activated_at AS "activatedAt",
     completed_at AS "completedAt",
     cancelled_at AS "cancelledAt"
+    , workspace_status AS "workspaceStatus"
+    , workspace_source_repository AS "workspaceSourceRepository"
+    , workspace_base_commit AS "workspaceBaseCommit"
+    , workspace_branch AS "workspaceBranch"
+    , workspace_path AS "workspacePath"
+    , workspace_created_at AS "workspaceCreatedAt"
+    , workspace_removed_at AS "workspaceRemovedAt"
+    , workspace_failure_code AS "workspaceFailureCode"
+    , workspace_failure_reason AS "workspaceFailureReason"
+    , workspace_updated_at AS "workspaceUpdatedAt"
   `;
 
   const getRow = SqlSchema.findOneOption({

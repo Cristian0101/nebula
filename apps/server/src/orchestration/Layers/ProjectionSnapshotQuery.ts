@@ -82,6 +82,36 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   }),
 );
 const ProjectionTaskDbRowSchema = ProjectionTask;
+type ProjectionTaskRow = typeof ProjectionTask.Type;
+const mapTaskRow = (row: ProjectionTaskRow): OrchestrationTask => ({
+  id: row.taskId,
+  projectId: row.projectId,
+  title: row.title,
+  objective: row.objective,
+  role: row.role,
+  status: row.status,
+  threadId: row.threadId,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+  activatedAt: row.activatedAt,
+  completedAt: row.completedAt,
+  cancelledAt: row.cancelledAt,
+  workspace:
+    row.workspaceStatus === null || row.workspaceUpdatedAt === null
+      ? null
+      : {
+          status: row.workspaceStatus,
+          sourceRepository: row.workspaceSourceRepository,
+          baseCommit: row.workspaceBaseCommit,
+          branch: row.workspaceBranch,
+          path: row.workspacePath,
+          createdAt: row.workspaceCreatedAt,
+          removedAt: row.workspaceRemovedAt,
+          failureCode: row.workspaceFailureCode,
+          failureReason: row.workspaceFailureReason,
+          updatedAt: row.workspaceUpdatedAt,
+        },
+});
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   Struct.assign({
     isStreaming: Schema.Number,
@@ -430,6 +460,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           activated_at AS "activatedAt",
           completed_at AS "completedAt",
           cancelled_at AS "cancelledAt"
+          , workspace_status AS "workspaceStatus"
+          , workspace_source_repository AS "workspaceSourceRepository"
+          , workspace_base_commit AS "workspaceBaseCommit"
+          , workspace_branch AS "workspaceBranch"
+          , workspace_path AS "workspacePath"
+          , workspace_created_at AS "workspaceCreatedAt"
+          , workspace_removed_at AS "workspaceRemovedAt"
+          , workspace_failure_code AS "workspaceFailureCode"
+          , workspace_failure_reason AS "workspaceFailureReason"
+          , workspace_updated_at AS "workspaceUpdatedAt"
         FROM projection_tasks
         ORDER BY created_at ASC, task_id ASC
       `,
@@ -1724,20 +1764,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 deletedAt: row.deletedAt,
               }));
 
-              const tasks: ReadonlyArray<OrchestrationTask> = taskRows.map((row) => ({
-                id: row.taskId,
-                projectId: row.projectId,
-                title: row.title,
-                objective: row.objective,
-                role: row.role,
-                status: row.status,
-                threadId: row.threadId,
-                createdAt: row.createdAt,
-                updatedAt: row.updatedAt,
-                activatedAt: row.activatedAt,
-                completedAt: row.completedAt,
-                cancelledAt: row.cancelledAt,
-              }));
+              const tasks: ReadonlyArray<OrchestrationTask> = taskRows.map(mapTaskRow);
 
               const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) => ({
                 id: row.threadId,
@@ -1866,20 +1893,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             Effect.sync(() => {
               let updatedAt: string | null = null;
               const projects: OrchestrationProject[] = [];
-              const tasks: OrchestrationTask[] = taskRows.map((row) => ({
-                id: row.taskId,
-                projectId: row.projectId,
-                title: row.title,
-                objective: row.objective,
-                role: row.role,
-                status: row.status,
-                threadId: row.threadId,
-                createdAt: row.createdAt,
-                updatedAt: row.updatedAt,
-                activatedAt: row.activatedAt,
-                completedAt: row.completedAt,
-                cancelledAt: row.cancelledAt,
-              }));
+              const tasks: OrchestrationTask[] = taskRows.map(mapTaskRow);
               const threads: OrchestrationThread[] = [];
 
               for (let index = 0; index < projectRows.length; index += 1) {
@@ -2128,20 +2142,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       )
                     : Result.failVoid,
                 ),
-                tasks: taskRows.map((row) => ({
-                  id: row.taskId,
-                  projectId: row.projectId,
-                  title: row.title,
-                  objective: row.objective,
-                  role: row.role,
-                  status: row.status,
-                  threadId: row.threadId,
-                  createdAt: row.createdAt,
-                  updatedAt: row.updatedAt,
-                  activatedAt: row.activatedAt,
-                  completedAt: row.completedAt,
-                  cancelledAt: row.cancelledAt,
-                })),
+                tasks: taskRows.map(mapTaskRow),
                 threads: Arr.filterMap(threadRows, (row) =>
                   row.deletedAt === null
                     ? Result.succeed({

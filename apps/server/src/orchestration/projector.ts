@@ -19,6 +19,14 @@ import {
   TaskCompletedPayload,
   TaskCreatedPayload,
   TaskThreadBoundPayload,
+  TaskWorkspaceCleanupFailedPayload,
+  TaskWorkspaceFailedPayload,
+  TaskWorkspaceMissingPayload,
+  TaskWorkspacePreparationStartedPayload,
+  TaskWorkspacePrepareRequestedPayload,
+  TaskWorkspaceReadyPayload,
+  TaskWorkspaceRemovedPayload,
+  TaskWorkspaceRemoveRequestedPayload,
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
@@ -303,6 +311,7 @@ export function projectEvent(
               activatedAt: null,
               completedAt: null,
               cancelledAt: null,
+              workspace: null,
             },
           ],
         })),
@@ -364,6 +373,225 @@ export function projectEvent(
                   ...task,
                   status: "cancelled" as const,
                   cancelledAt: payload.cancelledAt,
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.workspace.prepare-requested":
+      return decodeForEvent(
+        TaskWorkspacePrepareRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  workspace: {
+                    status: "preparing" as const,
+                    sourceRepository: null,
+                    baseCommit: null,
+                    branch: null,
+                    path: null,
+                    createdAt: null,
+                    removedAt: null,
+                    failureCode: null,
+                    failureReason: null,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.workspace.preparation-started":
+      return decodeForEvent(
+        TaskWorkspacePreparationStartedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  workspace: {
+                    status: "preparing" as const,
+                    sourceRepository: payload.sourceRepository,
+                    baseCommit: payload.baseCommit,
+                    branch: payload.branch,
+                    path: null,
+                    createdAt: null,
+                    removedAt: null,
+                    failureCode: null,
+                    failureReason: null,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.workspace.ready":
+      return decodeForEvent(TaskWorkspaceReadyPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  workspace: {
+                    status: "ready" as const,
+                    sourceRepository: payload.sourceRepository,
+                    baseCommit: payload.baseCommit,
+                    branch: payload.branch,
+                    path: payload.path,
+                    createdAt: payload.createdAt,
+                    removedAt: null,
+                    failureCode: null,
+                    failureReason: null,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.workspace.failed":
+      return decodeForEvent(TaskWorkspaceFailedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  workspace: {
+                    ...(task.workspace ?? {
+                      sourceRepository: null,
+                      baseCommit: null,
+                      branch: null,
+                      path: null,
+                      createdAt: null,
+                      removedAt: null,
+                    }),
+                    status: "failed" as const,
+                    failureCode: payload.failureCode,
+                    failureReason: payload.failureReason,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.workspace.missing":
+      return decodeForEvent(TaskWorkspaceMissingPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.workspace != null
+              ? {
+                  ...task,
+                  workspace: {
+                    ...task.workspace,
+                    status: "missing" as const,
+                    failureCode: "workspace-missing",
+                    failureReason: payload.failureReason,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.workspace.remove-requested":
+      return decodeForEvent(
+        TaskWorkspaceRemoveRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.workspace != null
+              ? {
+                  ...task,
+                  workspace: {
+                    ...task.workspace,
+                    status: "removing" as const,
+                    failureCode: null,
+                    failureReason: null,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.workspace.removed":
+      return decodeForEvent(TaskWorkspaceRemovedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.workspace != null
+              ? {
+                  ...task,
+                  workspace: {
+                    ...task.workspace,
+                    status: "removed" as const,
+                    removedAt: payload.removedAt,
+                    failureCode: null,
+                    failureReason: null,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.workspace.cleanup-failed":
+      return decodeForEvent(
+        TaskWorkspaceCleanupFailedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId && task.workspace != null
+              ? {
+                  ...task,
+                  workspace: {
+                    ...task.workspace,
+                    status: "ready" as const,
+                    failureCode: payload.failureCode,
+                    failureReason: payload.failureReason,
+                    updatedAt: payload.updatedAt,
+                  },
                   updatedAt: payload.updatedAt,
                 }
               : task,
