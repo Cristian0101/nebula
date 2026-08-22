@@ -55,6 +55,8 @@ T3 Code is the runtime foundation, not a temporary prototype.
 
 Built-in providers register through `apps/server/src/provider/builtInDrivers.ts`. Drivers create scoped provider instances, adapters translate provider protocols, registries route by provider instance, and `ProviderService` owns the common session lifecycle. Provider authentication remains provider-owned.
 
+Gemini CLI is an additive `ProviderDriver` using the inherited ACP session runtime. The driver launches the official `gemini --acp` process in the canonical Thread workspace, maps ACP sessions and events through the existing adapter contract, and leaves Google login and credential storage with Gemini CLI. Background readiness checks never start ACP. Model presentation uses provider-owned Auto plus optional manual identifiers instead of scraping Gemini's interactive model menu.
+
 ### Git, workspaces, and recovery
 
 Projects hold a workspace root; a thread may override it with a worktree path. `apps/server/src/vcs` supplies VCS drivers and Git workflows, including worktree creation/removal. `apps/server/src/checkpointing` captures hidden Git refs, computes diffs, restores files, and coordinates provider conversation rollback.

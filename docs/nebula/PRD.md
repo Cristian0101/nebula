@@ -72,7 +72,7 @@ The current repository already provides:
 - web, desktop, and mobile clients;
 - local and remote environment connections;
 - projects and durable threads;
-- built-in Codex, Claude, Cursor, Grok, and OpenCode drivers;
+- built-in Codex, Claude, Cursor, Grok, OpenCode, and opt-in Gemini CLI drivers;
 - provider-owned authentication detection and provider sessions;
 - terminal and process execution;
 - Git/VCS operations, including worktree creation and removal;
@@ -110,7 +110,7 @@ Build toward:
 - configure providers; and
 - apply the Nebula design system.
 
-The current slice implements one explicit Task tied to one inherited thread/provider session. A new Builder Task requires explicit write ownership, prepares an isolated inherited Git worktree before its Thread is created, and receives a machine-generated ownership summary. Pre-ownership Tasks remain readable and keep their prior behavior. Multi-agent automation remains out of scope.
+The current slice implements one explicit Task tied to one inherited thread/provider session. A new Builder Task requires explicit write ownership, prepares an isolated inherited Git worktree before its Thread is created, and receives a machine-generated ownership summary. Gemini CLI is manually selectable behind the same provider-neutral Task path; automatic provider assignment and multi-agent automation remain out of scope. Pre-ownership Tasks remain readable and keep their prior behavior.
 
 ### ROADMAP v0.2 — Deterministic Swarm
 
