@@ -1,0 +1,40 @@
+# Nebula source of truth
+
+This directory is the durable product and architecture source of truth for Nebula, the Kaizora Labs multi-agent development orchestration platform built on T3 Code.
+
+## Document map
+
+| Document                                    | Purpose                                                                                      |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| [PRD](PRD.md)                               | Product identity, boundaries, principles, and release sequence.                              |
+| [Project contract](PROJECT_CONTRACT.md)     | Non-negotiable engineering rules for future Nebula work.                                     |
+| [Architecture](ARCHITECTURE.md)             | Inherited runtime, target coordination architecture, and future concepts.                    |
+| [Swarm model](SWARM_MODEL.md)               | Philosophy and constraints for later multi-agent execution.                                  |
+| [Runtime map](RUNTIME_MAP.md)               | Evidence-based map of the inherited T3 Code repository.                                      |
+| [Extension contract](EXTENSION_CONTRACT.md) | Canonical attachment points, divergence budget, ADR review, and first module recommendation. |
+| [ADRs](../adr/)                             | Accepted architecture decisions.                                                             |
+| [Upstream tracking](../../UPSTREAM.md)      | Fork baseline, attribution, sync strategy, and known divergence.                             |
+
+Nebula product docs describe what the product is and where it is going. Architecture docs distinguish inherited behavior from target behavior. The runtime map records what the current code actually does. The extension contract determines where Nebula may attach without creating competing systems.
+
+## Source hierarchy
+
+When sources disagree, use this order:
+
+1. Current repository behavior.
+2. Current Nebula source-of-truth docs in this directory.
+3. Accepted ADRs in `docs/adr/`.
+4. `UPSTREAM.md`.
+5. Historical plans and older discussion.
+
+When a document conflicts with current verified repository reality, call out the conflict rather than silently forcing old architecture onto the current codebase.
+
+The code is authoritative for current behavior. These documents are authoritative for accepted Nebula intent only where they do not misdescribe that behavior.
+
+## Change discipline
+
+- Inspect the current upstream abstraction before proposing a Nebula abstraction.
+- Label statements as inherited, target, or future; do not present roadmap behavior as shipped.
+- Add or amend an ADR when a decision changes a durable boundary.
+- Update the runtime map when an upstream sync materially changes an attachment point.
+- Update `UPSTREAM.md` when the tracked baseline, sync state, attribution, or known divergence changes.
