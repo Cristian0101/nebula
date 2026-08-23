@@ -20,7 +20,18 @@ export function applyShellStreamEvent(
       const projects = snapshot.projects.some((p) => p.id === event.project.id)
         ? Arr.map(snapshot.projects, (p) => (p.id === event.project.id ? event.project : p))
         : Arr.append(snapshot.projects, event.project);
-      return { ...snapshot, projects, snapshotSequence: event.sequence };
+      const integrationByMissionId = new Map(
+        (event.project.integrationBatches ?? []).flatMap((batch) =>
+          batch.missionId ? [[batch.missionId, batch.id] as const] : [],
+        ),
+      );
+      const missions = (snapshot.missions ?? []).map((mission) => {
+        const integrationBatchId = integrationByMissionId.get(mission.id);
+        return integrationBatchId && mission.integrationBatchId !== integrationBatchId
+          ? { ...mission, integrationBatchId }
+          : mission;
+      });
+      return { ...snapshot, projects, missions, snapshotSequence: event.sequence };
     }
     case "project-removed":
       return {
@@ -46,6 +57,15 @@ export function applyShellStreamEvent(
         ? Arr.map(currentTasks, (task) => (task.id === event.task.id ? event.task : task))
         : Arr.append(currentTasks, event.task);
       return { ...snapshot, tasks, snapshotSequence: event.sequence };
+    }
+    case "mission-upserted": {
+      const currentMissions = snapshot.missions ?? [];
+      const missions = currentMissions.some((mission) => mission.id === event.mission.id)
+        ? Arr.map(currentMissions, (mission) =>
+            mission.id === event.mission.id ? event.mission : mission,
+          )
+        : Arr.append(currentMissions, event.mission);
+      return { ...snapshot, missions, snapshotSequence: event.sequence };
     }
     default:
       return snapshot;

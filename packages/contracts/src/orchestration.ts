@@ -12,6 +12,7 @@ import {
   EventId,
   IsoDateTime,
   IntegrationBatchId,
+  MissionId,
   MessageId,
   NonNegativeInt,
   PositiveInt,
@@ -389,8 +390,49 @@ export const IntegrationBatch = Schema.Struct({
   updatedAt: IsoDateTime,
   readyAt: Schema.NullOr(IsoDateTime),
   removedAt: Schema.NullOr(IsoDateTime),
+  // Optional so standalone Prompt-9 batches and older snapshots remain valid.
+  missionId: Schema.optional(Schema.NullOr(MissionId)),
 });
 export type IntegrationBatch = typeof IntegrationBatch.Type;
+
+export const MissionStatus = Schema.Literals(["draft", "active", "completed", "cancelled"]);
+export type MissionStatus = typeof MissionStatus.Type;
+
+export const MissionTaskDependency = Schema.Struct({
+  missionId: MissionId,
+  prerequisiteTaskId: TaskId,
+  dependentTaskId: TaskId,
+  createdAt: IsoDateTime,
+});
+export type MissionTaskDependency = typeof MissionTaskDependency.Type;
+
+export const MissionActivity = Schema.Struct({
+  id: EventId,
+  type: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  taskId: Schema.NullOr(TaskId),
+  occurredAt: IsoDateTime,
+});
+export type MissionActivity = typeof MissionActivity.Type;
+
+export const Mission = Schema.Struct({
+  id: MissionId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  objective: TrimmedNonEmptyString,
+  description: Schema.NullOr(TrimmedString),
+  status: MissionStatus,
+  taskIds: Schema.Array(TaskId),
+  dependencies: Schema.Array(MissionTaskDependency),
+  activities: Schema.Array(MissionActivity),
+  integrationBatchId: Schema.NullOr(IntegrationBatchId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  activatedAt: Schema.NullOr(IsoDateTime),
+  completedAt: Schema.NullOr(IsoDateTime),
+  cancelledAt: Schema.NullOr(IsoDateTime),
+});
+export type Mission = typeof Mission.Type;
 
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
@@ -926,6 +968,8 @@ export const OrchestrationReadModel = Schema.Struct({
   projects: Schema.Array(OrchestrationProject),
   // Optional for in-process fixtures and persisted snapshots created before Prompt 3.
   tasks: Schema.optional(Schema.Array(OrchestrationTask)),
+  // Optional for snapshots created before Mission coordination shipped.
+  missions: Schema.optional(Schema.Array(Mission)),
   threads: Schema.Array(OrchestrationThread),
   updatedAt: IsoDateTime,
 });
@@ -1006,6 +1050,7 @@ export const OrchestrationShellSnapshot = Schema.Struct({
   projects: Schema.Array(OrchestrationProjectShell),
   // Optional so cached shell snapshots from pre-Task clients remain readable.
   tasks: Schema.optional(Schema.Array(OrchestrationTask)),
+  missions: Schema.optional(Schema.Array(Mission)),
   threads: Schema.Array(OrchestrationThreadShell),
   updatedAt: IsoDateTime,
 });
@@ -1036,6 +1081,11 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     kind: Schema.Literal("task-upserted"),
     sequence: NonNegativeInt,
     task: OrchestrationTask,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("mission-upserted"),
+    sequence: NonNegativeInt,
+    mission: Mission,
   }),
 ]);
 export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent.Type;
@@ -1169,6 +1219,102 @@ const ProjectReviewPolicyUpdateCommand = Schema.Struct({
   projectId: ProjectId,
   requireIndependentReview: Schema.Boolean,
   preferDifferentProvider: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+const MissionCreateCommand = Schema.Struct({
+  type: Schema.Literal("mission.create"),
+  commandId: CommandId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  objective: TrimmedNonEmptyString,
+  description: Schema.optional(Schema.NullOr(TrimmedString)),
+  createdAt: IsoDateTime,
+});
+
+const MissionUpdateCommand = Schema.Struct({
+  type: Schema.Literal("mission.update"),
+  commandId: CommandId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  objective: TrimmedNonEmptyString,
+  description: Schema.optional(Schema.NullOr(TrimmedString)),
+  createdAt: IsoDateTime,
+});
+
+const MissionTaskAddCommand = Schema.Struct({
+  type: Schema.Literal("mission.task.add"),
+  commandId: CommandId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  taskId: TaskId,
+  createdAt: IsoDateTime,
+});
+
+const MissionTaskRemoveCommand = Schema.Struct({
+  type: Schema.Literal("mission.task.remove"),
+  commandId: CommandId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  taskId: TaskId,
+  confirmActiveEdit: Schema.optional(Schema.Boolean),
+  createdAt: IsoDateTime,
+});
+
+const MissionTasksReorderCommand = Schema.Struct({
+  type: Schema.Literal("mission.tasks.reorder"),
+  commandId: CommandId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  taskIds: Schema.Array(TaskId),
+  createdAt: IsoDateTime,
+});
+
+const MissionDependencyAddCommand = Schema.Struct({
+  type: Schema.Literal("mission.dependency.add"),
+  commandId: CommandId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  prerequisiteTaskId: TaskId,
+  dependentTaskId: TaskId,
+  confirmActiveEdit: Schema.optional(Schema.Boolean),
+  createdAt: IsoDateTime,
+});
+
+const MissionDependencyRemoveCommand = Schema.Struct({
+  type: Schema.Literal("mission.dependency.remove"),
+  commandId: CommandId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  prerequisiteTaskId: TaskId,
+  dependentTaskId: TaskId,
+  confirmActiveEdit: Schema.optional(Schema.Boolean),
+  createdAt: IsoDateTime,
+});
+
+const MissionActivateCommand = Schema.Struct({
+  type: Schema.Literal("mission.activate"),
+  commandId: CommandId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  createdAt: IsoDateTime,
+});
+
+const MissionCompleteCommand = Schema.Struct({
+  type: Schema.Literal("mission.complete"),
+  commandId: CommandId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  createdAt: IsoDateTime,
+});
+
+const MissionCancelCommand = Schema.Struct({
+  type: Schema.Literal("mission.cancel"),
+  commandId: CommandId,
+  missionId: MissionId,
+  projectId: ProjectId,
   createdAt: IsoDateTime,
 });
 
@@ -1599,6 +1745,7 @@ const IntegrationCreateCommand = Schema.Struct({
   projectId: ProjectId,
   taskIds: Schema.Array(TaskId),
   acknowledgeOverlaps: Schema.Boolean,
+  missionId: Schema.optional(Schema.NullOr(MissionId)),
   createdAt: IsoDateTime,
 });
 
@@ -1641,6 +1788,16 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectQualityPolicyUpdateCommand,
   ProjectReviewPolicyUpdateCommand,
   ProjectDeleteCommand,
+  MissionCreateCommand,
+  MissionUpdateCommand,
+  MissionTaskAddCommand,
+  MissionTaskRemoveCommand,
+  MissionTasksReorderCommand,
+  MissionDependencyAddCommand,
+  MissionDependencyRemoveCommand,
+  MissionActivateCommand,
+  MissionCompleteCommand,
+  MissionCancelCommand,
   IntegrationCreateCommand,
   IntegrationContinueCommand,
   IntegrationAbortCommand,
@@ -1694,6 +1851,16 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectQualityPolicyUpdateCommand,
   ProjectReviewPolicyUpdateCommand,
   ProjectDeleteCommand,
+  MissionCreateCommand,
+  MissionUpdateCommand,
+  MissionTaskAddCommand,
+  MissionTaskRemoveCommand,
+  MissionTasksReorderCommand,
+  MissionDependencyAddCommand,
+  MissionDependencyRemoveCommand,
+  MissionActivateCommand,
+  MissionCompleteCommand,
+  MissionCancelCommand,
   IntegrationCreateCommand,
   IntegrationContinueCommand,
   IntegrationAbortCommand,
@@ -2064,6 +2231,17 @@ export const OrchestrationEventType = Schema.Literals([
   "project.quality-policy-updated",
   "project.review-policy-updated",
   "project.deleted",
+  "mission.created",
+  "mission.updated",
+  "mission.task-added",
+  "mission.task-removed",
+  "mission.tasks-reordered",
+  "mission.dependency-added",
+  "mission.dependency-removed",
+  "mission.activated",
+  "mission.completed",
+  "mission.cancelled",
+  "mission.integration-linked",
   "integration.created",
   "integration.continue-requested",
   "integration.abort-requested",
@@ -2138,7 +2316,7 @@ export const OrchestrationEventType = Schema.Literals([
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
-export const OrchestrationAggregateKind = Schema.Literals(["project", "task", "thread"]);
+export const OrchestrationAggregateKind = Schema.Literals(["project", "mission", "task", "thread"]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
 
@@ -2176,6 +2354,57 @@ export const ProjectQualityPolicyUpdatedPayload = Schema.Struct({
 export const ProjectReviewPolicyUpdatedPayload = Schema.Struct({
   projectId: ProjectId,
   policy: ProjectReviewPolicy,
+  updatedAt: IsoDateTime,
+});
+
+export const MissionCreatedPayload = Schema.Struct({
+  missionId: MissionId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  objective: TrimmedNonEmptyString,
+  description: Schema.NullOr(TrimmedString),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const MissionUpdatedPayload = Schema.Struct({
+  missionId: MissionId,
+  title: TrimmedNonEmptyString,
+  objective: TrimmedNonEmptyString,
+  description: Schema.NullOr(TrimmedString),
+  updatedAt: IsoDateTime,
+});
+
+export const MissionTaskMembershipPayload = Schema.Struct({
+  missionId: MissionId,
+  taskId: TaskId,
+  position: NonNegativeInt,
+  updatedAt: IsoDateTime,
+});
+
+export const MissionTasksReorderedPayload = Schema.Struct({
+  missionId: MissionId,
+  taskIds: Schema.Array(TaskId),
+  updatedAt: IsoDateTime,
+});
+
+export const MissionDependencyPayload = Schema.Struct({
+  missionId: MissionId,
+  prerequisiteTaskId: TaskId,
+  dependentTaskId: TaskId,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const MissionLifecyclePayload = Schema.Struct({
+  missionId: MissionId,
+  occurredAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const MissionIntegrationLinkedPayload = Schema.Struct({
+  missionId: MissionId,
+  batchId: IntegrationBatchId,
   updatedAt: IsoDateTime,
 });
 
@@ -2680,7 +2909,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, TaskId, ThreadId]),
+  aggregateId: Schema.Union([ProjectId, MissionId, TaskId, ThreadId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -2713,6 +2942,61 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.created"),
+    payload: MissionCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.updated"),
+    payload: MissionUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.task-added"),
+    payload: MissionTaskMembershipPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.task-removed"),
+    payload: MissionTaskMembershipPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.tasks-reordered"),
+    payload: MissionTasksReorderedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.dependency-added"),
+    payload: MissionDependencyPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.dependency-removed"),
+    payload: MissionDependencyPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.activated"),
+    payload: MissionLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.completed"),
+    payload: MissionLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.cancelled"),
+    payload: MissionLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.integration-linked"),
+    payload: MissionIntegrationLinkedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

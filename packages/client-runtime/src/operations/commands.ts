@@ -33,6 +33,16 @@ export type UpdateProjectInput = CommandInput<"project.meta.update">;
 export type UpdateProjectQualityPolicyInput = CommandInput<"project.quality-policy.update">;
 export type UpdateProjectReviewPolicyInput = CommandInput<"project.review-policy.update">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
+export type CreateMissionInput = CommandInput<"mission.create">;
+export type UpdateMissionInput = CommandInput<"mission.update">;
+export type AddMissionTaskInput = CommandInput<"mission.task.add">;
+export type RemoveMissionTaskInput = CommandInput<"mission.task.remove">;
+export type ReorderMissionTasksInput = CommandInput<"mission.tasks.reorder">;
+export type AddMissionDependencyInput = CommandInput<"mission.dependency.add">;
+export type RemoveMissionDependencyInput = CommandInput<"mission.dependency.remove">;
+export type ActivateMissionInput = CommandInput<"mission.activate">;
+export type CompleteMissionInput = CommandInput<"mission.complete">;
+export type CancelMissionInput = CommandInput<"mission.cancel">;
 export type CreateIntegrationInput = CommandInput<"integration.create">;
 export type ContinueIntegrationInput = CommandInput<"integration.continue">;
 export type AbortIntegrationInput = CommandInput<"integration.abort">;
@@ -154,6 +164,59 @@ export const deleteProject: (input: DeleteProjectInput) => CommandEffect = Effec
     commandId: yield* commandId(input),
   });
 });
+
+const missionCommand = <
+  T extends
+    | "mission.create"
+    | "mission.update"
+    | "mission.task.add"
+    | "mission.task.remove"
+    | "mission.tasks.reorder"
+    | "mission.dependency.add"
+    | "mission.dependency.remove"
+    | "mission.activate"
+    | "mission.complete"
+    | "mission.cancel",
+>(
+  type: T,
+  input: CommandInput<T>,
+) =>
+  Effect.gen(function* () {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type, ...metadata } as ClientOrchestrationCommand);
+  });
+
+export const createMission: (input: CreateMissionInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.createMission",
+)((input) => missionCommand("mission.create", input));
+export const updateMission: (input: UpdateMissionInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.updateMission",
+)((input) => missionCommand("mission.update", input));
+export const addMissionTask: (input: AddMissionTaskInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.addMissionTask",
+)((input) => missionCommand("mission.task.add", input));
+export const removeMissionTask: (input: RemoveMissionTaskInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.removeMissionTask",
+)((input) => missionCommand("mission.task.remove", input));
+export const reorderMissionTasks: (input: ReorderMissionTasksInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.reorderMissionTasks",
+)((input) => missionCommand("mission.tasks.reorder", input));
+export const addMissionDependency: (input: AddMissionDependencyInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.addMissionDependency",
+)((input) => missionCommand("mission.dependency.add", input));
+export const removeMissionDependency: (input: RemoveMissionDependencyInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.removeMissionDependency")((input) =>
+    missionCommand("mission.dependency.remove", input),
+  );
+export const activateMission: (input: ActivateMissionInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.activateMission",
+)((input) => missionCommand("mission.activate", input));
+export const completeMission: (input: CompleteMissionInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.completeMission",
+)((input) => missionCommand("mission.complete", input));
+export const cancelMission: (input: CancelMissionInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.cancelMission",
+)((input) => missionCommand("mission.cancel", input));
 
 export const createIntegration: (input: CreateIntegrationInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.createIntegration",

@@ -29,6 +29,16 @@ import {
   abortIntegration,
   validateIntegration,
   removeIntegrationWorkspace,
+  createMission,
+  updateMission,
+  addMissionTask,
+  removeMissionTask,
+  reorderMissionTasks,
+  addMissionDependency,
+  removeMissionDependency,
+  activateMission,
+  completeMission,
+  cancelMission,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 
@@ -43,6 +53,16 @@ export type {
   AbortIntegrationInput,
   ValidateIntegrationInput,
   RemoveIntegrationWorkspaceInput,
+  CreateMissionInput,
+  UpdateMissionInput,
+  AddMissionTaskInput,
+  RemoveMissionTaskInput,
+  ReorderMissionTasksInput,
+  AddMissionDependencyInput,
+  RemoveMissionDependencyInput,
+  ActivateMissionInput,
+  CompleteMissionInput,
+  CancelMissionInput,
 } from "../operations/commands.ts";
 
 export interface OptimisticProjectFile {
@@ -154,6 +174,66 @@ export function createProjectEnvironmentAtoms<R, E>(
     removeIntegrationWorkspace: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:integration:workspace:remove",
       execute: removeIntegrationWorkspace,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    createMission: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission:create",
+      execute: createMission,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    updateMission: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission:update",
+      execute: updateMission,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    addMissionTask: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission:task:add",
+      execute: addMissionTask,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    removeMissionTask: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission:task:remove",
+      execute: removeMissionTask,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    reorderMissionTasks: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission:tasks:reorder",
+      execute: reorderMissionTasks,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    addMissionDependency: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission:dependency:add",
+      execute: addMissionDependency,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    removeMissionDependency: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission:dependency:remove",
+      execute: removeMissionDependency,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    activateMission: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission:activate",
+      execute: activateMission,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    completeMission: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission:complete",
+      execute: completeMission,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    cancelMission: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission:cancel",
+      execute: cancelMission,
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
     }),

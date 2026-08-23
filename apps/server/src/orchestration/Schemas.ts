@@ -4,6 +4,13 @@ import {
   ProjectQualityPolicyUpdatedPayload as ContractsProjectQualityPolicyUpdatedPayloadSchema,
   ProjectReviewPolicyUpdatedPayload as ContractsProjectReviewPolicyUpdatedPayloadSchema,
   ProjectDeletedPayload as ContractsProjectDeletedPayloadSchema,
+  MissionCreatedPayload as ContractsMissionCreatedPayloadSchema,
+  MissionUpdatedPayload as ContractsMissionUpdatedPayloadSchema,
+  MissionTaskMembershipPayload as ContractsMissionTaskMembershipPayloadSchema,
+  MissionTasksReorderedPayload as ContractsMissionTasksReorderedPayloadSchema,
+  MissionDependencyPayload as ContractsMissionDependencyPayloadSchema,
+  MissionLifecyclePayload as ContractsMissionLifecyclePayloadSchema,
+  MissionIntegrationLinkedPayload as ContractsMissionIntegrationLinkedPayloadSchema,
   IntegrationCreatedPayload as ContractsIntegrationCreatedPayloadSchema,
   IntegrationActionRequestedPayload as ContractsIntegrationActionRequestedPayloadSchema,
   IntegrationUpdatedPayload as ContractsIntegrationUpdatedPayloadSchema,
@@ -78,6 +85,13 @@ export const ProjectMetaUpdatedPayload = ContractsProjectMetaUpdatedPayloadSchem
 export const ProjectQualityPolicyUpdatedPayload = ContractsProjectQualityPolicyUpdatedPayloadSchema;
 export const ProjectReviewPolicyUpdatedPayload = ContractsProjectReviewPolicyUpdatedPayloadSchema;
 export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema;
+export const MissionCreatedPayload = ContractsMissionCreatedPayloadSchema;
+export const MissionUpdatedPayload = ContractsMissionUpdatedPayloadSchema;
+export const MissionTaskMembershipPayload = ContractsMissionTaskMembershipPayloadSchema;
+export const MissionTasksReorderedPayload = ContractsMissionTasksReorderedPayloadSchema;
+export const MissionDependencyPayload = ContractsMissionDependencyPayloadSchema;
+export const MissionLifecyclePayload = ContractsMissionLifecyclePayloadSchema;
+export const MissionIntegrationLinkedPayload = ContractsMissionIntegrationLinkedPayloadSchema;
 export const IntegrationCreatedPayload = ContractsIntegrationCreatedPayloadSchema;
 export const IntegrationActionRequestedPayload = ContractsIntegrationActionRequestedPayloadSchema;
 export const IntegrationUpdatedPayload = ContractsIntegrationUpdatedPayloadSchema;

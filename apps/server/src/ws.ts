@@ -33,6 +33,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   TaskId,
+  MissionId,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
@@ -579,6 +580,9 @@ const makeWsRpcLayer = (
             if (event.aggregateKind === "task") {
               return taskUpsert(TaskId.make(event.aggregateId), event.sequence);
             }
+            if (event.aggregateKind === "mission") {
+              return missionUpsert(MissionId.make(event.aggregateId), event.sequence);
+            }
             if (event.aggregateKind === "project") {
               return projectUpsertOrRemove(ProjectId.make(event.aggregateId), event.sequence);
             }
@@ -595,7 +599,7 @@ const makeWsRpcLayer = (
       // If both attempts fail, log and drop the stream item; treating an error as
       // a missing row would incorrectly remove a still-active aggregate.
       const retryShellProjectionRead = <A, E>(
-        aggregateKind: "project" | "task" | "thread",
+        aggregateKind: "project" | "mission" | "task" | "thread",
         aggregateId: string,
         read: Effect.Effect<A, E>,
       ): Effect.Effect<Option.Option<A>, never, never> =>
@@ -627,6 +631,25 @@ const makeWsRpcLayer = (
                     sequence,
                     task,
                   });
+            }),
+          ),
+        );
+
+      const missionUpsert = (
+        missionId: MissionId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead(
+          "mission",
+          missionId,
+          projectionSnapshotQuery.getShellSnapshot(),
+        ).pipe(
+          Effect.map(
+            Option.flatMap((snapshot) => {
+              const mission = snapshot.missions?.find((candidate) => candidate.id === missionId);
+              return mission === undefined
+                ? Option.none()
+                : Option.some({ kind: "mission-upserted" as const, sequence, mission });
             }),
           ),
         );

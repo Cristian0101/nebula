@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { ProjectId, ProviderInstanceId, TaskId, ThreadId } from "@t3tools/contracts";
+import {
+  IntegrationBatchId,
+  MissionId,
+  ProjectId,
+  ProviderInstanceId,
+  TaskId,
+  ThreadId,
+} from "@t3tools/contracts";
 import type { OrchestrationShellSnapshot, OrchestrationShellStreamEvent } from "@t3tools/contracts";
 
 import { applyShellStreamEvent } from "./shellReducer.ts";
@@ -56,6 +63,24 @@ const stubTask = {
   createdAt: "2026-04-01T00:00:00.000Z",
   updatedAt: "2026-04-01T00:00:00.000Z",
   activatedAt: null,
+  completedAt: null,
+  cancelledAt: null,
+};
+
+const stubMission = {
+  id: MissionId.make("mission-1"),
+  projectId: ProjectId.make("project-1"),
+  title: "Test Mission",
+  objective: "Prove the Mission client projection.",
+  description: null,
+  status: "active" as const,
+  taskIds: [TaskId.make("task-1")],
+  dependencies: [],
+  activities: [],
+  integrationBatchId: null,
+  createdAt: "2026-04-01T00:00:00.000Z",
+  updatedAt: "2026-04-01T00:00:00.000Z",
+  activatedAt: "2026-04-01T00:00:00.000Z",
   completedAt: null,
   cancelledAt: null,
 };
@@ -208,6 +233,69 @@ describe("applyShellStreamEvent", () => {
       });
       expect(activated.tasks).toHaveLength(1);
       expect(activated.tasks?.[0]).toMatchObject({ status: "active", threadId: "thread-1" });
+    });
+  });
+
+  describe("mission-upserted", () => {
+    it("adds and updates a Mission even when the cached snapshot predates Missions", () => {
+      const created = applyShellStreamEvent(baseSnapshot, {
+        kind: "mission-upserted",
+        sequence: 9,
+        mission: stubMission,
+      });
+      expect(created.missions).toEqual([stubMission]);
+
+      const completed = applyShellStreamEvent(created, {
+        kind: "mission-upserted",
+        sequence: 10,
+        mission: { ...stubMission, status: "completed", completedAt: stubMission.updatedAt },
+      });
+      expect(completed.missions).toHaveLength(1);
+      expect(completed.missions?.[0]?.status).toBe("completed");
+    });
+
+    it("links a Mission when its Integration Batch arrives in a project upsert", () => {
+      const snapshot: OrchestrationShellSnapshot = {
+        ...baseSnapshot,
+        projects: [stubProject],
+        missions: [stubMission],
+      };
+      const batchId = IntegrationBatchId.make("batch-1");
+      const next = applyShellStreamEvent(snapshot, {
+        kind: "project-upserted",
+        sequence: 11,
+        project: {
+          ...stubProject,
+          integrationBatches: [
+            {
+              id: batchId,
+              projectId: stubProject.id,
+              title: "Mission integration",
+              baseCommit: "base-commit",
+              sourceRepository: stubProject.workspaceRoot,
+              branch: "nebula/integrate/mission",
+              workspacePath: null,
+              status: "preparing",
+              tasks: [],
+              overlapPaths: [],
+              overlapsAcknowledged: true,
+              conflict: null,
+              validationSnapshot: null,
+              qualityGateRuns: [],
+              humanChanges: [],
+              failureCode: null,
+              failureReason: null,
+              createdAt: stubMission.createdAt,
+              updatedAt: stubMission.updatedAt,
+              readyAt: null,
+              removedAt: null,
+              missionId: stubMission.id,
+            },
+          ],
+        },
+      });
+
+      expect(next.missions?.[0]?.integrationBatchId).toBe(batchId);
     });
   });
 

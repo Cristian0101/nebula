@@ -37,6 +37,12 @@ import {
   ProjectQualityPolicy,
   ProjectReviewPolicy,
   IntegrationBatch,
+  IntegrationBatchId,
+  EventId,
+  MissionId,
+  MissionStatus,
+  TaskId,
+  type Mission,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -163,6 +169,89 @@ const mapTaskRow = (row: ProjectionTaskRow): OrchestrationTask => ({
   qualityGateRuns: row.qualityGateRunsJson,
   reviews: row.reviewsJson,
 });
+const ProjectionMissionRow = Schema.Struct({
+  missionId: MissionId,
+  projectId: ProjectId,
+  title: Schema.String,
+  objective: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  status: MissionStatus,
+  integrationBatchId: Schema.NullOr(IntegrationBatchId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  activatedAt: Schema.NullOr(IsoDateTime),
+  completedAt: Schema.NullOr(IsoDateTime),
+  cancelledAt: Schema.NullOr(IsoDateTime),
+});
+const ProjectionMissionTaskRow = Schema.Struct({
+  missionId: MissionId,
+  taskId: TaskId,
+  position: NonNegativeInt,
+  addedAt: IsoDateTime,
+});
+const ProjectionMissionDependencyRow = Schema.Struct({
+  missionId: MissionId,
+  prerequisiteTaskId: TaskId,
+  dependentTaskId: TaskId,
+  createdAt: IsoDateTime,
+});
+const ProjectionMissionActivityRow = Schema.Struct({
+  id: EventId,
+  missionId: MissionId,
+  type: Schema.String,
+  summary: Schema.String,
+  taskId: Schema.NullOr(TaskId),
+  occurredAt: IsoDateTime,
+});
+type ProjectionMissionRow = typeof ProjectionMissionRow.Type;
+type ProjectionMissionTaskRow = typeof ProjectionMissionTaskRow.Type;
+type ProjectionMissionDependencyRow = typeof ProjectionMissionDependencyRow.Type;
+type ProjectionMissionActivityRow = typeof ProjectionMissionActivityRow.Type;
+
+function mapMissionRows(input: {
+  readonly missions: ReadonlyArray<ProjectionMissionRow>;
+  readonly tasks: ReadonlyArray<ProjectionMissionTaskRow>;
+  readonly dependencies: ReadonlyArray<ProjectionMissionDependencyRow>;
+  readonly activities: ReadonlyArray<ProjectionMissionActivityRow>;
+}): ReadonlyArray<Mission> {
+  return input.missions.map((row) => ({
+    id: row.missionId,
+    projectId: row.projectId,
+    title: row.title,
+    objective: row.objective,
+    description: row.description,
+    status: row.status,
+    taskIds: input.tasks
+      .filter((entry) => entry.missionId === row.missionId)
+      .toSorted(
+        (left, right) => left.position - right.position || left.taskId.localeCompare(right.taskId),
+      )
+      .map((entry) => entry.taskId),
+    dependencies: input.dependencies
+      .filter((entry) => entry.missionId === row.missionId)
+      .map((entry) => ({
+        missionId: entry.missionId,
+        prerequisiteTaskId: entry.prerequisiteTaskId,
+        dependentTaskId: entry.dependentTaskId,
+        createdAt: entry.createdAt,
+      })),
+    activities: input.activities
+      .filter((entry) => entry.missionId === row.missionId)
+      .map((entry) => ({
+        id: entry.id,
+        type: entry.type,
+        summary: entry.summary,
+        taskId: entry.taskId,
+        occurredAt: entry.occurredAt,
+      })),
+    integrationBatchId: row.integrationBatchId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    activatedAt: row.activatedAt,
+    completedAt: row.completedAt,
+    cancelledAt: row.cancelledAt,
+  }));
+}
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   Struct.assign({
     isStreaming: Schema.Number,
@@ -279,6 +368,7 @@ const ProjectionFullThreadDiffContextRowSchema = Schema.Struct({
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
   ORCHESTRATION_PROJECTOR_NAMES.tasks,
+  ORCHESTRATION_PROJECTOR_NAMES.missions,
   ORCHESTRATION_PROJECTOR_NAMES.threads,
   ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
   ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
@@ -550,6 +640,63 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ORDER BY created_at ASC, task_id ASC
       `,
   });
+
+  const listMissionRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionMissionRow,
+    execute: () => sql`
+      SELECT mission_id AS "missionId", project_id AS "projectId", title, objective,
+        description, status, integration_batch_id AS "integrationBatchId",
+        created_at AS "createdAt", updated_at AS "updatedAt",
+        activated_at AS "activatedAt", completed_at AS "completedAt",
+        cancelled_at AS "cancelledAt"
+      FROM projection_missions ORDER BY created_at, mission_id
+    `,
+  });
+  const listMissionTaskRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionMissionTaskRow,
+    execute: () => sql`
+      SELECT mission_id AS "missionId", task_id AS "taskId", position, added_at AS "addedAt"
+      FROM projection_mission_tasks ORDER BY mission_id, position, task_id
+    `,
+  });
+  const listMissionDependencyRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionMissionDependencyRow,
+    execute: () => sql`
+      SELECT mission_id AS "missionId", prerequisite_task_id AS "prerequisiteTaskId",
+        dependent_task_id AS "dependentTaskId", created_at AS "createdAt"
+      FROM projection_mission_dependencies
+      ORDER BY mission_id, created_at, prerequisite_task_id, dependent_task_id
+    `,
+  });
+  const listMissionActivityRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionMissionActivityRow,
+    execute: () => sql`
+      SELECT event_id AS id, mission_id AS "missionId", type, summary,
+        task_id AS "taskId", occurred_at AS "occurredAt"
+      FROM projection_mission_activities ORDER BY occurred_at, event_id
+    `,
+  });
+  const listMissions = (operation: string) =>
+    Effect.all([
+      listMissionRows(undefined),
+      listMissionTaskRows(undefined),
+      listMissionDependencyRows(undefined),
+      listMissionActivityRows(undefined),
+    ]).pipe(
+      Effect.map(([missions, tasks, dependencies, activities]) =>
+        mapMissionRows({ missions, tasks, dependencies, activities }),
+      ),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          `ProjectionSnapshotQuery.${operation}:listMissions:query`,
+          `ProjectionSnapshotQuery.${operation}:listMissions:decodeRows`,
+        ),
+      ),
+    );
 
   const listThreadRows = SqlSchema.findAll({
     Request: Schema.Void,
@@ -1610,6 +1757,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listMissions("getSnapshot"),
           listThreadRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1681,6 +1829,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           ([
             projectRows,
             taskRows,
+            missionRows,
             threadRows,
             messageRows,
             proposedPlanRows,
@@ -1850,6 +1999,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               }));
 
               const tasks: ReadonlyArray<OrchestrationTask> = taskRows.map(mapTaskRow);
+              const missions = missionRows;
 
               const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) => ({
                 id: row.threadId,
@@ -1883,6 +2033,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 tasks,
+                missions,
                 threads,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
@@ -1922,6 +2073,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listMissions("getCommandReadModel"),
           listThreadRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1969,6 +2121,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           ([
             projectRows,
             taskRows,
+            missionRows,
             threadRows,
             proposedPlanRows,
             sessionRows,
@@ -1979,6 +2132,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               let updatedAt: string | null = null;
               const projects: OrchestrationProject[] = [];
               const tasks: OrchestrationTask[] = taskRows.map(mapTaskRow);
+              const missions = missionRows;
               const threads: OrchestrationThread[] = [];
 
               for (let index = 0; index < projectRows.length; index += 1) {
@@ -2115,6 +2269,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 tasks,
+                missions,
                 threads,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               } satisfies OrchestrationReadModel;
@@ -2148,6 +2303,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listMissions("getShellSnapshot"),
           listActiveThreadRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2184,7 +2340,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, taskRows, threadRows, sessionRows, latestTurnRows, stateRows]) =>
+          ([
+            projectRows,
+            taskRows,
+            missionRows,
+            threadRows,
+            sessionRows,
+            latestTurnRows,
+            stateRows,
+          ]) =>
             Effect.gen(function* () {
               let updatedAt: string | null = null;
               for (const row of projectRows) {
@@ -2192,6 +2356,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               }
               for (const row of taskRows) {
                 updatedAt = maxIso(updatedAt, row.updatedAt);
+              }
+              for (const mission of missionRows) {
+                updatedAt = maxIso(updatedAt, mission.updatedAt);
               }
               for (const row of threadRows) {
                 updatedAt = maxIso(updatedAt, row.updatedAt);
@@ -2231,6 +2398,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     : Result.failVoid,
                 ),
                 tasks: taskRows.map(mapTaskRow),
+                missions: missionRows,
                 threads: Arr.filterMap(threadRows, (row) =>
                   row.deletedAt === null
                     ? Result.succeed({

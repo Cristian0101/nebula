@@ -13,6 +13,7 @@ import {
   OrchestrationAggregateKind,
   OrchestrationCommandReceiptStatus,
   ProjectId,
+  MissionId,
   TaskId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -26,7 +27,7 @@ import type { OrchestrationCommandReceiptRepositoryError } from "../Errors.ts";
 export const OrchestrationCommandReceipt = Schema.Struct({
   commandId: CommandId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, TaskId, ThreadId]),
+  aggregateId: Schema.Union([ProjectId, MissionId, TaskId, ThreadId]),
   acceptedAt: IsoDateTime,
   resultSequence: NonNegativeInt,
   status: OrchestrationCommandReceiptStatus,

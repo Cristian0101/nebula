@@ -9,6 +9,7 @@ import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
+import { computeMissionPlan, validateMissionGraph } from "@t3tools/shared/missionGraph";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
@@ -16,6 +17,8 @@ import {
   listTasksByProjectId,
   requireTask,
   requireTaskAbsent,
+  requireMission,
+  requireMissionAbsent,
   requireActiveProjectWorkspaceRootAbsent,
   requireProject,
   requireProjectAbsent,
@@ -27,6 +30,49 @@ import {
 import { projectEvent } from "./projector.ts";
 import { validateOwnershipRules } from "./taskOwnership.ts";
 import { buildIntegrationBatch, integrationEligibility } from "./integrationPolicy.ts";
+
+function missionContainingTask(readModel: OrchestrationReadModel, taskId: string) {
+  return (readModel.missions ?? []).find((mission) =>
+    mission.taskIds.some((candidate) => candidate === taskId),
+  );
+}
+
+function requireMissionTaskReady(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly taskId: string;
+}) {
+  const mission = missionContainingTask(input.readModel, input.taskId);
+  if (!mission) return Effect.void;
+  if (mission.status !== "active") {
+    return Effect.fail(
+      new OrchestrationCommandInvariantError({
+        commandType: input.command.type,
+        detail: `Task '${input.taskId}' belongs to Mission '${mission.id}', which must be active before the Task can start.`,
+      }),
+    );
+  }
+  const plan = computeMissionPlan({
+    mission,
+    tasks: input.readModel.tasks ?? [],
+    threads: input.readModel.threads,
+    integrationBatches:
+      input.readModel.projects.find((project) => project.id === mission.projectId)
+        ?.integrationBatches ?? [],
+  });
+  const taskPlan = plan.tasks.find((candidate) => candidate.task.id === input.taskId);
+  return taskPlan?.status === "ready"
+    ? Effect.void
+    : Effect.fail(
+        new OrchestrationCommandInvariantError({
+          commandType: input.command.type,
+          detail:
+            taskPlan?.blockerReasons.join(" ") ||
+            taskPlan?.attention.join(" ") ||
+            `Task '${input.taskId}' is not ready in Mission '${mission.id}'.`,
+        }),
+      );
+}
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -170,14 +216,12 @@ function requiredQualityGateFailure(
 }
 
 function currentApprovedReview(task: NonNullable<OrchestrationReadModel["tasks"]>[number]) {
-  return (task.reviews ?? [])
-    .filter(
-      (review) =>
-        review.snapshotId === task.reviewSnapshot?.id &&
-        review.status === "completed" &&
-        (review.verdict === "approve" || review.verdict === "approve_with_notes"),
-    )
-    .at(-1);
+  return (task.reviews ?? []).findLast(
+    (review) =>
+      review.snapshotId === task.reviewSnapshot?.id &&
+      review.status === "completed" &&
+      (review.verdict === "approve" || review.verdict === "approve_with_notes"),
+  );
 }
 
 function withEventBase(
@@ -455,8 +499,389 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "mission.create": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (project.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Mission '${command.missionId}' cannot be created in a deleted Project.`,
+        });
+      }
+      yield* requireMissionAbsent({ readModel, command, missionId: command.missionId });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: command.missionId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.created" as const,
+        payload: {
+          missionId: command.missionId,
+          projectId: command.projectId,
+          title: command.title,
+          objective: command.objective,
+          description: command.description ?? null,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "mission.update": {
+      const mission = yield* requireMission({ readModel, command, missionId: command.missionId });
+      if (
+        mission.projectId !== command.projectId ||
+        mission.status === "completed" ||
+        mission.status === "cancelled"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Only a draft or active Mission in Project '${command.projectId}' can be edited.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.updated" as const,
+        payload: {
+          missionId: mission.id,
+          title: command.title,
+          objective: command.objective,
+          description: command.description ?? null,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "mission.task.add": {
+      const mission = yield* requireMission({ readModel, command, missionId: command.missionId });
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (mission.projectId !== command.projectId || task.projectId !== mission.projectId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Mission Tasks must belong to the same Project.",
+        });
+      }
+      const existingMission = missionContainingTask(readModel, task.id);
+      if (existingMission) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${task.id}' already belongs to Mission '${existingMission.id}'.`,
+        });
+      }
+      if (
+        !["draft", "active"].includes(mission.status) ||
+        task.status === "active" ||
+        task.status === "cancelled" ||
+        (mission.status === "active" && task.status !== "draft")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Only an eligible draft Task can be added to an active Mission; draft Missions may also retain completed Tasks.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.task-added" as const,
+        payload: {
+          missionId: mission.id,
+          taskId: task.id,
+          position: mission.taskIds.length,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "mission.task.remove": {
+      const mission = yield* requireMission({ readModel, command, missionId: command.missionId });
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (mission.projectId !== command.projectId || !mission.taskIds.includes(task.id)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${task.id}' is not in this Mission.`,
+        });
+      }
+      if (!["draft", "active"].includes(mission.status) || task.status !== "draft") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A started or terminal Task cannot be removed from its Mission.",
+        });
+      }
+      if (mission.status === "active" && command.confirmActiveEdit !== true) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Editing an active Mission requires explicit confirmation.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.task-removed" as const,
+        payload: {
+          missionId: mission.id,
+          taskId: task.id,
+          position: mission.taskIds.indexOf(task.id),
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "mission.tasks.reorder": {
+      const mission = yield* requireMission({ readModel, command, missionId: command.missionId });
+      const current = new Set(mission.taskIds);
+      if (
+        mission.projectId !== command.projectId ||
+        command.taskIds.length !== current.size ||
+        new Set(command.taskIds).size !== current.size ||
+        command.taskIds.some((taskId) => !current.has(taskId))
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Mission reorder must contain every member Task exactly once.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.tasks-reordered" as const,
+        payload: { missionId: mission.id, taskIds: command.taskIds, updatedAt: command.createdAt },
+      };
+    }
+
+    case "mission.dependency.add": {
+      const mission = yield* requireMission({ readModel, command, missionId: command.missionId });
+      if (
+        mission.projectId !== command.projectId ||
+        !mission.taskIds.includes(command.prerequisiteTaskId) ||
+        !mission.taskIds.includes(command.dependentTaskId)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Both dependency Tasks must belong to this Mission.",
+        });
+      }
+      const dependent = yield* requireTask({ readModel, command, taskId: command.dependentTaskId });
+      if (!["draft", "active"].includes(mission.status) || dependent.status !== "draft") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A new prerequisite cannot be added to a started or terminal Task.",
+        });
+      }
+      if (mission.status === "active" && command.confirmActiveEdit !== true) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Editing an active Mission requires explicit confirmation.",
+        });
+      }
+      const edge = {
+        missionId: mission.id,
+        prerequisiteTaskId: command.prerequisiteTaskId,
+        dependentTaskId: command.dependentTaskId,
+        createdAt: command.createdAt,
+      };
+      const validation = validateMissionGraph(mission.taskIds, [...mission.dependencies, edge]);
+      if (!validation.valid) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: validation.error ?? "Invalid Mission dependency.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.dependency-added" as const,
+        payload: { ...edge, updatedAt: command.createdAt },
+      };
+    }
+
+    case "mission.dependency.remove": {
+      const mission = yield* requireMission({ readModel, command, missionId: command.missionId });
+      const edge = mission.dependencies.find(
+        (candidate) =>
+          candidate.prerequisiteTaskId === command.prerequisiteTaskId &&
+          candidate.dependentTaskId === command.dependentTaskId,
+      );
+      const prerequisite = (readModel.tasks ?? []).find(
+        (task) => task.id === command.prerequisiteTaskId,
+      );
+      const dependent = (readModel.tasks ?? []).find((task) => task.id === command.dependentTaskId);
+      if (mission.projectId !== command.projectId || !edge) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Mission dependency does not exist.",
+        });
+      }
+      if (
+        !["draft", "active"].includes(mission.status) ||
+        (mission.status === "active" &&
+          (prerequisite?.status !== "draft" || dependent?.status !== "draft"))
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Dependencies involving started work cannot be removed from an active Mission.",
+        });
+      }
+      if (mission.status === "active" && command.confirmActiveEdit !== true) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Editing an active Mission requires explicit confirmation.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.dependency-removed" as const,
+        payload: { ...edge, updatedAt: command.createdAt },
+      };
+    }
+
+    case "mission.activate": {
+      const mission = yield* requireMission({ readModel, command, missionId: command.missionId });
+      const validation = validateMissionGraph(mission.taskIds, mission.dependencies);
+      if (
+        mission.projectId !== command.projectId ||
+        mission.status !== "draft" ||
+        mission.taskIds.length === 0 ||
+        !validation.valid
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            validation.error ??
+            "Activation requires a draft Mission with at least one Task and a valid DAG.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.activated" as const,
+        payload: {
+          missionId: mission.id,
+          occurredAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "mission.complete": {
+      const mission = yield* requireMission({ readModel, command, missionId: command.missionId });
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const plan = computeMissionPlan({
+        mission,
+        tasks: readModel.tasks ?? [],
+        threads: readModel.threads,
+        integrationBatches: project.integrationBatches ?? [],
+      });
+      if (
+        mission.status !== "active" ||
+        mission.projectId !== project.id ||
+        !plan.completionEligible
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Mission completion requires every non-cancelled Task to be completed and any linked Integration Batch to be ready.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.completed" as const,
+        payload: {
+          missionId: mission.id,
+          occurredAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "mission.cancel": {
+      const mission = yield* requireMission({ readModel, command, missionId: command.missionId });
+      if (
+        mission.projectId !== command.projectId ||
+        mission.status === "completed" ||
+        mission.status === "cancelled"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Only a draft or active Mission can be cancelled.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.cancelled" as const,
+        payload: {
+          missionId: mission.id,
+          occurredAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
     case "integration.create": {
       const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const mission = command.missionId
+        ? yield* requireMission({ readModel, command, missionId: command.missionId })
+        : null;
+      const linkedBatch = mission?.integrationBatchId
+        ? (project.integrationBatches ?? []).find(
+            (batch) => batch.id === mission.integrationBatchId,
+          )
+        : null;
+      const mayReplaceLinkedBatch =
+        linkedBatch?.status === "failed" || linkedBatch?.status === "cancelled";
+      if (
+        mission &&
+        (mission.projectId !== project.id ||
+          (mission.integrationBatchId !== null && !mayReplaceLinkedBatch) ||
+          command.taskIds.some((taskId) => !mission.taskIds.includes(taskId)))
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "A Mission Integration Batch must use completed member Tasks and may replace only a failed or cancelled linked Batch.",
+        });
+      }
       if ((project.integrationBatches ?? []).some((batch) => batch.id === command.batchId)) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -490,7 +915,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           });
         }
       }
-      const batch = yield* Effect.try({
+      const builtBatch = yield* Effect.try({
         try: () =>
           buildIntegrationBatch({
             project,
@@ -506,6 +931,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             detail: cause instanceof Error ? cause.message : "Invalid Integration Batch.",
           }),
       });
+      const batch = { ...builtBatch, missionId: mission?.id ?? null };
       return {
         ...(yield* withEventBase({
           aggregateKind: "project",
@@ -767,6 +1193,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "task.activate": {
       const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      yield* requireMissionTaskReady({ readModel, command, taskId: command.taskId });
       if (task.status !== "draft" || task.threadId === null) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -1732,6 +2159,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "task.workspace.prepare": {
       const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      yield* requireMissionTaskReady({ readModel, command, taskId: command.taskId });
       if (task.role !== "builder" || task.status !== "draft" || task.threadId !== null) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,

@@ -18,6 +18,13 @@ import {
   ProjectMetaUpdatedPayload,
   ProjectQualityPolicyUpdatedPayload,
   ProjectReviewPolicyUpdatedPayload,
+  MissionCreatedPayload,
+  MissionUpdatedPayload,
+  MissionTaskMembershipPayload,
+  MissionTasksReorderedPayload,
+  MissionDependencyPayload,
+  MissionLifecyclePayload,
+  MissionIntegrationLinkedPayload,
   TaskActivatedPayload,
   TaskCancelledPayload,
   TaskCompletedPayload,
@@ -231,6 +238,7 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
     snapshotSequence: 0,
     projects: [],
     tasks: [],
+    missions: [],
     threads: [],
     updatedAt: nowIso,
   };
@@ -357,10 +365,287 @@ export function projectEvent(
         })),
       );
 
+    case "mission.created":
+      return decodeForEvent(MissionCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          missions: [
+            ...(nextBase.missions ?? []),
+            {
+              id: payload.missionId,
+              projectId: payload.projectId,
+              title: payload.title,
+              objective: payload.objective,
+              description: payload.description,
+              status: "draft" as const,
+              taskIds: [],
+              dependencies: [],
+              activities: [
+                {
+                  id: event.eventId,
+                  type: event.type,
+                  summary: "Mission created",
+                  taskId: null,
+                  occurredAt: event.occurredAt,
+                },
+              ],
+              integrationBatchId: null,
+              createdAt: payload.createdAt,
+              updatedAt: payload.updatedAt,
+              activatedAt: null,
+              completedAt: null,
+              cancelledAt: null,
+            },
+          ],
+        })),
+      );
+
+    case "mission.updated":
+      return decodeForEvent(MissionUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          missions: (nextBase.missions ?? []).map((mission) =>
+            mission.id === payload.missionId
+              ? {
+                  ...mission,
+                  title: payload.title,
+                  objective: payload.objective,
+                  description: payload.description,
+                  updatedAt: payload.updatedAt,
+                  activities: [
+                    ...mission.activities,
+                    {
+                      id: event.eventId,
+                      type: event.type,
+                      summary: "Mission details updated",
+                      taskId: null,
+                      occurredAt: event.occurredAt,
+                    },
+                  ],
+                }
+              : mission,
+          ),
+        })),
+      );
+
+    case "mission.task-added":
+    case "mission.task-removed":
+      return decodeForEvent(
+        MissionTaskMembershipPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          missions: (nextBase.missions ?? []).map((mission) =>
+            mission.id !== payload.missionId
+              ? mission
+              : {
+                  ...mission,
+                  taskIds:
+                    event.type === "mission.task-added"
+                      ? [...mission.taskIds, payload.taskId]
+                      : mission.taskIds.filter((taskId) => taskId !== payload.taskId),
+                  dependencies:
+                    event.type === "mission.task-removed"
+                      ? mission.dependencies.filter(
+                          (edge) =>
+                            edge.prerequisiteTaskId !== payload.taskId &&
+                            edge.dependentTaskId !== payload.taskId,
+                        )
+                      : mission.dependencies,
+                  updatedAt: payload.updatedAt,
+                  activities: [
+                    ...mission.activities,
+                    {
+                      id: event.eventId,
+                      type: event.type,
+                      summary: event.type === "mission.task-added" ? "Task added" : "Task removed",
+                      taskId: payload.taskId,
+                      occurredAt: event.occurredAt,
+                    },
+                  ],
+                },
+          ),
+        })),
+      );
+
+    case "mission.tasks-reordered":
+      return decodeForEvent(
+        MissionTasksReorderedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          missions: (nextBase.missions ?? []).map((mission) =>
+            mission.id === payload.missionId
+              ? {
+                  ...mission,
+                  taskIds: payload.taskIds,
+                  updatedAt: payload.updatedAt,
+                  activities: [
+                    ...mission.activities,
+                    {
+                      id: event.eventId,
+                      type: event.type,
+                      summary: "Task presentation order changed",
+                      taskId: null,
+                      occurredAt: event.occurredAt,
+                    },
+                  ],
+                }
+              : mission,
+          ),
+        })),
+      );
+
+    case "mission.dependency-added":
+    case "mission.dependency-removed":
+      return decodeForEvent(MissionDependencyPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          missions: (nextBase.missions ?? []).map((mission) =>
+            mission.id !== payload.missionId
+              ? mission
+              : {
+                  ...mission,
+                  dependencies:
+                    event.type === "mission.dependency-added"
+                      ? [
+                          ...mission.dependencies,
+                          {
+                            missionId: payload.missionId,
+                            prerequisiteTaskId: payload.prerequisiteTaskId,
+                            dependentTaskId: payload.dependentTaskId,
+                            createdAt: payload.createdAt,
+                          },
+                        ]
+                      : mission.dependencies.filter(
+                          (edge) =>
+                            edge.prerequisiteTaskId !== payload.prerequisiteTaskId ||
+                            edge.dependentTaskId !== payload.dependentTaskId,
+                        ),
+                  updatedAt: payload.updatedAt,
+                  activities: [
+                    ...mission.activities,
+                    {
+                      id: event.eventId,
+                      type: event.type,
+                      summary:
+                        event.type === "mission.dependency-added"
+                          ? "Dependency added"
+                          : "Dependency removed",
+                      taskId: payload.dependentTaskId,
+                      occurredAt: event.occurredAt,
+                    },
+                  ],
+                },
+          ),
+        })),
+      );
+
+    case "mission.activated":
+    case "mission.completed":
+    case "mission.cancelled":
+      return decodeForEvent(MissionLifecyclePayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          missions: (nextBase.missions ?? []).map((mission) =>
+            mission.id !== payload.missionId
+              ? mission
+              : {
+                  ...mission,
+                  status:
+                    event.type === "mission.activated"
+                      ? ("active" as const)
+                      : event.type === "mission.completed"
+                        ? ("completed" as const)
+                        : ("cancelled" as const),
+                  ...(event.type === "mission.activated"
+                    ? { activatedAt: payload.occurredAt }
+                    : event.type === "mission.completed"
+                      ? { completedAt: payload.occurredAt }
+                      : { cancelledAt: payload.occurredAt }),
+                  updatedAt: payload.updatedAt,
+                  activities: [
+                    ...mission.activities,
+                    {
+                      id: event.eventId,
+                      type: event.type,
+                      summary:
+                        event.type === "mission.activated"
+                          ? "Mission activated"
+                          : event.type === "mission.completed"
+                            ? "Mission completed"
+                            : "Mission cancelled",
+                      taskId: null,
+                      occurredAt: event.occurredAt,
+                    },
+                  ],
+                },
+          ),
+        })),
+      );
+
+    case "mission.integration-linked":
+      return decodeForEvent(
+        MissionIntegrationLinkedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          missions: (nextBase.missions ?? []).map((mission) =>
+            mission.id === payload.missionId
+              ? {
+                  ...mission,
+                  integrationBatchId: payload.batchId,
+                  updatedAt: payload.updatedAt,
+                  activities: [
+                    ...mission.activities,
+                    {
+                      id: event.eventId,
+                      type: event.type,
+                      summary: "Integration Batch linked",
+                      taskId: null,
+                      occurredAt: event.occurredAt,
+                    },
+                  ],
+                }
+              : mission,
+          ),
+        })),
+      );
+
     case "integration.created":
       return decodeForEvent(IntegrationCreatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
+          missions: payload.batch.missionId
+            ? (nextBase.missions ?? []).map((mission) =>
+                mission.id === payload.batch.missionId
+                  ? {
+                      ...mission,
+                      integrationBatchId: payload.batch.id,
+                      updatedAt: payload.batch.updatedAt,
+                      activities: [
+                        ...mission.activities,
+                        {
+                          id: event.eventId,
+                          type: "mission.integration-linked",
+                          summary: "Integration Batch linked",
+                          taskId: null,
+                          occurredAt: event.occurredAt,
+                        },
+                      ],
+                    }
+                  : mission,
+              )
+            : nextBase.missions,
           projects: nextBase.projects.map((project) =>
             project.id === payload.projectId
               ? {

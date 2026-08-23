@@ -70,6 +70,7 @@ import {
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
   tasks: "projection.tasks",
+  missions: "projection.missions",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
   threadProposedPlans: "projection.thread-proposed-plans",
@@ -1525,6 +1526,209 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }
     });
 
+    const appendMissionActivity = Effect.fn("appendMissionActivity")(function* (input: {
+      readonly missionId: string;
+      readonly eventId: string;
+      readonly type: string;
+      readonly summary: string;
+      readonly taskId: string | null;
+      readonly occurredAt: string;
+    }) {
+      yield* sql`
+        INSERT OR IGNORE INTO projection_mission_activities (
+          event_id, mission_id, type, summary, task_id, occurred_at
+        ) VALUES (
+          ${input.eventId}, ${input.missionId}, ${input.type}, ${input.summary},
+          ${input.taskId}, ${input.occurredAt}
+        )
+      `.pipe(Effect.mapError(toPersistenceSqlError("ProjectionMissions.activity:query")));
+    });
+
+    const applyMissionsProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyMissionsProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "mission.created":
+          yield* sql`
+            INSERT INTO projection_missions (
+              mission_id, project_id, title, objective, description, status,
+              integration_batch_id, created_at, updated_at, activated_at, completed_at, cancelled_at
+            ) VALUES (
+              ${event.payload.missionId}, ${event.payload.projectId}, ${event.payload.title},
+              ${event.payload.objective}, ${event.payload.description}, 'draft', NULL,
+              ${event.payload.createdAt}, ${event.payload.updatedAt}, NULL, NULL, NULL
+            ) ON CONFLICT (mission_id) DO UPDATE SET
+              project_id = excluded.project_id, title = excluded.title,
+              objective = excluded.objective, description = excluded.description,
+              updated_at = excluded.updated_at
+          `.pipe(Effect.mapError(toPersistenceSqlError("ProjectionMissions.created:query")));
+          yield* appendMissionActivity({
+            missionId: event.payload.missionId,
+            eventId: event.eventId,
+            type: event.type,
+            summary: "Mission created",
+            taskId: null,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        case "mission.updated":
+          yield* sql`UPDATE projection_missions SET title = ${event.payload.title}, objective = ${event.payload.objective}, description = ${event.payload.description}, updated_at = ${event.payload.updatedAt} WHERE mission_id = ${event.payload.missionId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.updated:query")),
+          );
+          yield* appendMissionActivity({
+            missionId: event.payload.missionId,
+            eventId: event.eventId,
+            type: event.type,
+            summary: "Mission details updated",
+            taskId: null,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        case "mission.task-added":
+          yield* sql`INSERT INTO projection_mission_tasks (mission_id, task_id, position, added_at) VALUES (${event.payload.missionId}, ${event.payload.taskId}, ${event.payload.position}, ${event.payload.updatedAt})`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.taskAdded:query")),
+          );
+          yield* sql`UPDATE projection_missions SET updated_at = ${event.payload.updatedAt} WHERE mission_id = ${event.payload.missionId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.taskAdded:update")),
+          );
+          yield* appendMissionActivity({
+            missionId: event.payload.missionId,
+            eventId: event.eventId,
+            type: event.type,
+            summary: "Task added",
+            taskId: event.payload.taskId,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        case "mission.task-removed":
+          yield* sql`DELETE FROM projection_mission_dependencies WHERE mission_id = ${event.payload.missionId} AND (prerequisite_task_id = ${event.payload.taskId} OR dependent_task_id = ${event.payload.taskId})`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.taskRemoved:dependencies")),
+          );
+          yield* sql`DELETE FROM projection_mission_tasks WHERE mission_id = ${event.payload.missionId} AND task_id = ${event.payload.taskId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.taskRemoved:query")),
+          );
+          yield* sql`UPDATE projection_missions SET updated_at = ${event.payload.updatedAt} WHERE mission_id = ${event.payload.missionId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.taskRemoved:update")),
+          );
+          yield* appendMissionActivity({
+            missionId: event.payload.missionId,
+            eventId: event.eventId,
+            type: event.type,
+            summary: "Task removed",
+            taskId: event.payload.taskId,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        case "mission.tasks-reordered":
+          yield* Effect.forEach(event.payload.taskIds, (taskId, position) =>
+            sql`UPDATE projection_mission_tasks SET position = ${position} WHERE mission_id = ${event.payload.missionId} AND task_id = ${taskId}`.pipe(
+              Effect.mapError(toPersistenceSqlError("ProjectionMissions.tasksReordered:query")),
+            ),
+          );
+          yield* sql`UPDATE projection_missions SET updated_at = ${event.payload.updatedAt} WHERE mission_id = ${event.payload.missionId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.tasksReordered:update")),
+          );
+          yield* appendMissionActivity({
+            missionId: event.payload.missionId,
+            eventId: event.eventId,
+            type: event.type,
+            summary: "Task presentation order changed",
+            taskId: null,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        case "mission.dependency-added":
+          yield* sql`INSERT INTO projection_mission_dependencies (mission_id, prerequisite_task_id, dependent_task_id, created_at) VALUES (${event.payload.missionId}, ${event.payload.prerequisiteTaskId}, ${event.payload.dependentTaskId}, ${event.payload.createdAt})`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.dependencyAdded:query")),
+          );
+          yield* sql`UPDATE projection_missions SET updated_at = ${event.payload.updatedAt} WHERE mission_id = ${event.payload.missionId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.dependencyAdded:update")),
+          );
+          yield* appendMissionActivity({
+            missionId: event.payload.missionId,
+            eventId: event.eventId,
+            type: event.type,
+            summary: "Dependency added",
+            taskId: event.payload.dependentTaskId,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        case "mission.dependency-removed":
+          yield* sql`DELETE FROM projection_mission_dependencies WHERE mission_id = ${event.payload.missionId} AND prerequisite_task_id = ${event.payload.prerequisiteTaskId} AND dependent_task_id = ${event.payload.dependentTaskId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.dependencyRemoved:query")),
+          );
+          yield* sql`UPDATE projection_missions SET updated_at = ${event.payload.updatedAt} WHERE mission_id = ${event.payload.missionId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.dependencyRemoved:update")),
+          );
+          yield* appendMissionActivity({
+            missionId: event.payload.missionId,
+            eventId: event.eventId,
+            type: event.type,
+            summary: "Dependency removed",
+            taskId: event.payload.dependentTaskId,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        case "mission.activated":
+        case "mission.completed":
+        case "mission.cancelled": {
+          const status =
+            event.type === "mission.activated"
+              ? "active"
+              : event.type === "mission.completed"
+                ? "completed"
+                : "cancelled";
+          yield* sql`UPDATE projection_missions SET status = ${status}, activated_at = CASE WHEN ${status} = 'active' THEN ${event.payload.occurredAt} ELSE activated_at END, completed_at = CASE WHEN ${status} = 'completed' THEN ${event.payload.occurredAt} ELSE completed_at END, cancelled_at = CASE WHEN ${status} = 'cancelled' THEN ${event.payload.occurredAt} ELSE cancelled_at END, updated_at = ${event.payload.updatedAt} WHERE mission_id = ${event.payload.missionId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.lifecycle:query")),
+          );
+          yield* appendMissionActivity({
+            missionId: event.payload.missionId,
+            eventId: event.eventId,
+            type: event.type,
+            summary:
+              status === "active"
+                ? "Mission activated"
+                : status === "completed"
+                  ? "Mission completed"
+                  : "Mission cancelled",
+            taskId: null,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        }
+        case "mission.integration-linked":
+          yield* sql`UPDATE projection_missions SET integration_batch_id = ${event.payload.batchId}, updated_at = ${event.payload.updatedAt} WHERE mission_id = ${event.payload.missionId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.integrationLinked:query")),
+          );
+          yield* appendMissionActivity({
+            missionId: event.payload.missionId,
+            eventId: event.eventId,
+            type: event.type,
+            summary: "Integration Batch linked",
+            taskId: null,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        case "integration.created":
+          if (event.payload.batch.missionId) {
+            yield* sql`UPDATE projection_missions SET integration_batch_id = ${event.payload.batch.id}, updated_at = ${event.payload.batch.updatedAt} WHERE mission_id = ${event.payload.batch.missionId}`.pipe(
+              Effect.mapError(toPersistenceSqlError("ProjectionMissions.integrationCreated:query")),
+            );
+            yield* appendMissionActivity({
+              missionId: event.payload.batch.missionId,
+              eventId: event.eventId,
+              type: "mission.integration-linked",
+              summary: "Integration Batch linked",
+              taskId: null,
+              occurredAt: event.occurredAt,
+            });
+          }
+          return;
+        default:
+          return;
+      }
+    });
+
     const applyThreadMessagesProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyThreadMessagesProjection",
     )(function* (event, attachmentSideEffects) {
@@ -2228,6 +2432,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.tasks,
         apply: applyTasksProjection,
+      },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.missions,
+        apply: applyMissionsProjection,
       },
     ];
 

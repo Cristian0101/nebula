@@ -102,7 +102,7 @@ The current repository already provides:
 - snapshot-bound, bounded quality results with timeout, cancellation, mutation detection, and restart-safe history; and
 - provider-neutral independent review with cross-provider preference, same-provider fallback, structured verdict invariants, human-controlled findings handoff, and multiple review rounds.
 
-The current repository does **not** yet provide agent-generated ownership requests, shared-resource locks, deterministic Swarm automation, Mission/DAG planning, scheduling, automatic provider routing, automatic remediation, or automatic integration queues. Manual deterministic Integration Batches are implemented.
+The current repository also provides durable Missions over canonical Tasks, explicit acyclic dependencies, derived readiness and execution waves, human-controlled starts, active-graph audit events, and optional Mission-linked Integration Batches. It does **not** provide agent-generated ownership requests, shared-resource locks, automatic Task planning, scheduling, automatic provider routing, automatic remediation, Architect, automatic integration queues, or Swarm Mode.
 
 ### IMPLEMENTED v0.1 — Command Deck
 
@@ -123,15 +123,19 @@ Command Deck now provides:
 
 The user remains the coordinator: provider/model choice, ownership, Start, review, completion, restore, and cleanup are explicit actions. Command Deck derives presentation and attention state from canonical Task, Thread, provider, workspace, ownership, and review projections. It does not persist a Command Deck entity or duplicate provider output. Draft Task assignment is stored on the Task because no Thread exists yet; once execution starts, the bound Thread's model selection is authoritative for that execution.
 
-Manual parallel provider Tasks, quality gates, user-requested independent reviews, and manual deterministic Integration Batches are implemented. Automated planning, provider routing, Task dependencies, shared-resource locks, automatic integration, automatic remediation loops, and Swarm Mode remain out of scope.
+Manual parallel provider Tasks, quality gates, user-requested independent reviews, deterministic Integration Batches, Missions, explicit Task dependencies, and manual execution waves are implemented. Automated planning, provider routing, scheduling, shared-resource locks, automatic integration, automatic remediation loops, and Swarm Mode remain out of scope.
 
 ### IMPLEMENTED v0.2 — Quality Gates and Reviewer
 
 New managed Builder Tasks require independent review by default while historical Tasks keep their prior completion behavior. Users may change the Project policy or the Task-level requirement. Required approved gates must pass against the current immutable snapshot before review; a workspace mutation stales that snapshot and its results. Reviewer generation uses the selected provider instance's shared `TextGeneration` capability against a bounded, data-minimized evidence package. Schema decoding and server invariants fail closed, and a blocking or security finding cannot coexist with an approving verdict.
 
-### ROADMAP v0.2 — Deterministic Swarm
+### IMPLEMENTED v0.3 — Missions and explicit execution waves
 
-Later, add Mission Composer, an Architect responsibility, a task DAG, ownership prediction, shared-resource locks, and an automatic controlled queue over the implemented manual Integration Engine.
+A Mission is the durable coordination boundary for a human-authored engineering objective. Each Task belongs to at most one Mission, remains a canonical Task with its existing workspace/result/review lifecycle, and may depend on other Mission Tasks. The server rejects cycles and direct execution that would bypass Mission readiness. Waves are derived topological views, never persisted scheduler state. The user explicitly activates the Mission, starts one ready Task or all currently ready Tasks, edits the graph within guarded rules, creates an optional Integration Batch, and explicitly completes or cancels the Mission.
+
+### ROADMAP v0.4 — Deterministic Swarm
+
+Later, add an Architect responsibility, ownership prediction, shared-resource locks, and an automatic controlled queue over the implemented Mission DAG and manual Integration Engine.
 
 Command Deck and Swarm Mode must use the same Task, Workspace, Provider, Session, Event, Diff, and Review primitives.
 

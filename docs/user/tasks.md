@@ -2,6 +2,8 @@
 
 For manual multi-Task work, open **Command Deck** from the active Project menu or Project settings. See [Coordinate Tasks in Command Deck](command-deck.md).
 
+A Task may belong to one Mission. It remains the same canonical Task with the same provider, ownership, isolated workspace, review, and result lifecycle; Mission membership adds only explicit dependencies and derived readiness. See [Plan and run a Mission](missions.md).
+
 Managed Builder Tasks keep their work in an isolated workspace. Open a Task in project settings and expand **Task Changes** to inspect the complete result from the Task's base commit to its current workspace. The file list includes committed, staged, unstaged, and untracked changes. Select a file to load its patch; binary and oversized files show a safe placeholder.
 
 Choose **Prepare completion** when the work is ready. Nebula validates ownership, captures an immutable review snapshot, and prepares a structured handoff. Git evidence is read-only. You can edit the summary, reported tests, assumptions, interface changes, migrations, risks, and follow-ups before marking the handoff ready.

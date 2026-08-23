@@ -4,7 +4,7 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import { createModelSelection } from "@t3tools/shared/model";
-import { TaskRestoreId, TaskReviewId } from "@t3tools/contracts";
+import { MissionId, TaskRestoreId, TaskReviewId } from "@t3tools/contracts";
 import type {
   EnvironmentId,
   ModelSelection,
@@ -50,6 +50,7 @@ import { newMessageId, newTaskId, newThreadId, randomUUID } from "../../lib/util
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { useServerConfigs } from "../../state/entities";
 import { environmentSnapshotAtom } from "../../state/shell";
+import { projectEnvironment } from "../../state/projects";
 import { taskEnvironment } from "../../state/tasks";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -64,6 +65,7 @@ import {
 } from "../ProjectTasksSection";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { IntegrationPanel } from "./IntegrationPanel";
+import { MissionPanel } from "./MissionPanel";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -110,6 +112,7 @@ interface CommandDeckProject {
 }
 
 type InspectorSection = "overview" | "ownership" | "changes" | "review" | "workspace";
+type CommandDeckSection = "tasks" | "missions" | "integration";
 
 const toneVariant = {
   neutral: "outline",
@@ -261,6 +264,10 @@ export function CommandDeck({
   );
   const currentProject =
     snapshot?.projects.find((candidate) => candidate.id === project.id) ?? null;
+  const missions = useMemo(
+    () => (snapshot?.missions ?? []).filter((mission) => mission.projectId === project.id),
+    [project.id, snapshot?.missions],
+  );
   const threadById = useMemo(
     () => new Map((snapshot?.threads ?? []).map((thread) => [thread.id, thread] as const)),
     [snapshot?.threads],
@@ -328,6 +335,17 @@ export function CommandDeck({
     () => providerTaskCounts([...modelSelectionByTaskId.values()]),
     [modelSelectionByTaskId],
   );
+  const unavailableProviderTaskIds = useMemo(
+    () =>
+      new Set(
+        tasks
+          .filter((task) =>
+            (attentionByTaskId.get(task.id) ?? []).some((item) => item.kind === "provider"),
+          )
+          .map((task) => task.id),
+      ),
+    [attentionByTaskId, tasks],
+  );
 
   const createTask = useAtomCommand(taskEnvironment.create, { reportFailure: false });
   const bindThread = useAtomCommand(taskEnvironment.bindThread, { reportFailure: false });
@@ -364,8 +382,13 @@ export function CommandDeck({
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn, { reportFailure: false });
+  const addMissionTask = useAtomCommand(projectEnvironment.addMissionTask, {
+    reportFailure: false,
+  });
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [createMissionId, setCreateMissionId] = useState<MissionId | null>(null);
+  const [deckSection, setDeckSection] = useState<CommandDeckSection>("tasks");
   const [createTitle, setCreateTitle] = useState("");
   const [createObjective, setCreateObjective] = useState("");
   const [createCriteria, setCreateCriteria] = useState<string[]>([]);
@@ -376,7 +399,9 @@ export function CommandDeck({
   const [editingTask, setEditingTask] = useState<OrchestrationTask | null>(null);
   const [editingRules, setEditingRules] = useState<ReadonlyArray<OwnershipRuleDraft>>([]);
   const [busyTaskId, setBusyTaskId] = useState<TaskId | null>(null);
-  const [pendingStartTaskId, setPendingStartTaskId] = useState<TaskId | null>(null);
+  const [pendingStartTaskIds, setPendingStartTaskIds] = useState<ReadonlySet<TaskId>>(
+    () => new Set(),
+  );
   const [inspectorSection, setInspectorSection] = useState<InspectorSection>("overview");
   const [handoffSummary, setHandoffSummary] = useState("");
   const [criteriaText, setCriteriaText] = useState("");
@@ -443,6 +468,14 @@ export function CommandDeck({
         }),
       );
     }
+    if (error === null && createMissionId) {
+      error = commandError(
+        await addMissionTask({
+          environmentId: project.environmentId,
+          input: { missionId: createMissionId, projectId: project.id, taskId },
+        }),
+      );
+    }
     setBusyTaskId(null);
     if (error) {
       reportError("Could not create Task", error);
@@ -453,6 +486,7 @@ export function CommandDeck({
     setCreateObjective("");
     setCreateCriteria([]);
     setCreateOwnership([{ draftId: randomUUID(), access: "write", pattern: "", reason: "" }]);
+    setCreateMissionId(null);
     setCreateOpen(false);
   };
 
@@ -564,7 +598,7 @@ export function CommandDeck({
       await launchReadyTask(task);
       return;
     }
-    setPendingStartTaskId(task.id);
+    setPendingStartTaskIds((current) => new Set(current).add(task.id));
     const error = commandError(
       await prepareWorkspace({
         environmentId: project.environmentId,
@@ -572,28 +606,41 @@ export function CommandDeck({
       }),
     );
     if (error) {
-      setPendingStartTaskId(null);
+      setPendingStartTaskIds((current) => {
+        const next = new Set(current);
+        next.delete(task.id);
+        return next;
+      });
       setBusyTaskId(null);
       reportError("Could not prepare Task workspace", error);
     }
   };
 
   useEffect(() => {
-    if (!pendingStartTaskId) return;
-    const task = tasks.find((candidate) => candidate.id === pendingStartTaskId);
-    if (!task?.workspace) return;
-    if (task.workspace.status === "ready") {
-      setPendingStartTaskId(null);
-      void launchReadyTask(task);
-    } else if (task.workspace.status === "failed" || task.workspace.status === "missing") {
-      setPendingStartTaskId(null);
-      setBusyTaskId(null);
-      reportError(
-        "Could not prepare Task workspace",
-        task.workspace.failureReason ?? "Workspace preparation failed.",
-      );
+    for (const taskId of pendingStartTaskIds) {
+      const task = tasks.find((candidate) => candidate.id === taskId);
+      if (!task?.workspace) continue;
+      if (task.workspace.status === "ready") {
+        setPendingStartTaskIds((current) => {
+          const next = new Set(current);
+          next.delete(taskId);
+          return next;
+        });
+        void launchReadyTask(task);
+      } else if (task.workspace.status === "failed" || task.workspace.status === "missing") {
+        setPendingStartTaskIds((current) => {
+          const next = new Set(current);
+          next.delete(taskId);
+          return next;
+        });
+        setBusyTaskId(null);
+        reportError(
+          "Could not prepare Task workspace",
+          task.workspace.failureReason ?? "Workspace preparation failed.",
+        );
+      }
     }
-  }, [launchReadyTask, pendingStartTaskId, reportError, tasks]);
+  }, [launchReadyTask, pendingStartTaskIds, reportError, tasks]);
 
   const runTaskCommand = async (
     task: OrchestrationTask,
@@ -770,9 +817,17 @@ export function CommandDeck({
                 {displayName} · {project.workspaceRoot}
               </p>
             </div>
-            <Button size="sm" onClick={() => setCreateOpen(true)}>
-              <PlusIcon /> New Task
-            </Button>
+            {deckSection === "tasks" ? (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setCreateMissionId(null);
+                  setCreateOpen(true);
+                }}
+              >
+                <PlusIcon /> New Task
+              </Button>
+            ) : null}
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
             <CompactStat label="Tasks" value={summary.total} />
@@ -796,9 +851,32 @@ export function CommandDeck({
               ))}
             </div>
           ) : null}
+          <nav className="mt-3 flex flex-wrap gap-1" aria-label="Command Deck sections">
+            <Button
+              size="xs"
+              variant={deckSection === "tasks" ? "default" : "outline"}
+              onClick={() => setDeckSection("tasks")}
+            >
+              Tasks
+            </Button>
+            <Button
+              size="xs"
+              variant={deckSection === "missions" ? "default" : "outline"}
+              onClick={() => setDeckSection("missions")}
+            >
+              Missions
+            </Button>
+            <Button
+              size="xs"
+              variant={deckSection === "integration" ? "default" : "outline"}
+              onClick={() => setDeckSection("integration")}
+            >
+              Integration
+            </Button>
+          </nav>
         </section>
 
-        {currentProject ? (
+        {deckSection === "integration" && currentProject ? (
           <IntegrationPanel
             environmentId={project.environmentId}
             project={currentProject}
@@ -806,659 +884,849 @@ export function CommandDeck({
           />
         ) : null}
 
-        {tasks.length === 0 ? (
-          <section className="flex min-h-[26rem] flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-card/75 p-8 text-center">
-            <div className="max-w-md">
-              <FolderGit2Icon className="mx-auto size-8 text-primary" aria-hidden />
-              <h2 className="mt-4 text-lg font-semibold">
-                Run multiple coding agents without sharing one writable workspace.
-              </h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Create a Task, choose a provider, set ownership, then start and review the work
-                here.
-              </p>
-              <Button className="mt-5" onClick={() => setCreateOpen(true)}>
-                Create your first Task
-              </Button>
-            </div>
-          </section>
-        ) : (
-          <div className="grid min-h-[34rem] flex-1 gap-3 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)_23rem]">
-            <section
-              className="min-h-0 overflow-hidden rounded-xl border border-border/70 bg-card/95"
-              aria-label="Task rail"
-            >
-              <div className="border-b border-border/70 px-3 py-2.5">
-                <h2 className="text-sm font-medium">Tasks</h2>
-                <p className="text-xs text-muted-foreground">
-                  Select a Task to inspect its canonical state.
+        {deckSection === "missions" && currentProject ? (
+          <MissionPanel
+            environmentId={project.environmentId}
+            project={currentProject}
+            missions={missions}
+            tasks={tasks}
+            threads={snapshot?.threads ?? []}
+            unavailableProviderTaskIds={unavailableProviderTaskIds}
+            onStartTask={startTask}
+            onOpenTask={(taskId) => {
+              setSelectedTaskId(taskId);
+              setDeckSection("tasks");
+            }}
+            onCreateTask={(missionId) => {
+              setCreateMissionId(missionId);
+              setCreateOpen(true);
+            }}
+          />
+        ) : null}
+
+        {deckSection === "tasks" &&
+          (tasks.length === 0 ? (
+            <section className="flex min-h-[26rem] flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-card/75 p-8 text-center">
+              <div className="max-w-md">
+                <FolderGit2Icon className="mx-auto size-8 text-primary" aria-hidden />
+                <h2 className="mt-4 text-lg font-semibold">
+                  Run multiple coding agents without sharing one writable workspace.
+                </h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Create a Task, choose a provider, set ownership, then start and review the work
+                  here.
                 </p>
-              </div>
-              <div className="max-h-[calc(100dvh-18rem)] overflow-auto p-1.5 [content-visibility:auto]">
-                {tasks.map((task) => {
-                  const thread = task.threadId ? (threadById.get(task.threadId) ?? null) : null;
-                  const attention = attentionByTaskId.get(task.id) ?? [];
-                  const presentation = deriveTaskPresentationStatus({ task, thread, attention });
-                  const providerEntry = providerEntryByTaskId.get(task.id) ?? null;
-                  const selection = modelSelectionByTaskId.get(task.id) ?? null;
-                  return (
-                    <button
-                      type="button"
-                      key={task.id}
-                      aria-current={selectedTask?.id === task.id ? "true" : undefined}
-                      onClick={() => setSelectedTaskId(task.id)}
-                      className={`mb-1 w-full rounded-lg px-2.5 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                        selectedTask?.id === task.id
-                          ? "bg-primary/10 ring-1 ring-primary/25"
-                          : "hover:bg-muted/45"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="min-w-0 truncate text-sm font-medium">{task.title}</span>
-                        <ChevronRightIcon
-                          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-                          aria-hidden
-                        />
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <Badge size="sm" variant={toneVariant[presentation.tone]}>
-                          {presentation.label}
-                        </Badge>
-                        <span className="truncate text-[11px] text-muted-foreground">
-                          {providerEntry?.displayName ?? selection?.instanceId ?? "Unassigned"} ·{" "}
-                          {selection?.model || "No model"}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
-                        <span>{task.role === "builder" ? "Builder" : task.role}</span>
-                        <span className="text-right">{taskChangedFiles(task)} files</span>
-                        <span>{task.workspace?.status ?? "No workspace"}</span>
-                        <span className="truncate text-right">
-                          {task.handoff?.status ?? "No handoff"}
-                        </span>
-                      </div>
-                      <AttentionList items={attention.slice(0, 1)} />
-                    </button>
-                  );
-                })}
+                <Button className="mt-5" onClick={() => setCreateOpen(true)}>
+                  Create your first Task
+                </Button>
               </div>
             </section>
-
-            <section
-              className="min-h-0 overflow-hidden rounded-xl border border-border/70 bg-card/95"
-              aria-label="Active Task workspace"
-            >
-              {selectedTask ? (
-                <div className="flex h-full min-h-[30rem] flex-col">
-                  <header className="border-b border-border/70 p-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[11px] text-muted-foreground">Active workspace</p>
-                        <h2 className="truncate text-base font-semibold">{selectedTask.title}</h2>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {selectedProviderEntry?.displayName ??
-                            selectedSelection?.instanceId ??
-                            "Unassigned"}{" "}
-                          · {selectedSelection?.model || "No model"} · {selectedTask.role}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {selectedTask.status === "draft" ? (
-                          <Button
-                            size="xs"
-                            disabled={busyTaskId === selectedTask.id}
-                            onClick={() => void startTask(selectedTask)}
-                          >
-                            <PlayIcon />{" "}
-                            {selectedTask.workspace?.status === "preparing"
-                              ? "Preparing…"
-                              : "Start"}
-                          </Button>
-                        ) : null}
-                        {selectedThread?.latestTurn?.state === "running" ? (
-                          <Button
-                            size="xs"
-                            variant="destructive"
-                            disabled={busyTaskId === selectedTask.id}
-                            onClick={() =>
-                              void runTaskCommand(selectedTask, "Could not stop current turn", () =>
-                                interruptTurn({
-                                  environmentId: project.environmentId,
-                                  input: { threadId: selectedThread.id },
-                                }),
-                              )
-                            }
-                          >
-                            <SquareIcon /> Stop current turn
-                          </Button>
-                        ) : null}
-                        {selectedTask.threadId ? (
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            onClick={() => openThread(selectedTask)}
-                          >
-                            <ExternalLinkIcon /> Open Thread
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                  </header>
-                  <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4">
-                    <CompactStat label="Task status" value={selectedTask.status} />
-                    <CompactStat
-                      label="Current action"
-                      value={deriveCurrentAction(selectedThread)}
-                    />
-                    <CompactStat
-                      label="Workspace"
-                      value={selectedTask.workspace?.status ?? "Not prepared"}
-                    />
-                    <CompactStat
-                      label="Ownership"
-                      value={selectedTask.ownership?.status ?? "Unconfigured"}
-                    />
-                  </div>
-                  <div className="mx-3 rounded-lg border border-border/60 bg-background/45 p-3">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <ActivityIcon className="size-4 text-primary" aria-hidden /> Canonical
-                      provider execution
-                    </div>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {selectedTask.threadId
-                        ? "This Task uses its existing Thread, provider stream, composer, tools, and terminal. Open it to continue execution without creating a second chat surface."
-                        : "Starting prepares an isolated worktree, creates the canonical Thread, binds it to this Task, and dispatches the objective to the selected provider."}
-                    </p>
-                    {selectedThread ? (
-                      <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                        <div>
-                          <dt className="text-muted-foreground">Thread</dt>
-                          <dd className="truncate font-mono">{selectedThread.id}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-muted-foreground">Session</dt>
-                          <dd>{selectedThread.session?.status ?? "Not started"}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-muted-foreground">Turn</dt>
-                          <dd>{selectedThread.latestTurn?.state ?? "No turn"}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-muted-foreground">Updated</dt>
-                          <dd>{formatTimestamp(selectedThread.updatedAt)}</dd>
-                        </div>
-                      </dl>
-                    ) : null}
-                  </div>
-                  <div className="mt-auto border-t border-border/70 p-3">
-                    <AttentionList items={selectedAttention} />
-                    {selectedAttention.length === 0 ? (
-                      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <CheckCircle2Icon className="size-3.5 text-success" aria-hidden /> No
-                        attention required.
-                      </p>
-                    ) : null}
-                  </div>
+          ) : (
+            <div className="grid min-h-[34rem] flex-1 gap-3 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)_23rem]">
+              <section
+                className="min-h-0 overflow-hidden rounded-xl border border-border/70 bg-card/95"
+                aria-label="Task rail"
+              >
+                <div className="border-b border-border/70 px-3 py-2.5">
+                  <h2 className="text-sm font-medium">Tasks</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Select a Task to inspect its canonical state.
+                  </p>
                 </div>
-              ) : null}
-            </section>
-
-            <section
-              className="min-h-0 overflow-hidden rounded-xl border border-border/70 bg-card/95 lg:col-span-2 xl:col-span-1"
-              aria-label="Task inspector"
-            >
-              {selectedTask ? (
-                <div className="flex h-full min-h-[30rem] flex-col">
-                  <div className="border-b border-border/70 px-3 py-2.5">
-                    <h2 className="text-sm font-medium">Inspector</h2>
-                  </div>
-                  <div
-                    className="flex gap-1 overflow-x-auto border-b border-border/60 p-1.5"
-                    role="tablist"
-                    aria-label="Task inspector sections"
-                  >
-                    {(["overview", "ownership", "changes", "review", "workspace"] as const).map(
-                      (section) => (
-                        <button
-                          type="button"
-                          role="tab"
-                          aria-selected={inspectorSection === section}
-                          key={section}
-                          onClick={() => setInspectorSection(section)}
-                          className={`rounded-md px-2 py-1.5 text-xs capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${inspectorSection === section ? "bg-primary/12 text-foreground" : "text-muted-foreground hover:bg-muted/45"}`}
-                        >
-                          {section}
-                        </button>
-                      ),
-                    )}
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-auto p-3">
-                    {inspectorSection === "overview" ? (
-                      <div className="space-y-4">
-                        <div>
-                          <p className="text-xs text-muted-foreground">Objective</p>
-                          <p className="mt-1 text-sm leading-5">{selectedTask.objective}</p>
+                <div className="max-h-[calc(100dvh-18rem)] overflow-auto p-1.5 [content-visibility:auto]">
+                  {tasks.map((task) => {
+                    const thread = task.threadId ? (threadById.get(task.threadId) ?? null) : null;
+                    const attention = attentionByTaskId.get(task.id) ?? [];
+                    const presentation = deriveTaskPresentationStatus({ task, thread, attention });
+                    const providerEntry = providerEntryByTaskId.get(task.id) ?? null;
+                    const selection = modelSelectionByTaskId.get(task.id) ?? null;
+                    return (
+                      <button
+                        type="button"
+                        key={task.id}
+                        aria-current={selectedTask?.id === task.id ? "true" : undefined}
+                        onClick={() => setSelectedTaskId(task.id)}
+                        className={`mb-1 w-full rounded-lg px-2.5 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                          selectedTask?.id === task.id
+                            ? "bg-primary/10 ring-1 ring-primary/25"
+                            : "hover:bg-muted/45"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="min-w-0 truncate text-sm font-medium">{task.title}</span>
+                          <ChevronRightIcon
+                            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+                            aria-hidden
+                          />
                         </div>
-                        <dl className="space-y-2 text-xs">
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <Badge size="sm" variant={toneVariant[presentation.tone]}>
+                            {presentation.label}
+                          </Badge>
+                          <span className="truncate text-[11px] text-muted-foreground">
+                            {providerEntry?.displayName ?? selection?.instanceId ?? "Unassigned"} ·{" "}
+                            {selection?.model || "No model"}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
+                          <span>{task.role === "builder" ? "Builder" : task.role}</span>
+                          <span className="text-right">{taskChangedFiles(task)} files</span>
+                          <span>{task.workspace?.status ?? "No workspace"}</span>
+                          <span className="truncate text-right">
+                            {task.handoff?.status ?? "No handoff"}
+                          </span>
+                        </div>
+                        <AttentionList items={attention.slice(0, 1)} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section
+                className="min-h-0 overflow-hidden rounded-xl border border-border/70 bg-card/95"
+                aria-label="Active Task workspace"
+              >
+                {selectedTask ? (
+                  <div className="flex h-full min-h-[30rem] flex-col">
+                    <header className="border-b border-border/70 p-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[11px] text-muted-foreground">Active workspace</p>
+                          <h2 className="truncate text-base font-semibold">{selectedTask.title}</h2>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {selectedProviderEntry?.displayName ??
+                              selectedSelection?.instanceId ??
+                              "Unassigned"}{" "}
+                            · {selectedSelection?.model || "No model"} · {selectedTask.role}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {selectedTask.status === "draft" ? (
+                            <Button
+                              size="xs"
+                              disabled={busyTaskId === selectedTask.id}
+                              onClick={() => void startTask(selectedTask)}
+                            >
+                              <PlayIcon />{" "}
+                              {selectedTask.workspace?.status === "preparing"
+                                ? "Preparing…"
+                                : "Start"}
+                            </Button>
+                          ) : null}
+                          {selectedThread?.latestTurn?.state === "running" ? (
+                            <Button
+                              size="xs"
+                              variant="destructive"
+                              disabled={busyTaskId === selectedTask.id}
+                              onClick={() =>
+                                void runTaskCommand(
+                                  selectedTask,
+                                  "Could not stop current turn",
+                                  () =>
+                                    interruptTurn({
+                                      environmentId: project.environmentId,
+                                      input: { threadId: selectedThread.id },
+                                    }),
+                                )
+                              }
+                            >
+                              <SquareIcon /> Stop current turn
+                            </Button>
+                          ) : null}
+                          {selectedTask.threadId ? (
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => openThread(selectedTask)}
+                            >
+                              <ExternalLinkIcon /> Open Thread
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </header>
+                    <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4">
+                      <CompactStat label="Task status" value={selectedTask.status} />
+                      <CompactStat
+                        label="Current action"
+                        value={deriveCurrentAction(selectedThread)}
+                      />
+                      <CompactStat
+                        label="Workspace"
+                        value={selectedTask.workspace?.status ?? "Not prepared"}
+                      />
+                      <CompactStat
+                        label="Ownership"
+                        value={selectedTask.ownership?.status ?? "Unconfigured"}
+                      />
+                    </div>
+                    <div className="mx-3 rounded-lg border border-border/60 bg-background/45 p-3">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <ActivityIcon className="size-4 text-primary" aria-hidden /> Canonical
+                        provider execution
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {selectedTask.threadId
+                          ? "This Task uses its existing Thread, provider stream, composer, tools, and terminal. Open it to continue execution without creating a second chat surface."
+                          : "Starting prepares an isolated worktree, creates the canonical Thread, binds it to this Task, and dispatches the objective to the selected provider."}
+                      </p>
+                      {selectedThread ? (
+                        <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                           <div>
-                            <dt className="text-muted-foreground">Provider / model</dt>
-                            <dd>
-                              {selectedProviderEntry?.displayName ??
-                                selectedSelection?.instanceId ??
-                                "Unassigned"}{" "}
-                              · {selectedSelection?.model || "No model"}
-                            </dd>
+                            <dt className="text-muted-foreground">Thread</dt>
+                            <dd className="truncate font-mono">{selectedThread.id}</dd>
                           </div>
                           <div>
-                            <dt className="text-muted-foreground">Role</dt>
-                            <dd>{selectedTask.role}</dd>
+                            <dt className="text-muted-foreground">Session</dt>
+                            <dd>{selectedThread.session?.status ?? "Not started"}</dd>
                           </div>
                           <div>
-                            <dt className="text-muted-foreground">Created</dt>
-                            <dd>{formatTimestamp(selectedTask.createdAt)}</dd>
+                            <dt className="text-muted-foreground">Turn</dt>
+                            <dd>{selectedThread.latestTurn?.state ?? "No turn"}</dd>
                           </div>
                           <div>
-                            <dt className="text-muted-foreground">Activated</dt>
-                            <dd>{formatTimestamp(selectedTask.activatedAt)}</dd>
+                            <dt className="text-muted-foreground">Updated</dt>
+                            <dd>{formatTimestamp(selectedThread.updatedAt)}</dd>
                           </div>
                         </dl>
-                        <div className="flex flex-wrap gap-1.5">
-                          {selectedTask.status === "draft" || selectedTask.status === "active" ? (
-                            <Button
-                              size="xs"
-                              variant="ghost"
-                              disabled={busyTaskId === selectedTask.id}
-                              onClick={() =>
-                                void runTaskCommand(selectedTask, "Could not cancel Task", () =>
-                                  cancelTask({
-                                    environmentId: project.environmentId,
-                                    input: { taskId: selectedTask.id },
-                                  }),
-                                )
-                              }
-                            >
-                              <CircleSlash2Icon /> Cancel Task
-                            </Button>
-                          ) : null}
-                          {(selectedTask.status === "completed" ||
-                            selectedTask.status === "cancelled") &&
-                          selectedTask.workspace &&
-                          selectedTask.workspace.status !== "removed" ? (
-                            <Button
-                              size="xs"
-                              variant="outline"
-                              disabled={busyTaskId === selectedTask.id}
-                              onClick={() =>
-                                void runTaskCommand(
-                                  selectedTask,
-                                  "Could not remove workspace",
-                                  () =>
-                                    removeWorkspace({
-                                      environmentId: project.environmentId,
-                                      input: { taskId: selectedTask.id },
-                                    }),
-                                )
-                              }
-                            >
-                              <Trash2Icon /> Remove workspace
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-                    {inspectorSection === "ownership" ? (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="flex items-center gap-1.5 text-sm font-medium">
-                            <ShieldCheckIcon className="size-4" /> Ownership
-                          </span>
-                          <Badge
-                            size="sm"
-                            variant={
-                              selectedTask.ownership?.status === "valid"
-                                ? "success"
-                                : selectedTask.ownership?.status === "violation" ||
-                                    selectedTask.ownership?.status === "error"
-                                  ? "destructive"
-                                  : "outline"
-                            }
-                          >
-                            {selectedTask.ownership?.status ?? "Unconfigured"}
-                          </Badge>
-                        </div>
-                        {(["write", "read", "deny"] as const).map((access) => (
-                          <div key={access}>
-                            <p className="text-[11px] text-muted-foreground">
-                              {access === "read" ? "Read-only" : access}
-                            </p>
-                            <div className="mt-1 space-y-1">
-                              {selectedTask.ownership?.rules
-                                .filter((rule) => rule.access === access)
-                                .map((rule) => (
-                                  <code
-                                    key={rule.id}
-                                    className="block truncate rounded bg-muted/45 px-2 py-1 text-xs"
-                                  >
-                                    {rule.pattern}
-                                  </code>
-                                )) || null}
-                            </div>
-                          </div>
-                        ))}
-                        {selectedTask.ownership?.violations.map((violation) => (
-                          <p
-                            key={`${violation.path}:${violation.changeType}`}
-                            className="rounded-md bg-destructive/8 px-2 py-1.5 text-xs text-destructive"
-                          >
-                            {violation.path} · {violation.reason}
-                          </p>
-                        ))}
-                        <div className="flex flex-wrap gap-1.5">
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            onClick={() => editOwnership(selectedTask)}
-                          >
-                            Edit ownership
-                          </Button>
-                          {selectedTask.workspace?.status === "ready" ? (
-                            <Button
-                              size="xs"
-                              variant="outline"
-                              disabled={busyTaskId === selectedTask.id}
-                              onClick={() =>
-                                void runTaskCommand(
-                                  selectedTask,
-                                  "Could not validate ownership",
-                                  () =>
-                                    validateOwnership({
-                                      environmentId: project.environmentId,
-                                      input: { taskId: selectedTask.id },
-                                    }),
-                                )
-                              }
-                            >
-                              Validate ownership
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-                    {inspectorSection === "changes" ? (
-                      selectedTask.workspace?.status === "ready" ? (
-                        <TaskChangesPanel
-                          environmentId={project.environmentId}
-                          task={selectedTask}
-                          provider={
-                            selectedProviderEntry?.displayName ?? selectedSelection?.instanceId
-                          }
-                        />
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          Changes become available after the Task workspace is ready.
+                      ) : null}
+                    </div>
+                    <div className="mt-auto border-t border-border/70 p-3">
+                      <AttentionList items={selectedAttention} />
+                      {selectedAttention.length === 0 ? (
+                        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <CheckCircle2Icon className="size-3.5 text-success" aria-hidden /> No
+                          attention required.
                         </p>
-                      )
-                    ) : null}
-                    {inspectorSection === "review" ? (
-                      <div className="space-y-3">
-                        <div className="grid grid-cols-2 gap-2">
-                          <CompactStat
-                            label="Snapshot"
-                            value={selectedTask.reviewSnapshot?.status ?? "Not prepared"}
-                          />
-                          <CompactStat
-                            label="Handoff"
-                            value={selectedTask.handoff?.status ?? "Not prepared"}
-                          />
-                        </div>
-                        <div className="space-y-1.5 rounded-lg border border-black/[0.08] p-3">
-                          <p className="text-xs font-medium">Acceptance criteria</p>
-                          <Textarea
-                            aria-label="Task acceptance criteria"
-                            rows={4}
-                            placeholder="One optional criterion per line"
-                            value={criteriaText}
-                            onChange={(event) => setCriteriaText(event.currentTarget.value)}
-                          />
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            disabled={busyTaskId === selectedTask.id}
-                            onClick={() => void saveCriteria(selectedTask)}
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
+              <section
+                className="min-h-0 overflow-hidden rounded-xl border border-border/70 bg-card/95 lg:col-span-2 xl:col-span-1"
+                aria-label="Task inspector"
+              >
+                {selectedTask ? (
+                  <div className="flex h-full min-h-[30rem] flex-col">
+                    <div className="border-b border-border/70 px-3 py-2.5">
+                      <h2 className="text-sm font-medium">Inspector</h2>
+                    </div>
+                    <div
+                      className="flex gap-1 overflow-x-auto border-b border-border/60 p-1.5"
+                      role="tablist"
+                      aria-label="Task inspector sections"
+                    >
+                      {(["overview", "ownership", "changes", "review", "workspace"] as const).map(
+                        (section) => (
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={inspectorSection === section}
+                            key={section}
+                            onClick={() => setInspectorSection(section)}
+                            className={`rounded-md px-2 py-1.5 text-xs capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${inspectorSection === section ? "bg-primary/12 text-foreground" : "text-muted-foreground hover:bg-muted/45"}`}
                           >
-                            Save criteria
-                          </Button>
-                        </div>
-                        {selectedTask.handoff ? (
-                          <label className="block space-y-1.5 text-xs">
-                            <span className="text-muted-foreground">Handoff summary</span>
-                            <Textarea
-                              rows={7}
-                              value={handoffSummary}
-                              onChange={(event) => setHandoffSummary(event.currentTarget.value)}
-                            />
-                          </label>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            Prepare completion to capture an immutable review snapshot and
-                            structured handoff.
-                          </p>
-                        )}
-                        <div className="space-y-2 rounded-lg border border-black/[0.08] p-3">
-                          <div className="flex items-center justify-between gap-2">
+                            {section}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-auto p-3">
+                      {inspectorSection === "overview" ? (
+                        <div className="space-y-4">
+                          <div>
+                            <p className="text-xs text-muted-foreground">Objective</p>
+                            <p className="mt-1 text-sm leading-5">{selectedTask.objective}</p>
+                          </div>
+                          <dl className="space-y-2 text-xs">
                             <div>
-                              <p className="text-xs font-medium">Quality gates</p>
-                              <p className="text-[11px] text-muted-foreground">
-                                {configuredGates.length === 0
-                                  ? "No project quality gates configured"
-                                  : `${configuredGates.filter((gate) => gate.required).length} required`}
-                              </p>
+                              <dt className="text-muted-foreground">Provider / model</dt>
+                              <dd>
+                                {selectedProviderEntry?.displayName ??
+                                  selectedSelection?.instanceId ??
+                                  "Unassigned"}{" "}
+                                · {selectedSelection?.model || "No model"}
+                              </dd>
                             </div>
-                            {selectedTask.reviewSnapshot?.status === "current" &&
-                            selectedTask.handoff?.status === "ready" ? (
+                            <div>
+                              <dt className="text-muted-foreground">Role</dt>
+                              <dd>{selectedTask.role}</dd>
+                            </div>
+                            <div>
+                              <dt className="text-muted-foreground">Created</dt>
+                              <dd>{formatTimestamp(selectedTask.createdAt)}</dd>
+                            </div>
+                            <div>
+                              <dt className="text-muted-foreground">Activated</dt>
+                              <dd>{formatTimestamp(selectedTask.activatedAt)}</dd>
+                            </div>
+                          </dl>
+                          <div className="flex flex-wrap gap-1.5">
+                            {selectedTask.status === "draft" || selectedTask.status === "active" ? (
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                disabled={busyTaskId === selectedTask.id}
+                                onClick={() =>
+                                  void runTaskCommand(selectedTask, "Could not cancel Task", () =>
+                                    cancelTask({
+                                      environmentId: project.environmentId,
+                                      input: { taskId: selectedTask.id },
+                                    }),
+                                  )
+                                }
+                              >
+                                <CircleSlash2Icon /> Cancel Task
+                              </Button>
+                            ) : null}
+                            {(selectedTask.status === "completed" ||
+                              selectedTask.status === "cancelled") &&
+                            selectedTask.workspace &&
+                            selectedTask.workspace.status !== "removed" ? (
                               <Button
                                 size="xs"
                                 variant="outline"
-                                disabled={
-                                  busyTaskId === selectedTask.id ||
-                                  configuredGates.some(
-                                    (gate) => gate.approvedCommand !== gate.command,
-                                  )
-                                }
+                                disabled={busyTaskId === selectedTask.id}
                                 onClick={() =>
                                   void runTaskCommand(
                                     selectedTask,
-                                    "Could not run quality gates",
+                                    "Could not remove workspace",
                                     () =>
-                                      runQualityGates({
+                                      removeWorkspace({
                                         environmentId: project.environmentId,
-                                        input: {
-                                          taskId: selectedTask.id,
-                                          snapshotId: selectedTask.reviewSnapshot!.id,
-                                        },
+                                        input: { taskId: selectedTask.id },
                                       }),
                                   )
                                 }
                               >
-                                Run gates
+                                <Trash2Icon /> Remove workspace
                               </Button>
                             ) : null}
                           </div>
-                          {configuredGates.length > 0 ? (
-                            <div className="rounded-md bg-muted/30 p-2 font-mono text-[11px]">
-                              {configuredGates.map((gate) => (
-                                <p key={gate.id}>{gate.command}</p>
-                              ))}
+                        </div>
+                      ) : null}
+                      {inspectorSection === "ownership" ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="flex items-center gap-1.5 text-sm font-medium">
+                              <ShieldCheckIcon className="size-4" /> Ownership
+                            </span>
+                            <Badge
+                              size="sm"
+                              variant={
+                                selectedTask.ownership?.status === "valid"
+                                  ? "success"
+                                  : selectedTask.ownership?.status === "violation" ||
+                                      selectedTask.ownership?.status === "error"
+                                    ? "destructive"
+                                    : "outline"
+                              }
+                            >
+                              {selectedTask.ownership?.status ?? "Unconfigured"}
+                            </Badge>
+                          </div>
+                          {(["write", "read", "deny"] as const).map((access) => (
+                            <div key={access}>
+                              <p className="text-[11px] text-muted-foreground">
+                                {access === "read" ? "Read-only" : access}
+                              </p>
+                              <div className="mt-1 space-y-1">
+                                {selectedTask.ownership?.rules
+                                  .filter((rule) => rule.access === access)
+                                  .map((rule) => (
+                                    <code
+                                      key={rule.id}
+                                      className="block truncate rounded bg-muted/45 px-2 py-1 text-xs"
+                                    >
+                                      {rule.pattern}
+                                    </code>
+                                  )) || null}
+                              </div>
                             </div>
-                          ) : null}
-                          <div className="space-y-1">
-                            {configuredGates.map((gate) => {
-                              const run = currentQualityRuns.findLast(
-                                (candidate) =>
-                                  candidate.gateId === gate.id &&
-                                  candidate.command === gate.command,
-                              );
-                              return (
-                                <div key={gate.id} className="space-y-1 text-xs">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span>
-                                      {run?.status === "passed" ? "✓" : run ? "○" : "–"}{" "}
-                                      {gate.label}
-                                      {gate.required ? " · Required" : " · Optional"}
-                                    </span>
-                                    <span className="text-muted-foreground">
-                                      {run?.status ?? "Not run"}
-                                      {run?.exitCode === null || run?.exitCode === undefined
-                                        ? ""
-                                        : ` · exit ${run.exitCode}`}
-                                    </span>
-                                    {run?.status === "running" || run?.status === "queued" ? (
-                                      <Button
-                                        size="xs"
-                                        variant="ghost"
-                                        onClick={() =>
-                                          void runTaskCommand(
-                                            selectedTask,
-                                            "Could not cancel quality gate",
-                                            () =>
-                                              cancelQualityGate({
-                                                environmentId: project.environmentId,
-                                                input: { taskId: selectedTask.id, runId: run.id },
-                                              }),
-                                          )
-                                        }
-                                      >
-                                        Cancel
-                                      </Button>
-                                    ) : null}
-                                  </div>
-                                  {run?.outputSummary ? (
-                                    <details className="rounded bg-muted/30 px-2 py-1">
-                                      <summary className="cursor-pointer text-muted-foreground">
-                                        Output summary{run.outputTruncated ? " · Truncated" : ""}
-                                      </summary>
-                                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[10px]">
-                                        {run.outputSummary}
-                                      </pre>
-                                    </details>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
+                          ))}
+                          {selectedTask.ownership?.violations.map((violation) => (
+                            <p
+                              key={`${violation.path}:${violation.changeType}`}
+                              className="rounded-md bg-destructive/8 px-2 py-1.5 text-xs text-destructive"
+                            >
+                              {violation.path} · {violation.reason}
+                            </p>
+                          ))}
+                          <div className="flex flex-wrap gap-1.5">
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => editOwnership(selectedTask)}
+                            >
+                              Edit ownership
+                            </Button>
+                            {selectedTask.workspace?.status === "ready" ? (
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                disabled={busyTaskId === selectedTask.id}
+                                onClick={() =>
+                                  void runTaskCommand(
+                                    selectedTask,
+                                    "Could not validate ownership",
+                                    () =>
+                                      validateOwnership({
+                                        environmentId: project.environmentId,
+                                        input: { taskId: selectedTask.id },
+                                      }),
+                                  )
+                                }
+                              >
+                                Validate ownership
+                              </Button>
+                            ) : null}
                           </div>
                         </div>
-                        <div className="space-y-2 rounded-lg border border-black/[0.08] p-3">
-                          <div>
-                            <p className="text-xs font-medium">Independent review</p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {latestReview
-                                ? `${latestReview.status}${latestReview.verdict ? ` · ${latestReview.verdict}` : ""}`
-                                : selectedTask.reviewRequired
-                                  ? "Required for this Task"
-                                  : "Optional for this Task"}
-                            </p>
-                          </div>
-                          {reviewerSelection ? (
-                            <ProviderModelPicker
-                              activeInstanceId={reviewerSelection.instanceId}
-                              model={reviewerSelection.model}
-                              lockedProvider={null}
-                              instanceEntries={instanceEntries}
-                              modelOptionsByInstance={modelOptionsByInstance}
-                              triggerVariant="outline"
-                              triggerClassName="max-w-full"
-                              triggerAriaLabel="Reviewer provider and model"
-                              onInstanceModelChange={(instanceId, model) =>
-                                setReviewerSelection(createModelSelection(instanceId, model))
-                              }
-                            />
-                          ) : (
-                            <p className="text-xs text-destructive">No ready reviewer provider.</p>
-                          )}
-                          <p className="text-xs text-muted-foreground">
-                            Review diversity:{" "}
-                            {instanceEntries.find(
-                              (entry) => entry.instanceId === reviewerSelection?.instanceId,
-                            )?.driverKind === selectedProviderEntry?.driverKind
-                              ? "Same provider · Degraded"
-                              : "Cross-provider"}
-                          </p>
-                          <Button
-                            size="xs"
-                            disabled={
-                              !reviewerSelection ||
-                              !requiredGatesPassed ||
-                              selectedTask.handoff?.status !== "ready" ||
-                              selectedTask.reviewSnapshot?.status !== "current" ||
-                              busyTaskId === selectedTask.id
+                      ) : null}
+                      {inspectorSection === "changes" ? (
+                        selectedTask.workspace?.status === "ready" ? (
+                          <TaskChangesPanel
+                            environmentId={project.environmentId}
+                            task={selectedTask}
+                            provider={
+                              selectedProviderEntry?.displayName ?? selectedSelection?.instanceId
                             }
-                            onClick={() => void requestReview(selectedTask)}
-                          >
-                            Request review
-                          </Button>
-                          {latestReview?.summary ? (
-                            <div className="space-y-2 rounded-md bg-muted/30 p-2 text-xs">
-                              <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-                                <span>
-                                  Reviewer:{" "}
-                                  {instanceEntries.find(
-                                    (entry) =>
-                                      entry.instanceId ===
-                                      latestReview.reviewerModelSelection.instanceId,
-                                  )?.displayName ?? latestReview.reviewerModelSelection.instanceId}
-                                </span>
-                                <span>Snapshot: {latestReview.snapshotId}</span>
-                                <span>
-                                  Diversity:{" "}
-                                  {latestReview.diversity === "cross-provider"
-                                    ? "Cross-provider"
-                                    : "Same provider · Degraded"}
-                                </span>
+                          />
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            Changes become available after the Task workspace is ready.
+                          </p>
+                        )
+                      ) : null}
+                      {inspectorSection === "review" ? (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-2">
+                            <CompactStat
+                              label="Snapshot"
+                              value={selectedTask.reviewSnapshot?.status ?? "Not prepared"}
+                            />
+                            <CompactStat
+                              label="Handoff"
+                              value={selectedTask.handoff?.status ?? "Not prepared"}
+                            />
+                          </div>
+                          <div className="space-y-1.5 rounded-lg border border-black/[0.08] p-3">
+                            <p className="text-xs font-medium">Acceptance criteria</p>
+                            <Textarea
+                              aria-label="Task acceptance criteria"
+                              rows={4}
+                              placeholder="One optional criterion per line"
+                              value={criteriaText}
+                              onChange={(event) => setCriteriaText(event.currentTarget.value)}
+                            />
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              disabled={busyTaskId === selectedTask.id}
+                              onClick={() => void saveCriteria(selectedTask)}
+                            >
+                              Save criteria
+                            </Button>
+                          </div>
+                          {selectedTask.handoff ? (
+                            <label className="block space-y-1.5 text-xs">
+                              <span className="text-muted-foreground">Handoff summary</span>
+                              <Textarea
+                                rows={7}
+                                value={handoffSummary}
+                                onChange={(event) => setHandoffSummary(event.currentTarget.value)}
+                              />
+                            </label>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              Prepare completion to capture an immutable review snapshot and
+                              structured handoff.
+                            </p>
+                          )}
+                          <div className="space-y-2 rounded-lg border border-black/[0.08] p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <p className="text-xs font-medium">Quality gates</p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {configuredGates.length === 0
+                                    ? "No project quality gates configured"
+                                    : `${configuredGates.filter((gate) => gate.required).length} required`}
+                                </p>
                               </div>
-                              <p className="font-medium">{latestReview.verdict}</p>
-                              <p>{latestReview.summary}</p>
-                              {latestReview.findings.length > 0 ? (
-                                <div className="space-y-1">
-                                  {latestReview.findings.map((finding) => (
-                                    <div
-                                      key={`${finding.severity}:${finding.title}:${finding.detail}:${finding.file ?? ""}:${finding.line ?? ""}`}
-                                      className="rounded border border-black/[0.08] p-2"
-                                    >
-                                      <p className="font-medium">
-                                        {finding.severity} · {finding.title}
-                                      </p>
-                                      <p className="text-muted-foreground">{finding.detail}</p>
-                                      {finding.file ? (
-                                        <p className="font-mono text-[10px] text-muted-foreground">
-                                          {finding.file}
-                                          {finding.line ? `:${finding.line}` : ""}
-                                        </p>
+                              {selectedTask.reviewSnapshot?.status === "current" &&
+                              selectedTask.handoff?.status === "ready" ? (
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  disabled={
+                                    busyTaskId === selectedTask.id ||
+                                    configuredGates.some(
+                                      (gate) => gate.approvedCommand !== gate.command,
+                                    )
+                                  }
+                                  onClick={() =>
+                                    void runTaskCommand(
+                                      selectedTask,
+                                      "Could not run quality gates",
+                                      () =>
+                                        runQualityGates({
+                                          environmentId: project.environmentId,
+                                          input: {
+                                            taskId: selectedTask.id,
+                                            snapshotId: selectedTask.reviewSnapshot!.id,
+                                          },
+                                        }),
+                                    )
+                                  }
+                                >
+                                  Run gates
+                                </Button>
+                              ) : null}
+                            </div>
+                            {configuredGates.length > 0 ? (
+                              <div className="rounded-md bg-muted/30 p-2 font-mono text-[11px]">
+                                {configuredGates.map((gate) => (
+                                  <p key={gate.id}>{gate.command}</p>
+                                ))}
+                              </div>
+                            ) : null}
+                            <div className="space-y-1">
+                              {configuredGates.map((gate) => {
+                                const run = currentQualityRuns.findLast(
+                                  (candidate) =>
+                                    candidate.gateId === gate.id &&
+                                    candidate.command === gate.command,
+                                );
+                                return (
+                                  <div key={gate.id} className="space-y-1 text-xs">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span>
+                                        {run?.status === "passed" ? "✓" : run ? "○" : "–"}{" "}
+                                        {gate.label}
+                                        {gate.required ? " · Required" : " · Optional"}
+                                      </span>
+                                      <span className="text-muted-foreground">
+                                        {run?.status ?? "Not run"}
+                                        {run?.exitCode === null || run?.exitCode === undefined
+                                          ? ""
+                                          : ` · exit ${run.exitCode}`}
+                                      </span>
+                                      {run?.status === "running" || run?.status === "queued" ? (
+                                        <Button
+                                          size="xs"
+                                          variant="ghost"
+                                          onClick={() =>
+                                            void runTaskCommand(
+                                              selectedTask,
+                                              "Could not cancel quality gate",
+                                              () =>
+                                                cancelQualityGate({
+                                                  environmentId: project.environmentId,
+                                                  input: { taskId: selectedTask.id, runId: run.id },
+                                                }),
+                                            )
+                                          }
+                                        >
+                                          Cancel
+                                        </Button>
                                       ) : null}
                                     </div>
-                                  ))}
+                                    {run?.outputSummary ? (
+                                      <details className="rounded bg-muted/30 px-2 py-1">
+                                        <summary className="cursor-pointer text-muted-foreground">
+                                          Output summary{run.outputTruncated ? " · Truncated" : ""}
+                                        </summary>
+                                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[10px]">
+                                          {run.outputSummary}
+                                        </pre>
+                                      </details>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div className="space-y-2 rounded-lg border border-black/[0.08] p-3">
+                            <div>
+                              <p className="text-xs font-medium">Independent review</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {latestReview
+                                  ? `${latestReview.status}${latestReview.verdict ? ` · ${latestReview.verdict}` : ""}`
+                                  : selectedTask.reviewRequired
+                                    ? "Required for this Task"
+                                    : "Optional for this Task"}
+                              </p>
+                            </div>
+                            {reviewerSelection ? (
+                              <ProviderModelPicker
+                                activeInstanceId={reviewerSelection.instanceId}
+                                model={reviewerSelection.model}
+                                lockedProvider={null}
+                                instanceEntries={instanceEntries}
+                                modelOptionsByInstance={modelOptionsByInstance}
+                                triggerVariant="outline"
+                                triggerClassName="max-w-full"
+                                triggerAriaLabel="Reviewer provider and model"
+                                onInstanceModelChange={(instanceId, model) =>
+                                  setReviewerSelection(createModelSelection(instanceId, model))
+                                }
+                              />
+                            ) : (
+                              <p className="text-xs text-destructive">
+                                No ready reviewer provider.
+                              </p>
+                            )}
+                            <p className="text-xs text-muted-foreground">
+                              Review diversity:{" "}
+                              {instanceEntries.find(
+                                (entry) => entry.instanceId === reviewerSelection?.instanceId,
+                              )?.driverKind === selectedProviderEntry?.driverKind
+                                ? "Same provider · Degraded"
+                                : "Cross-provider"}
+                            </p>
+                            <Button
+                              size="xs"
+                              disabled={
+                                !reviewerSelection ||
+                                !requiredGatesPassed ||
+                                selectedTask.handoff?.status !== "ready" ||
+                                selectedTask.reviewSnapshot?.status !== "current" ||
+                                busyTaskId === selectedTask.id
+                              }
+                              onClick={() => void requestReview(selectedTask)}
+                            >
+                              Request review
+                            </Button>
+                            {latestReview?.summary ? (
+                              <div className="space-y-2 rounded-md bg-muted/30 p-2 text-xs">
+                                <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                                  <span>
+                                    Reviewer:{" "}
+                                    {instanceEntries.find(
+                                      (entry) =>
+                                        entry.instanceId ===
+                                        latestReview.reviewerModelSelection.instanceId,
+                                    )?.displayName ??
+                                      latestReview.reviewerModelSelection.instanceId}
+                                  </span>
+                                  <span>Snapshot: {latestReview.snapshotId}</span>
+                                  <span>
+                                    Diversity:{" "}
+                                    {latestReview.diversity === "cross-provider"
+                                      ? "Cross-provider"
+                                      : "Same provider · Degraded"}
+                                  </span>
                                 </div>
-                              ) : null}
-                              {latestReview.criteria.length > 0 ? (
-                                <div className="space-y-1">
-                                  <p className="font-medium">Acceptance criteria</p>
-                                  {latestReview.criteria.map((criterion) => (
-                                    <p
-                                      key={`${criterion.criterion}:${criterion.status}:${criterion.detail}`}
-                                    >
-                                      {criterion.status} · {criterion.criterion}
-                                    </p>
-                                  ))}
-                                </div>
-                              ) : null}
-                              {latestReview.requiredChanges.length > 0 ? (
-                                <ol className="list-decimal space-y-1 pl-4">
-                                  {latestReview.requiredChanges.map((change) => (
-                                    <li key={change}>{change}</li>
+                                <p className="font-medium">{latestReview.verdict}</p>
+                                <p>{latestReview.summary}</p>
+                                {latestReview.findings.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {latestReview.findings.map((finding) => (
+                                      <div
+                                        key={`${finding.severity}:${finding.title}:${finding.detail}:${finding.file ?? ""}:${finding.line ?? ""}`}
+                                        className="rounded border border-black/[0.08] p-2"
+                                      >
+                                        <p className="font-medium">
+                                          {finding.severity} · {finding.title}
+                                        </p>
+                                        <p className="text-muted-foreground">{finding.detail}</p>
+                                        {finding.file ? (
+                                          <p className="font-mono text-[10px] text-muted-foreground">
+                                            {finding.file}
+                                            {finding.line ? `:${finding.line}` : ""}
+                                          </p>
+                                        ) : null}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {latestReview.criteria.length > 0 ? (
+                                  <div className="space-y-1">
+                                    <p className="font-medium">Acceptance criteria</p>
+                                    {latestReview.criteria.map((criterion) => (
+                                      <p
+                                        key={`${criterion.criterion}:${criterion.status}:${criterion.detail}`}
+                                      >
+                                        {criterion.status} · {criterion.criterion}
+                                      </p>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {latestReview.requiredChanges.length > 0 ? (
+                                  <ol className="list-decimal space-y-1 pl-4">
+                                    {latestReview.requiredChanges.map((change) => (
+                                      <li key={change}>{change}</li>
+                                    ))}
+                                  </ol>
+                                ) : null}
+                                {latestReview.verdict === "request_changes" ||
+                                latestReview.verdict === "reject" ? (
+                                  <Button
+                                    size="xs"
+                                    variant="outline"
+                                    disabled={busyTaskId === selectedTask.id}
+                                    onClick={() =>
+                                      void runTaskCommand(
+                                        selectedTask,
+                                        "Could not send findings to Builder",
+                                        () =>
+                                          sendReviewFindings({
+                                            environmentId: project.environmentId,
+                                            input: {
+                                              taskId: selectedTask.id,
+                                              reviewId: latestReview.id,
+                                            },
+                                          }),
+                                      )
+                                    }
+                                  >
+                                    Send review findings to Builder
+                                  </Button>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            {(selectedTask.reviews?.length ?? 0) > 0 ? (
+                              <details className="text-[11px] text-muted-foreground">
+                                <summary className="cursor-pointer">
+                                  Review history: {selectedTask.reviews?.length} round
+                                  {selectedTask.reviews?.length === 1 ? "" : "s"} preserved
+                                </summary>
+                                <ol className="mt-1 space-y-1 pl-4">
+                                  {selectedTask.reviews?.map((review, index) => (
+                                    <li key={review.id}>
+                                      Round {index + 1} · {review.status}
+                                      {review.verdict ? ` · ${review.verdict}` : ""} ·{" "}
+                                      {review.diversity === "cross-provider"
+                                        ? "Cross-provider"
+                                        : "Same provider"}
+                                    </li>
                                   ))}
                                 </ol>
-                              ) : null}
-                              {latestReview.verdict === "request_changes" ||
-                              latestReview.verdict === "reject" ? (
+                              </details>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {selectedTask.status === "active" ? (
+                              <>
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  disabled={
+                                    busyTaskId === selectedTask.id ||
+                                    selectedTask.ownership?.status === "pending" ||
+                                    selectedTask.reviewSnapshot?.status === "current"
+                                  }
+                                  onClick={() =>
+                                    void runTaskCommand(
+                                      selectedTask,
+                                      "Could not prepare review",
+                                      () =>
+                                        prepareReview({
+                                          environmentId: project.environmentId,
+                                          input: {
+                                            taskId: selectedTask.id,
+                                            generation: "provider",
+                                          },
+                                        }),
+                                    )
+                                  }
+                                >
+                                  Prepare completion
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  disabled={
+                                    busyTaskId === selectedTask.id ||
+                                    selectedTask.ownership?.status === "pending" ||
+                                    selectedTask.reviewSnapshot?.status === "current"
+                                  }
+                                  onClick={() =>
+                                    void runTaskCommand(
+                                      selectedTask,
+                                      "Could not prepare manual handoff",
+                                      () =>
+                                        prepareReview({
+                                          environmentId: project.environmentId,
+                                          input: { taskId: selectedTask.id, generation: "manual" },
+                                        }),
+                                    )
+                                  }
+                                >
+                                  Manual handoff
+                                </Button>
+                              </>
+                            ) : null}
+                            {selectedTask.handoff &&
+                            selectedTask.reviewSnapshot?.status === "current" &&
+                            selectedTask.handoff.snapshotId === selectedTask.reviewSnapshot.id ? (
+                              <Button
+                                size="xs"
+                                disabled={!handoffSummary.trim() || busyTaskId === selectedTask.id}
+                                onClick={() => void saveHandoffReady(selectedTask)}
+                              >
+                                Mark ready
+                              </Button>
+                            ) : null}
+                            {selectedTask.handoff?.status === "ready" &&
+                            selectedTask.reviewSnapshot?.status === "current" ? (
+                              <Button
+                                size="xs"
+                                disabled={!completionEligible || busyTaskId === selectedTask.id}
+                                onClick={() =>
+                                  void runTaskCommand(selectedTask, "Could not complete Task", () =>
+                                    completeTask({
+                                      environmentId: project.environmentId,
+                                      input: { taskId: selectedTask.id },
+                                    }),
+                                  )
+                                }
+                              >
+                                Complete Task
+                              </Button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+                      {inspectorSection === "workspace" ? (
+                        <div className="space-y-3 text-xs">
+                          <div>
+                            <p className="text-muted-foreground">Isolation</p>
+                            <p>{selectedTask.workspace ? "Git-isolated" : "Not prepared"}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Branch</p>
+                            <code className="block truncate">
+                              {selectedTask.workspace?.branch ?? "Not assigned"}
+                            </code>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Base SHA</p>
+                            <code className="block truncate">
+                              {selectedTask.workspace?.baseCommit ?? "Not recorded"}
+                            </code>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Worktree</p>
+                            <code className="block break-all">
+                              {selectedTask.workspace?.path ?? "Not prepared"}
+                            </code>
+                          </div>
+                          {selectedTask.status === "active" &&
+                          selectedTask.workspace?.status === "ready" ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              <Button
+                                size="xs"
+                                variant="destructive"
+                                disabled={busyTaskId === selectedTask.id}
+                                onClick={() => void confirmRestore(selectedTask)}
+                              >
+                                <RotateCcwIcon /> Restore Task
+                              </Button>
+                              {selectedTask.restore?.safetyCheckpointRef ? (
                                 <Button
                                   size="xs"
                                   variant="outline"
@@ -1466,187 +1734,30 @@ export function CommandDeck({
                                   onClick={() =>
                                     void runTaskCommand(
                                       selectedTask,
-                                      "Could not send findings to Builder",
+                                      "Could not undo restore",
                                       () =>
-                                        sendReviewFindings({
+                                        undoRestore({
                                           environmentId: project.environmentId,
-                                          input: {
-                                            taskId: selectedTask.id,
-                                            reviewId: latestReview.id,
-                                          },
+                                          input: { taskId: selectedTask.id },
                                         }),
                                     )
                                   }
                                 >
-                                  Send review findings to Builder
+                                  <Undo2Icon /> Undo restore
                                 </Button>
                               ) : null}
                             </div>
                           ) : null}
-                          {(selectedTask.reviews?.length ?? 0) > 0 ? (
-                            <details className="text-[11px] text-muted-foreground">
-                              <summary className="cursor-pointer">
-                                Review history: {selectedTask.reviews?.length} round
-                                {selectedTask.reviews?.length === 1 ? "" : "s"} preserved
-                              </summary>
-                              <ol className="mt-1 space-y-1 pl-4">
-                                {selectedTask.reviews?.map((review, index) => (
-                                  <li key={review.id}>
-                                    Round {index + 1} · {review.status}
-                                    {review.verdict ? ` · ${review.verdict}` : ""} ·{" "}
-                                    {review.diversity === "cross-provider"
-                                      ? "Cross-provider"
-                                      : "Same provider"}
-                                  </li>
-                                ))}
-                              </ol>
-                            </details>
-                          ) : null}
                         </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {selectedTask.status === "active" ? (
-                            <>
-                              <Button
-                                size="xs"
-                                variant="outline"
-                                disabled={
-                                  busyTaskId === selectedTask.id ||
-                                  selectedTask.ownership?.status === "pending" ||
-                                  selectedTask.reviewSnapshot?.status === "current"
-                                }
-                                onClick={() =>
-                                  void runTaskCommand(
-                                    selectedTask,
-                                    "Could not prepare review",
-                                    () =>
-                                      prepareReview({
-                                        environmentId: project.environmentId,
-                                        input: { taskId: selectedTask.id, generation: "provider" },
-                                      }),
-                                  )
-                                }
-                              >
-                                Prepare completion
-                              </Button>
-                              <Button
-                                size="xs"
-                                variant="ghost"
-                                disabled={
-                                  busyTaskId === selectedTask.id ||
-                                  selectedTask.ownership?.status === "pending" ||
-                                  selectedTask.reviewSnapshot?.status === "current"
-                                }
-                                onClick={() =>
-                                  void runTaskCommand(
-                                    selectedTask,
-                                    "Could not prepare manual handoff",
-                                    () =>
-                                      prepareReview({
-                                        environmentId: project.environmentId,
-                                        input: { taskId: selectedTask.id, generation: "manual" },
-                                      }),
-                                  )
-                                }
-                              >
-                                Manual handoff
-                              </Button>
-                            </>
-                          ) : null}
-                          {selectedTask.handoff &&
-                          selectedTask.reviewSnapshot?.status === "current" &&
-                          selectedTask.handoff.snapshotId === selectedTask.reviewSnapshot.id ? (
-                            <Button
-                              size="xs"
-                              disabled={!handoffSummary.trim() || busyTaskId === selectedTask.id}
-                              onClick={() => void saveHandoffReady(selectedTask)}
-                            >
-                              Mark ready
-                            </Button>
-                          ) : null}
-                          {selectedTask.handoff?.status === "ready" &&
-                          selectedTask.reviewSnapshot?.status === "current" ? (
-                            <Button
-                              size="xs"
-                              disabled={!completionEligible || busyTaskId === selectedTask.id}
-                              onClick={() =>
-                                void runTaskCommand(selectedTask, "Could not complete Task", () =>
-                                  completeTask({
-                                    environmentId: project.environmentId,
-                                    input: { taskId: selectedTask.id },
-                                  }),
-                                )
-                              }
-                            >
-                              Complete Task
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-                    {inspectorSection === "workspace" ? (
-                      <div className="space-y-3 text-xs">
-                        <div>
-                          <p className="text-muted-foreground">Isolation</p>
-                          <p>{selectedTask.workspace ? "Git-isolated" : "Not prepared"}</p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Branch</p>
-                          <code className="block truncate">
-                            {selectedTask.workspace?.branch ?? "Not assigned"}
-                          </code>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Base SHA</p>
-                          <code className="block truncate">
-                            {selectedTask.workspace?.baseCommit ?? "Not recorded"}
-                          </code>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Worktree</p>
-                          <code className="block break-all">
-                            {selectedTask.workspace?.path ?? "Not prepared"}
-                          </code>
-                        </div>
-                        {selectedTask.status === "active" &&
-                        selectedTask.workspace?.status === "ready" ? (
-                          <div className="flex flex-wrap gap-1.5">
-                            <Button
-                              size="xs"
-                              variant="destructive"
-                              disabled={busyTaskId === selectedTask.id}
-                              onClick={() => void confirmRestore(selectedTask)}
-                            >
-                              <RotateCcwIcon /> Restore Task
-                            </Button>
-                            {selectedTask.restore?.safetyCheckpointRef ? (
-                              <Button
-                                size="xs"
-                                variant="outline"
-                                disabled={busyTaskId === selectedTask.id}
-                                onClick={() =>
-                                  void runTaskCommand(selectedTask, "Could not undo restore", () =>
-                                    undoRestore({
-                                      environmentId: project.environmentId,
-                                      input: { taskId: selectedTask.id },
-                                    }),
-                                  )
-                                }
-                              >
-                                <Undo2Icon /> Undo restore
-                              </Button>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              ) : null}
-            </section>
-          </div>
-        )}
+                ) : null}
+              </section>
+            </div>
+          ))}
 
-        {activity.length > 0 ? (
+        {deckSection === "tasks" && activity.length > 0 ? (
           <section
             className="rounded-xl border border-border/70 bg-card/95 p-3"
             aria-label="Command Deck activity"
@@ -1675,10 +1786,16 @@ export function CommandDeck({
         ) : null}
       </div>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          setCreateOpen(open);
+          if (!open) setCreateMissionId(null);
+        }}
+      >
         <DialogPopup className="max-h-[90vh] max-w-2xl overflow-auto">
           <DialogHeader>
-            <DialogTitle>New Task</DialogTitle>
+            <DialogTitle>{createMissionId ? "New Mission Task" : "New Task"}</DialogTitle>
             <DialogDescription>
               Create a bounded Builder Task, assign a ready provider, and declare path ownership.
             </DialogDescription>
@@ -1733,7 +1850,13 @@ export function CommandDeck({
             </p>
           </DialogPanel>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCreateOpen(false);
+                setCreateMissionId(null);
+              }}
+            >
               Cancel
             </Button>
             <Button
