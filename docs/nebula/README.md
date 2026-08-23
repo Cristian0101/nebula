@@ -30,6 +30,8 @@ Task Diff, immutable review snapshots, structured handoffs, and safe Task restor
 
 Command Deck is the implemented desktop-first manual orchestration surface over those canonical primitives. From one Project, a user can create provider-assigned draft Tasks with optional acceptance criteria, declare ownership, start several isolated Tasks, monitor provider and review state, open each existing Thread, inspect changes and handoffs, and restore one Task without creating a second Task, provider, Git, event, or persistence system.
 
+Terminal Center is the implemented freeform complement to Command Deck. It creates and reuses canonical provider Threads, optionally composes the existing isolated Task workspace flow, and presents those sessions on a persisted UI-only spatial canvas. It introduces no provider, terminal, Task, Git, event, or database runtime. Removing a canvas node only changes local visibility.
+
 Quality Gates, independent Reviewer, the deterministic Integration Engine, and Missions are implemented. A Mission groups canonical Project Tasks, stores explicit dependency edges as a DAG, and derives blockers, readiness, and deterministic execution waves without creating a second Task lifecycle. The user authors the graph, activates it, and manually starts ready Tasks or a ready wave. Completed Mission results can seed an existing Integration Batch in suggested topological order, which the user can review and change. Nebula never starts Tasks automatically, merges main, or opens a PR. Shared-resource locks, automatic Task planning, automatic scheduling or provider routing, Architect, and Swarm Mode are not implemented.
 
 Antigravity CLI is the implemented Google first-party provider for individual Google accounts. Nebula invokes its official headless CLI, keeps authentication provider-owned, and binds each run to the canonical Task worktree. The preserved Gemini CLI prototype remains experimental and blocked for the individual-account authentication path; it is not a mainline provider.
@@ -59,6 +61,11 @@ The code is authoritative for current behavior. These documents are authoritativ
 | Quality gates                         | Implemented     |
 | Reviewer                              | Implemented     |
 | Command Deck                          | Implemented     |
+| Terminal Center                       | Implemented     |
+| Agent Canvas                          | Implemented     |
+| Quick provider launch                 | Implemented     |
+| Automatic canvas layouts              | Implemented     |
+| Freeform spatial layout               | Implemented     |
 | Integration Engine                    | Implemented     |
 | Mission                               | Implemented     |
 | Explicit Task DAG                     | Implemented     |

@@ -1,5 +1,13 @@
 # Nebula changelog
 
+## Unreleased — Terminal Center
+
+- Added a Project-scoped spatial workspace for quick-launching configured provider instances as canonical Threads without requiring a Task or Mission.
+- Added explicit per-Project current-checkout or isolated Task-backed quick-launch preferences, provider model defaults, and shared-checkout warnings.
+- Added Grid, Provider Columns, Status Lanes, Mission Flow, Radial, Compact, and Freeform layouts with persisted positions and viewport.
+- Added lightweight node previews, existing Task Thread placement, focused reuse of the full Thread workspace, command-palette navigation, and hide-without-delete semantics.
+- Reused provider registry, Threads, Tasks, worktrees, ownership, Mission DAG, chat, terminal, settings, shell projection, and typed commands. No scheduler, provider runtime, terminal engine, or Swarm Mode was added.
+
 ## Architect Plan Proposal
 
 - Added bounded provider-neutral Architect generation with strict structured decoding.

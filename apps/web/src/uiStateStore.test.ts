@@ -24,6 +24,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
+    terminalCenterByProjectId: {},
     ...overrides,
   };
 }
@@ -166,6 +167,7 @@ describe("parsePersistedState", () => {
           "turn-2": true,
         },
       },
+      terminalCenterByProjectId: {},
     });
 
     expect(parsed).toEqual({
@@ -183,6 +185,7 @@ describe("parsePersistedState", () => {
           "turn-2": true,
         },
       },
+      terminalCenterByProjectId: {},
     });
   });
 
@@ -303,6 +306,7 @@ describe("uiStateStore persistence", () => {
           "turn-2": true,
         },
       },
+      terminalCenterByProjectId: {},
     });
     expect(parsePersistedState(persisted)).toEqual({
       ...state,

@@ -46,6 +46,7 @@ import {
   ServerIcon,
   SettingsIcon,
   SquarePenIcon,
+  TerminalIcon,
   TextSearchIcon,
 } from "lucide-react";
 import {
@@ -1634,6 +1635,30 @@ function OpenCommandPaletteDialog(props: {
     projectGroups[0] ??
     null;
   if (contextualProjectGroup) {
+    actionItems.push({
+      kind: "action",
+      value: "action:terminal-center",
+      searchTerms: [
+        "terminal center",
+        "agent canvas",
+        "provider sessions",
+        "codex",
+        "antigravity",
+        "claude",
+        "cursor",
+        "grok",
+        "opencode",
+      ],
+      title: "Open Terminal Center",
+      description: contextualProjectGroup.displayName,
+      icon: <TerminalIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({
+          to: "/projects/$projectKey/terminal-center",
+          params: { projectKey: contextualProjectGroup.projectKey },
+        });
+      },
+    });
     actionItems.push({
       kind: "action",
       value: "action:project-settings",
