@@ -106,7 +106,7 @@ The current repository already provides:
 - snapshot-bound, bounded quality results with timeout, cancellation, mutation detection, and restart-safe history; and
 - provider-neutral independent review with cross-provider preference, same-provider fallback, structured verdict invariants, human-controlled findings handoff, and multiple review rounds.
 
-The current repository also provides durable Missions over canonical Tasks, explicit acyclic dependencies, derived readiness and execution waves, human-controlled starts, active-graph audit events, and optional Mission-linked Integration Batches. It does **not** provide agent-generated ownership requests, shared-resource locks, automatic Task planning, scheduling, automatic provider routing, automatic remediation, Architect, automatic integration queues, or Swarm Mode.
+The current repository also provides durable Missions over canonical Tasks, explicit acyclic dependencies, derived readiness and execution waves, manual starts, explicitly authorized Supervised Mission Runs, active-graph audit events, and optional Mission-linked Integration Batches. It does **not** provide agent-generated ownership requests, automatic provider routing, automatic remediation, automatic integration queues, or Swarm Mode.
 
 ### IMPLEMENTED v0.1 — Command Deck
 
@@ -127,7 +127,7 @@ Command Deck now provides:
 
 The user remains the coordinator: provider/model choice, ownership, Start, review, completion, restore, and cleanup are explicit actions. Command Deck derives presentation and attention state from canonical Task, Thread, provider, workspace, ownership, and review projections. It does not persist a Command Deck entity or duplicate provider output. Draft Task assignment is stored on the Task because no Thread exists yet; once execution starts, the bound Thread's model selection is authoritative for that execution.
 
-Manual parallel provider Tasks, quality gates, user-requested independent reviews, deterministic Integration Batches, Missions, explicit Task dependencies, and manual execution waves are implemented. Automated planning, provider routing, scheduling, shared-resource locks, automatic integration, automatic remediation loops, and Swarm Mode remain out of scope.
+Manual parallel provider Tasks, quality gates, independent reviews, deterministic Integration Batches, Missions, explicit Task dependencies, Shared Resources, Architect planning, and supervised deterministic execution are implemented. Provider routing, automatic integration, automatic remediation loops, and Swarm Mode remain out of scope.
 
 ### IMPLEMENTED v0.2 — Quality Gates and Reviewer
 
@@ -137,9 +137,9 @@ New managed Builder Tasks require independent review by default while historical
 
 A Mission is the durable coordination boundary for a human-authored engineering objective. Each Task belongs to at most one Mission, remains a canonical Task with its existing workspace/result/review lifecycle, and may depend on other Mission Tasks. The server rejects cycles and direct execution that would bypass Mission readiness. Waves are derived topological views, never persisted scheduler state. The user explicitly activates the Mission, starts one ready Task or all currently ready Tasks, edits the graph within guarded rules, creates an optional Integration Batch, and explicitly completes or cancels the Mission.
 
-### ROADMAP v0.4 — Deterministic Swarm
+### IMPLEMENTED v0.4 — Supervised deterministic execution
 
-Later, add an Architect responsibility, ownership prediction, shared-resource locks, and an automatic controlled queue over the implemented Mission DAG and manual Integration Engine.
+A human-approved active Mission can start one durable supervised Run. The runner deterministically schedules canonical Tasks by dependency wave, Mission order, stable ID, Shared Resource availability, provider/ownership readiness, and a configured writable concurrency cap. It injects bounded prerequisite evidence, advances the existing completion/review pipeline, survives restart idempotently, and stops affected branches for attention. It does not rewrite plans, reroute providers, remediate failures, or start Integration.
 
 Command Deck and Swarm Mode must use the same Task, Workspace, Provider, Session, Event, Diff, and Review primitives.
 

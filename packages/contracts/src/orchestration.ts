@@ -14,6 +14,7 @@ import {
   IsoDateTime,
   IntegrationBatchId,
   MissionId,
+  MissionRunId,
   OwnershipRequestId,
   ResourceLeaseId,
   SharedResourceId,
@@ -441,6 +442,66 @@ export const Mission = Schema.Struct({
   architectPlanProposalId: Schema.optional(Schema.NullOr(ArchitectPlanProposalId)),
 });
 export type Mission = typeof Mission.Type;
+
+export const MissionRunStatus = Schema.Literals([
+  "idle",
+  "running",
+  "paused",
+  "attention",
+  "completed",
+  "stopped",
+  "failed",
+]);
+export type MissionRunStatus = typeof MissionRunStatus.Type;
+
+export const MissionRunAttention = Schema.Struct({
+  taskId: Schema.NullOr(TaskId),
+  code: TrimmedNonEmptyString,
+  detail: TrimmedNonEmptyString,
+  blocksMission: Schema.Boolean,
+});
+export type MissionRunAttention = typeof MissionRunAttention.Type;
+
+export const MissionRunDecision = Schema.Struct({
+  id: EventId,
+  kind: Schema.Literals([
+    "scheduled",
+    "waiting_dependency",
+    "waiting_resource",
+    "waiting_concurrency",
+    "context_injected",
+    "pipeline",
+    "attention",
+    "completed",
+  ]),
+  taskId: Schema.NullOr(TaskId),
+  reason: TrimmedNonEmptyString,
+  sourceTaskIds: Schema.Array(TaskId),
+  occurredAt: IsoDateTime,
+});
+export type MissionRunDecision = typeof MissionRunDecision.Type;
+
+export const MissionRun = Schema.Struct({
+  id: MissionRunId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  mode: Schema.Literal("supervised"),
+  status: MissionRunStatus,
+  maxConcurrentTasks: PositiveInt.check(Schema.isLessThanOrEqualTo(32)),
+  currentReadyTaskIds: Schema.Array(TaskId),
+  scheduledTaskIds: Schema.Array(TaskId),
+  attention: Schema.Array(MissionRunAttention),
+  attentionReason: Schema.NullOr(TrimmedNonEmptyString),
+  decisions: Schema.Array(MissionRunDecision),
+  startedAt: IsoDateTime,
+  pausedAt: Schema.NullOr(IsoDateTime),
+  completedAt: Schema.NullOr(IsoDateTime),
+  stoppedAt: Schema.NullOr(IsoDateTime),
+  failedAt: Schema.NullOr(IsoDateTime),
+  failureReason: Schema.NullOr(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+export type MissionRun = typeof MissionRun.Type;
 
 export const SharedResourceDefinition = Schema.Struct({
   id: SharedResourceId,
@@ -1037,6 +1098,8 @@ export const OrchestrationReadModel = Schema.Struct({
   tasks: Schema.optional(Schema.Array(OrchestrationTask)),
   // Optional for snapshots created before Mission coordination shipped.
   missions: Schema.optional(Schema.Array(Mission)),
+  // Optional for snapshots created before supervised Mission execution shipped.
+  missionRuns: Schema.optional(Schema.Array(MissionRun)),
   threads: Schema.Array(OrchestrationThread),
   updatedAt: IsoDateTime,
 });
@@ -1121,6 +1184,7 @@ export const OrchestrationShellSnapshot = Schema.Struct({
   // Optional so cached shell snapshots from pre-Task clients remain readable.
   tasks: Schema.optional(Schema.Array(OrchestrationTask)),
   missions: Schema.optional(Schema.Array(Mission)),
+  missionRuns: Schema.optional(Schema.Array(MissionRun)),
   threads: Schema.Array(OrchestrationThreadShell),
   updatedAt: IsoDateTime,
 });
@@ -1156,6 +1220,11 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     kind: Schema.Literal("mission-upserted"),
     sequence: NonNegativeInt,
     mission: Mission,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("mission-run-upserted"),
+    sequence: NonNegativeInt,
+    missionRun: MissionRun,
   }),
 ]);
 export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent.Type;
@@ -1461,6 +1530,37 @@ const MissionCancelCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const MissionRunStartCommand = Schema.Struct({
+  type: Schema.Literal("mission.run.start"),
+  commandId: CommandId,
+  runId: MissionRunId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  maxConcurrentTasks: PositiveInt.check(Schema.isLessThanOrEqualTo(32)),
+  createdAt: IsoDateTime,
+});
+
+const MissionRunPauseCommand = Schema.Struct({
+  type: Schema.Literal("mission.run.pause"),
+  commandId: CommandId,
+  runId: MissionRunId,
+  createdAt: IsoDateTime,
+});
+
+const MissionRunResumeCommand = Schema.Struct({
+  type: Schema.Literal("mission.run.resume"),
+  commandId: CommandId,
+  runId: MissionRunId,
+  createdAt: IsoDateTime,
+});
+
+const MissionRunStopCommand = Schema.Struct({
+  type: Schema.Literal("mission.run.stop"),
+  commandId: CommandId,
+  runId: MissionRunId,
+  createdAt: IsoDateTime,
+});
+
 const TaskCreateCommand = Schema.Struct({
   type: Schema.Literal("task.create"),
   commandId: CommandId,
@@ -1642,6 +1742,21 @@ const TaskReviewFindingsSendCommand = Schema.Struct({
   commandId: CommandId,
   taskId: TaskId,
   reviewId: TaskReviewId,
+  createdAt: IsoDateTime,
+});
+
+const MissionRunReconcileCommand = Schema.Struct({
+  type: Schema.Literal("mission.run.reconcile"),
+  commandId: CommandId,
+  runId: MissionRunId,
+  status: Schema.Literals(["running", "attention", "completed", "failed"]),
+  currentReadyTaskIds: Schema.Array(TaskId),
+  scheduledTaskIds: Schema.Array(TaskId),
+  attention: Schema.Array(MissionRunAttention),
+  attentionReason: Schema.NullOr(TrimmedNonEmptyString),
+  decision: Schema.optional(Schema.NullOr(MissionRunDecision)),
+  completedAt: Schema.NullOr(IsoDateTime),
+  failureReason: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
 });
 
@@ -1992,6 +2107,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   MissionActivateCommand,
   MissionCompleteCommand,
   MissionCancelCommand,
+  MissionRunStartCommand,
+  MissionRunPauseCommand,
+  MissionRunResumeCommand,
+  MissionRunStopCommand,
   IntegrationCreateCommand,
   IntegrationContinueCommand,
   IntegrationAbortCommand,
@@ -2067,6 +2186,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   MissionActivateCommand,
   MissionCompleteCommand,
   MissionCancelCommand,
+  MissionRunStartCommand,
+  MissionRunPauseCommand,
+  MissionRunResumeCommand,
+  MissionRunStopCommand,
   IntegrationCreateCommand,
   IntegrationContinueCommand,
   IntegrationAbortCommand,
@@ -2405,6 +2528,7 @@ const ProjectResourceLeasesReconcileCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  MissionRunReconcileCommand,
   TaskWorkspacePreparationStartedCommand,
   TaskWorkspaceReadyCommand,
   TaskWorkspaceFailedCommand,
@@ -2470,6 +2594,11 @@ export const OrchestrationEventType = Schema.Literals([
   "mission.completed",
   "mission.cancelled",
   "mission.integration-linked",
+  "mission.run.started",
+  "mission.run.paused",
+  "mission.run.resumed",
+  "mission.run.stopped",
+  "mission.run.reconciled",
   "integration.created",
   "integration.continue-requested",
   "integration.abort-requested",
@@ -2659,6 +2788,10 @@ export const MissionLifecyclePayload = Schema.Struct({
   missionId: MissionId,
   occurredAt: IsoDateTime,
   updatedAt: IsoDateTime,
+});
+
+export const MissionRunPayload = Schema.Struct({
+  run: MissionRun,
 });
 
 export const MissionIntegrationLinkedPayload = Schema.Struct({
@@ -3319,6 +3452,31 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("mission.integration-linked"),
     payload: MissionIntegrationLinkedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.run.started"),
+    payload: MissionRunPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.run.paused"),
+    payload: MissionRunPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.run.resumed"),
+    payload: MissionRunPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.run.stopped"),
+    payload: MissionRunPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.run.reconciled"),
+    payload: MissionRunPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

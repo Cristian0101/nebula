@@ -32,7 +32,7 @@ Command Deck is the implemented desktop-first manual orchestration surface over 
 
 Terminal Center is the implemented freeform complement to Command Deck. It creates and reuses canonical provider Threads, optionally composes the existing isolated Task workspace flow, and presents those sessions on a persisted UI-only spatial canvas. It introduces no provider, terminal, Task, Git, event, or database runtime. Removing a canvas node only changes local visibility.
 
-Quality Gates, independent Reviewer, the deterministic Integration Engine, and Missions are implemented. A Mission groups canonical Project Tasks, stores explicit dependency edges as a DAG, and derives blockers, readiness, and deterministic execution waves without creating a second Task lifecycle. The user authors the graph, activates it, and manually starts ready Tasks or a ready wave. Completed Mission results can seed an existing Integration Batch in suggested topological order, which the user can review and change. Nebula never starts Tasks automatically, merges main, or opens a PR. Shared-resource locks, automatic Task planning, automatic scheduling or provider routing, Architect, and Swarm Mode are not implemented.
+Quality Gates, independent Reviewer, the deterministic Integration Engine, Shared Resources, Architect proposals, Missions, and Supervised Mission Runs are implemented. A human approves and activates an Architect Mission, then separately authorizes a supervised Run. Nebula deterministically advances canonical Tasks under dependency, resource, provider, ownership, and concurrency policy while stopping affected branches for human attention. Completed Mission results can seed an existing Integration Batch in suggested topological order, which the user reviews and confirms. Nebula does not rewrite plans, reroute providers, remediate failures, merge main, or open a PR automatically. Swarm Mode is not implemented.
 
 Antigravity CLI is the implemented Google first-party provider for individual Google accounts. Nebula invokes its official headless CLI, keeps authentication provider-owned, and binds each run to the canonical Task worktree. The preserved Gemini CLI prototype remains experimental and blocked for the individual-account authentication path; it is not a mainline provider.
 
@@ -72,7 +72,9 @@ The code is authoritative for current behavior. These documents are authoritativ
 | Execution Waves                       | Implemented     |
 | Human-controlled wave start           | Implemented     |
 | Automatic Task planning               | Not implemented |
-| Automatic scheduler                   | Not implemented |
+| Supervised Mission scheduler          | Implemented     |
+| Automatic wave advancement            | Implemented     |
+| Dependency context injection          | Implemented     |
 | Automatic provider routing            | Not implemented |
 | Shared Resource definitions           | Implemented     |
 | Exclusive Task resource leases        | Implemented     |
@@ -80,7 +82,7 @@ The code is authoritative for current behavior. These documents are authoritativ
 | Resource compliance validation        | Implemented     |
 | Human-approved ownership requests     | Implemented     |
 | Provider-generated ownership requests | Not implemented |
-| Architect                             | Not implemented |
+| Architect                             | Implemented     |
 | Swarm Mode                            | Not implemented |
 
 Shared Resources are Project-defined logical resources whose repository-relative patterns may be

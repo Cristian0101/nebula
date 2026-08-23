@@ -5,9 +5,11 @@ import {
 import {
   IntegrationBatchId,
   MissionId,
+  MissionRunId,
   TaskId,
   type EnvironmentId,
   type Mission,
+  type MissionRun,
   type OrchestrationProjectShell,
   type OrchestrationTask,
   type OrchestrationThreadShell,
@@ -25,10 +27,12 @@ import {
   ListTreeIcon,
   PencilIcon,
   PlayIcon,
+  PauseIcon,
   PlusIcon,
   RocketIcon,
   Trash2Icon,
   TriangleAlertIcon,
+  SquareIcon,
   XCircleIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -54,6 +58,7 @@ interface MissionPanelProps {
   readonly environmentId: EnvironmentId;
   readonly project: OrchestrationProjectShell;
   readonly missions: ReadonlyArray<Mission>;
+  readonly missionRuns: ReadonlyArray<MissionRun>;
   readonly tasks: ReadonlyArray<OrchestrationTask>;
   readonly threads: ReadonlyArray<OrchestrationThreadShell>;
   readonly unavailableProviderTaskIds: ReadonlySet<TaskId>;
@@ -70,7 +75,13 @@ function commandError(result: AtomCommandResult<unknown, unknown>): string | nul
 
 function statusVariant(status: string) {
   if (status === "completed" || status === "ready") return "success" as const;
-  if (status === "blocked" || status === "resource-blocked" || status === "needs-attention")
+  if (
+    status === "blocked" ||
+    status === "resource-blocked" ||
+    status === "needs-attention" ||
+    status === "attention" ||
+    status === "paused"
+  )
     return "warning" as const;
   if (status === "running" || status === "active" || status === "review") return "info" as const;
   return "outline" as const;
@@ -173,7 +184,15 @@ function MissionGraph({
 }
 
 export function MissionPanel(props: MissionPanelProps) {
-  const { environmentId, project, missions, tasks, threads, unavailableProviderTaskIds } = props;
+  const {
+    environmentId,
+    project,
+    missions,
+    missionRuns,
+    tasks,
+    threads,
+    unavailableProviderTaskIds,
+  } = props;
   const [selectedMissionId, setSelectedMissionId] = useState<MissionId | null>(
     missions[0]?.id ?? null,
   );
@@ -189,6 +208,7 @@ export function MissionPanel(props: MissionPanelProps) {
   const [missionFilter, setMissionFilter] = useState<"all" | Mission["status"]>("all");
   const [busy, setBusy] = useState(false);
   const [integrationOrder, setIntegrationOrder] = useState<ReadonlyArray<TaskId>>([]);
+  const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(2);
 
   const createMission = useAtomCommand(projectEnvironment.createMission, { reportFailure: false });
   const updateMission = useAtomCommand(projectEnvironment.updateMission, { reportFailure: false });
@@ -214,6 +234,18 @@ export function MissionPanel(props: MissionPanelProps) {
     reportFailure: false,
   });
   const cancelMission = useAtomCommand(projectEnvironment.cancelMission, { reportFailure: false });
+  const startMissionRun = useAtomCommand(projectEnvironment.startMissionRun, {
+    reportFailure: false,
+  });
+  const pauseMissionRun = useAtomCommand(projectEnvironment.pauseMissionRun, {
+    reportFailure: false,
+  });
+  const resumeMissionRun = useAtomCommand(projectEnvironment.resumeMissionRun, {
+    reportFailure: false,
+  });
+  const stopMissionRun = useAtomCommand(projectEnvironment.stopMissionRun, {
+    reportFailure: false,
+  });
   const createIntegration = useAtomCommand(projectEnvironment.createIntegration, {
     reportFailure: false,
   });
@@ -226,6 +258,22 @@ export function MissionPanel(props: MissionPanelProps) {
     (mission) => missionFilter === "all" || mission.status === missionFilter,
   );
   const selectedMission = missions.find((mission) => mission.id === selectedMissionId) ?? null;
+  const selectedMissionRun = selectedMission
+    ? (missionRuns
+        .filter((candidate) => candidate.missionId === selectedMission.id)
+        .toSorted((left, right) => left.startedAt.localeCompare(right.startedAt))
+        .at(-1) ?? null)
+    : null;
+  const supervisedRunActive =
+    selectedMissionRun?.status === "running" ||
+    selectedMissionRun?.status === "paused" ||
+    selectedMissionRun?.status === "attention";
+  const architectProposalApproved =
+    selectedMission?.architectPlanProposalId != null &&
+    (project.architectPlans ?? []).some(
+      (proposal) =>
+        proposal.id === selectedMission.architectPlanProposalId && proposal.status === "approved",
+    );
   const plan = useMemo(
     () =>
       selectedMission
@@ -345,6 +393,24 @@ export function MissionPanel(props: MissionPanelProps) {
         .map(props.onStartTask),
     );
     setBusy(false);
+  };
+  const startSupervisedRun = async () => {
+    if (!selectedMission) return;
+    const confirmed = window.confirm(
+      "Start a supervised Mission Run?\n\nNebula will automatically start Tasks when their dependencies, resources, provider, ownership, and concurrency conditions allow.\n\nNebula will stop for attention when deterministic safety gates cannot proceed.",
+    );
+    if (!confirmed) return;
+    await run("Could not start supervised Mission Run", () =>
+      startMissionRun({
+        environmentId,
+        input: {
+          runId: MissionRunId.make(randomUUID()),
+          missionId: selectedMission.id,
+          projectId: project.id,
+          maxConcurrentTasks,
+        },
+      }),
+    );
   };
   const moveIntegration = (taskId: TaskId, offset: number) =>
     setIntegrationOrder((current) => {
@@ -522,6 +588,92 @@ export function MissionPanel(props: MissionPanelProps) {
                       <PlayIcon /> Start ready Tasks ({plan.readyTaskIds.length})
                     </Button>
                   ) : null}
+                  {selectedMission.status === "active" && !supervisedRunActive ? (
+                    <label className="flex items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground">
+                      Max active
+                      <input
+                        aria-label="Maximum active writable Tasks"
+                        className="h-6 w-10 bg-transparent text-center text-foreground outline-none"
+                        type="number"
+                        min={1}
+                        max={32}
+                        value={maxConcurrentTasks}
+                        onChange={(event) =>
+                          setMaxConcurrentTasks(
+                            Math.min(32, Math.max(1, Number(event.target.value) || 1)),
+                          )
+                        }
+                      />
+                    </label>
+                  ) : null}
+                  {selectedMission.status === "active" && !supervisedRunActive ? (
+                    <Button
+                      size="xs"
+                      disabled={busy || !plan.graph.valid || !architectProposalApproved}
+                      title={
+                        architectProposalApproved
+                          ? undefined
+                          : "Approve and materialize the Architect plan before starting a supervised Run."
+                      }
+                      onClick={() => void startSupervisedRun()}
+                    >
+                      <PlayIcon /> Start supervised Run
+                    </Button>
+                  ) : null}
+                  {(selectedMissionRun?.status === "running" ||
+                    selectedMissionRun?.status === "attention") && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() =>
+                        void run("Could not pause Mission Run", () =>
+                          pauseMissionRun({
+                            environmentId,
+                            input: { runId: selectedMissionRun.id },
+                          }),
+                        )
+                      }
+                    >
+                      <PauseIcon /> Pause Run
+                    </Button>
+                  )}
+                  {selectedMissionRun?.status === "paused" ? (
+                    <Button
+                      size="xs"
+                      disabled={busy}
+                      onClick={() =>
+                        void run("Could not resume Mission Run", () =>
+                          resumeMissionRun({
+                            environmentId,
+                            input: { runId: selectedMissionRun.id },
+                          }),
+                        )
+                      }
+                    >
+                      <PlayIcon /> Resume Run
+                    </Button>
+                  ) : null}
+                  {supervisedRunActive ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() =>
+                        window.confirm(
+                          "Stop automatic scheduling? Existing Tasks, worktrees, and provider turns remain intact and inspectable.",
+                        ) &&
+                        void run("Could not stop Mission Run", () =>
+                          stopMissionRun({
+                            environmentId,
+                            input: { runId: selectedMissionRun.id },
+                          }),
+                        )
+                      }
+                    >
+                      <SquareIcon /> Stop Run
+                    </Button>
+                  ) : null}
                   {selectedMission.status === "active" && plan.completionEligible ? (
                     <Button
                       size="xs"
@@ -597,6 +749,67 @@ export function MissionPanel(props: MissionPanelProps) {
             </header>
 
             <div className="space-y-4 p-4">
+              {selectedMissionRun ? (
+                <section
+                  className="rounded-lg border border-border/70 bg-muted/20 p-3"
+                  aria-label="Supervised Mission Run"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-medium">Supervised Mission Run</h3>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Max {selectedMissionRun.maxConcurrentTasks} active writable Tasks · started{" "}
+                        {new Date(selectedMissionRun.startedAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <Badge variant={statusVariant(selectedMissionRun.status)}>
+                      {selectedMissionRun.status}
+                    </Badge>
+                  </div>
+                  {selectedMissionRun.status === "completed" ? (
+                    <p className="mt-3 rounded-md border border-success/25 bg-success/10 p-2 text-xs text-success">
+                      All Mission Tasks completed. Mission ready for Integration.
+                    </p>
+                  ) : null}
+                  {selectedMissionRun.attention.length > 0 ? (
+                    <ul className="mt-3 space-y-1 text-xs text-warning">
+                      {selectedMissionRun.attention.map((item) => (
+                        <li key={`${item.taskId ?? "mission"}:${item.code}`}>
+                          {item.taskId
+                            ? `${taskById.get(item.taskId)?.title ?? item.taskId}: `
+                            : ""}
+                          {item.detail}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {selectedMissionRun.decisions.length > 0 ? (
+                    <details className="mt-3 text-xs">
+                      <summary className="cursor-pointer text-muted-foreground">
+                        Scheduler decisions ({selectedMissionRun.decisions.length})
+                      </summary>
+                      <ol className="mt-2 max-h-40 space-y-1 overflow-auto">
+                        {selectedMissionRun.decisions
+                          .toReversed()
+                          .slice(0, 30)
+                          .map((decision) => (
+                            <li
+                              key={decision.id}
+                              className="rounded-md bg-background/65 px-2 py-1.5"
+                            >
+                              <span className="text-foreground">
+                                {decision.taskId
+                                  ? (taskById.get(decision.taskId)?.title ?? decision.taskId)
+                                  : "Mission"}
+                              </span>{" "}
+                              <span className="text-muted-foreground">— {decision.reason}</span>
+                            </li>
+                          ))}
+                      </ol>
+                    </details>
+                  ) : null}
+                </section>
+              ) : null}
               {!plan.graph.valid ? (
                 <div
                   role="alert"

@@ -34,6 +34,7 @@ import {
   ProjectId,
   TaskId,
   MissionId,
+  MissionRunId,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
@@ -573,6 +574,12 @@ const makeWsRpcLayer = (
             );
           case "thread.unarchived":
             return threadUpsertOrRemove(event.payload.threadId, event.sequence);
+          case "mission.run.started":
+          case "mission.run.paused":
+          case "mission.run.resumed":
+          case "mission.run.stopped":
+          case "mission.run.reconciled":
+            return missionRunUpsert(event.payload.run.id, event.sequence);
           default:
             // Tasks have one shell projection regardless of which lifecycle facet changed.
             // Refetch by aggregate id so review, handoff, restore, and future Task events stay
@@ -650,6 +657,21 @@ const makeWsRpcLayer = (
               return mission === undefined
                 ? Option.none()
                 : Option.some({ kind: "mission-upserted" as const, sequence, mission });
+            }),
+          ),
+        );
+
+      const missionRunUpsert = (
+        runId: MissionRunId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead("mission", runId, projectionSnapshotQuery.getShellSnapshot()).pipe(
+          Effect.map(
+            Option.flatMap((snapshot) => {
+              const missionRun = snapshot.missionRuns?.find((candidate) => candidate.id === runId);
+              return missionRun === undefined
+                ? Option.none()
+                : Option.some({ kind: "mission-run-upserted" as const, sequence, missionRun });
             }),
           ),
         );

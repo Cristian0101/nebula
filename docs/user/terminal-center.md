@@ -33,8 +33,8 @@ Unselected nodes show a lightweight preview rather than mounting complete histor
 
 Use **Add thread** to place an existing Project Thread or Task Thread on the canvas. Mission Flow uses the Task's existing Mission membership and dependencies. Removing a node only hides it from this canvas; it does not delete the Thread, cancel a Task, or remove a workspace.
 
-Terminal Center and Command Deck are complementary. Terminal Center is for freeform provider sessions and spatial focus switching. Command Deck remains the structured Task, Mission, review, and Integration surface.
+Terminal Center and Command Deck are complementary. Terminal Center is for freeform provider sessions and spatial focus switching. Command Deck remains the structured Task, Mission, review, and Integration surface. While a Supervised Mission Run is active, its Task Threads are added to the canvas and the existing **Mission flow** layout remains available.
 
 ## Current scope
 
-Terminal Center, Agent Canvas, quick provider launch, automatic layouts, and freeform spatial layout are **implemented**. Scheduler and Swarm Mode are **not implemented**. Canvas edges are reserved for canonical Mission dependencies; Terminal Center does not invent agent-to-agent communication.
+Terminal Center, Agent Canvas, quick provider launch, automatic layouts, freeform spatial layout, and Supervised Run Thread discovery are **implemented**. Canvas edges are reserved for canonical Mission dependencies; Terminal Center does not invent agent-to-agent communication, and Swarm Mode is not implemented.

@@ -41,6 +41,7 @@ import {
   EventId,
   MissionId,
   MissionStatus,
+  MissionRun,
   TaskId,
   type Mission,
   SharedResourceDefinition,
@@ -225,6 +226,9 @@ type ProjectionMissionRow = typeof ProjectionMissionRow.Type;
 type ProjectionMissionTaskRow = typeof ProjectionMissionTaskRow.Type;
 type ProjectionMissionDependencyRow = typeof ProjectionMissionDependencyRow.Type;
 type ProjectionMissionActivityRow = typeof ProjectionMissionActivityRow.Type;
+const ProjectionMissionRunRow = Schema.Struct({
+  runJson: Schema.fromJsonString(MissionRun),
+});
 
 function mapMissionRows(input: {
   readonly missions: ReadonlyArray<ProjectionMissionRow>;
@@ -728,6 +732,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ),
       ),
     );
+
+  const listMissionRuns = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionMissionRunRow,
+    execute: () => sql`
+      SELECT run_json AS "runJson"
+      FROM projection_mission_runs
+      ORDER BY started_at, run_id
+    `,
+  });
 
   const listThreadRows = SqlSchema.findAll({
     Request: Schema.Void,
@@ -1795,6 +1809,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ),
           listMissions("getSnapshot"),
+          listMissionRuns(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getSnapshot:listMissionRuns:query",
+                "ProjectionSnapshotQuery.getSnapshot:listMissionRuns:decodeRows",
+              ),
+            ),
+          ),
           listThreadRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1867,6 +1889,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             projectRows,
             taskRows,
             missionRows,
+            missionRunRows,
             threadRows,
             messageRows,
             proposedPlanRows,
@@ -2074,6 +2097,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 projects,
                 tasks,
                 missions,
+                missionRuns: missionRunRows.map((row) => row.runJson),
                 threads,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
@@ -2114,6 +2138,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ),
           listMissions("getCommandReadModel"),
+          listMissionRuns(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listMissionRuns:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listMissionRuns:decodeRows",
+              ),
+            ),
+          ),
           listThreadRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2162,6 +2194,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             projectRows,
             taskRows,
             missionRows,
+            missionRunRows,
             threadRows,
             proposedPlanRows,
             sessionRows,
@@ -2313,6 +2346,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 projects,
                 tasks,
                 missions,
+                missionRuns: missionRunRows.map((row) => row.runJson),
                 threads,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               } satisfies OrchestrationReadModel;
@@ -2347,6 +2381,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ),
           listMissions("getShellSnapshot"),
+          listMissionRuns(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listMissionRuns:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listMissionRuns:decodeRows",
+              ),
+            ),
+          ),
           listActiveThreadRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2387,6 +2429,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             projectRows,
             taskRows,
             missionRows,
+            missionRunRows,
             threadRows,
             sessionRows,
             latestTurnRows,
@@ -2442,6 +2485,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 ),
                 tasks: taskRows.map(mapTaskRow),
                 missions: missionRows,
+                missionRuns: missionRunRows.map((row) => row.runJson),
                 threads: Arr.filterMap(threadRows, (row) =>
                   row.deletedAt === null
                     ? Result.succeed({

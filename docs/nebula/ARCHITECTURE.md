@@ -95,6 +95,7 @@ Nebula adds a task coordination domain to the existing orchestration engine.
 | QualityGate     | Deterministic command and result.                              | Future task policy using existing terminal/process execution. |
 | Integration     | Controlled promotion of approved commits.                      | Existing Git workflows plus new policy/state.                 |
 | Mission         | Durable objective and human-controlled coordination boundary.  | Existing orchestration events and normalized projections.     |
+| MissionRun      | Durable authorization and state for supervised plan execution. | Existing commands, events, projections, reactors, and Tasks.  |
 | TaskDependency  | Explicit acyclic prerequisite edge and derived readiness rule. | Pure shared graph engine plus Mission relation projection.    |
 
 Do not create one class or package for every noun. The first implementation should add only the types and state transitions needed for an explicit Task.
@@ -109,7 +110,7 @@ Task does not persist provider-session identity or trust a renderer-supplied wor
 
 A Task may persist an optional manual provider/model assignment before execution. This is assignment intent, not provider-session identity. It lets a draft hydrate truthfully without manufacturing a Thread. After Start creates and binds the canonical Thread, the Thread's model selection is authoritative for its provider execution.
 
-This slice does not create ownership requests, shared-resource locks, routing, scheduling, or automatic remediation. Quality gates, independent Reviewer, deterministic manual Integration Batches, and human-authored Mission DAGs are implemented as explicit user-driven boundaries.
+This slice does not create provider routing or automatic remediation. Quality gates, independent Reviewer, deterministic manual Integration Batches, Shared Resources, human-authored Mission DAGs, Architect proposals, and explicitly authorized Supervised Mission Runs are implemented over the same runtime.
 
 ### Workspace isolation
 
@@ -210,7 +211,11 @@ Mission commands and events use the inherited decider, event store, projection p
 
 `packages/shared/src/missionGraph.ts` is the pure provider-neutral graph engine. It validates membership and cycles, computes deterministic topological waves using human presentation order as the tie-breaker, and derives each Task's blockers, start-configuration attention, and readiness from canonical Task, Thread, workspace, and provider facts. The server applies the same readiness rule to Task workspace preparation and activation, so clients cannot bypass the DAG.
 
-Mission activation and every Task start remain explicit commands. There is no timer, daemon, queue, background planner, resource allocator, or automatic provider router. Graph edits after activation require confirmation and cannot remove started work or prerequisites involving started work. Completion is also explicit and requires every non-cancelled Task to be completed plus any linked Integration Batch to be Ready. Cancellation changes Mission coordination state without deleting Tasks, Threads, worktrees, or results.
+Mission activation remains explicit. Manual Task starts remain available. An approved, materialized active Mission may separately start a durable supervised Run. `MissionRunReactor` reconciles only from canonical projections and dispatches the existing workspace, Thread, activation, provider-turn, review, quality, and completion commands. It chooses eligible Tasks by wave, Mission order, and stable Task ID, while enforcing the configured writable concurrency cap and durable Shared Resource leases. Stable Run/Task command and Thread IDs make startup reconciliation idempotent.
+
+The Run injects a bounded prerequisite context package with explicit Nebula provenance before a dependent Builder turn. After that turn settles, it advances the existing fresh ownership/resource, review snapshot, structured handoff, quality gate, independent Reviewer, and Task completion pipeline. Task-scoped failures block that dependency subgraph while unrelated Tasks may continue. Missing Mission/Project/Task integrity fails the Run closed. Pause prevents new starts without killing active turns; resume recomputes canonical readiness; stop removes only automatic scheduling authority.
+
+Graph edits after activation still require explicit human confirmation and cannot remove started work or prerequisites involving started work. The runner never rewrites the graph, changes assignments or ownership, approves requests, reroutes providers, remediates failures, resolves conflicts, or starts Integration. Run completion reports that the Mission is ready for Integration without creating a Batch.
 
 Mission-linked Integration extends the Prompt-9 Batch with an optional `missionId`. A topological Task order is a UI suggestion only; the human confirms or changes the actual Integration order. Standalone historical Batches remain valid.
 
@@ -218,12 +223,9 @@ Mission-linked Integration extends the Prompt-9 Batch with an optional `missionI
 
 After the explicit Task, isolated workspace, and ownership lifecycle are proven, future modules may add:
 
-- automatic Mission planning and Task generation;
+- automatic remediation and bounded retry policy;
 - ownership prediction and agent-generated scope requests;
-- shared-resource locks;
-- structured handoffs;
-- independent review and quality gates;
-- an integration queue;
+- automatic integration queues;
 - provider aliases, scoring, Ichnos, capacity-aware routing, and fallback; and
 - multi-machine or team synchronization through a separately designed replication boundary.
 

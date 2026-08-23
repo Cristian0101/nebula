@@ -50,6 +50,10 @@ export type RemoveMissionDependencyInput = CommandInput<"mission.dependency.remo
 export type ActivateMissionInput = CommandInput<"mission.activate">;
 export type CompleteMissionInput = CommandInput<"mission.complete">;
 export type CancelMissionInput = CommandInput<"mission.cancel">;
+export type StartMissionRunInput = CommandInput<"mission.run.start">;
+export type PauseMissionRunInput = CommandInput<"mission.run.pause">;
+export type ResumeMissionRunInput = CommandInput<"mission.run.resume">;
+export type StopMissionRunInput = CommandInput<"mission.run.stop">;
 export type CreateIntegrationInput = CommandInput<"integration.create">;
 export type ContinueIntegrationInput = CommandInput<"integration.continue">;
 export type AbortIntegrationInput = CommandInput<"integration.abort">;
@@ -205,7 +209,11 @@ const sharedResourceCommand = <
 ) =>
   Effect.gen(function* () {
     const metadata = yield* timestampedCommandMetadata(input);
-    return yield* dispatch({ ...input, type, ...metadata } as ClientOrchestrationCommand);
+    return yield* dispatch({
+      ...input,
+      type,
+      ...metadata,
+    } as unknown as ClientOrchestrationCommand);
   });
 export const createProjectSharedResource: (
   input: CreateProjectSharedResourceInput,
@@ -238,14 +246,22 @@ const missionCommand = <
     | "mission.dependency.remove"
     | "mission.activate"
     | "mission.complete"
-    | "mission.cancel",
+    | "mission.cancel"
+    | "mission.run.start"
+    | "mission.run.pause"
+    | "mission.run.resume"
+    | "mission.run.stop",
 >(
   type: T,
   input: CommandInput<T>,
 ) =>
   Effect.gen(function* () {
     const metadata = yield* timestampedCommandMetadata(input);
-    return yield* dispatch({ ...input, type, ...metadata } as ClientOrchestrationCommand);
+    return yield* dispatch({
+      ...input,
+      type,
+      ...metadata,
+    } as unknown as ClientOrchestrationCommand);
   });
 
 export const createMission: (input: CreateMissionInput) => CommandEffect = Effect.fn(
@@ -279,6 +295,18 @@ export const completeMission: (input: CompleteMissionInput) => CommandEffect = E
 export const cancelMission: (input: CancelMissionInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.cancelMission",
 )((input) => missionCommand("mission.cancel", input));
+export const startMissionRun: (input: StartMissionRunInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.startMissionRun",
+)((input) => missionCommand("mission.run.start", input));
+export const pauseMissionRun: (input: PauseMissionRunInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.pauseMissionRun",
+)((input) => missionCommand("mission.run.pause", input));
+export const resumeMissionRun: (input: ResumeMissionRunInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.resumeMissionRun",
+)((input) => missionCommand("mission.run.resume", input));
+export const stopMissionRun: (input: StopMissionRunInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.stopMissionRun",
+)((input) => missionCommand("mission.run.stop", input));
 
 export const createIntegration: (input: CreateIntegrationInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.createIntegration",

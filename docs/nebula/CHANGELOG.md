@@ -1,5 +1,12 @@
 # Nebula changelog
 
+## Unreleased — Supervised Mission Runs
+
+- Added durable supervised Run state, deterministic dependency/resource/concurrency scheduling, stable crash-safe Task dispatch, and explainable scheduler decisions.
+- Added bounded prerequisite context with explicit Nebula provenance and automatic progression through the existing ownership, resource, snapshot, handoff, quality, Reviewer, and Task-completion commands.
+- Added branch-scoped attention, pause/resume/stop controls, Mission-ready-for-Integration state, and active Run Thread discovery in Terminal Center Mission Flow.
+- Kept plan rewriting, ownership approval, provider rerouting, automatic remediation, automatic Integration, and Swarm Mode out of scope.
+
 ## Unreleased — Terminal Center
 
 - Added a Project-scoped spatial workspace for quick-launching configured provider instances as canonical Threads without requiring a Task or Mission.

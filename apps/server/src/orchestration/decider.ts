@@ -1333,6 +1333,213 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "mission.run.start": {
+      const mission = yield* requireMission({
+        readModel,
+        command,
+        missionId: command.missionId,
+      });
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (mission.projectId !== command.projectId || mission.status !== "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Mission '${mission.id}' must be active in Project '${command.projectId}' before a supervised Run starts.`,
+        });
+      }
+      const proposal = mission.architectPlanProposalId
+        ? (project.architectPlans ?? []).find(
+            (candidate) => candidate.id === mission.architectPlanProposalId,
+          )
+        : null;
+      if (!proposal || proposal.status !== "approved") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Mission '${mission.id}' must be materialized from an approved Architect plan before supervised execution.`,
+        });
+      }
+      const graph = validateMissionGraph(mission.taskIds, mission.dependencies);
+      if (!graph.valid || mission.taskIds.length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: graph.error ?? "A supervised Mission Run requires a non-empty valid DAG.",
+        });
+      }
+      const taskById = new Map((readModel.tasks ?? []).map((task) => [task.id, task] as const));
+      const invalidTaskId = mission.taskIds.find((taskId) => {
+        const task = taskById.get(taskId);
+        return !task || task.projectId !== mission.projectId || task.status === "cancelled";
+      });
+      if (invalidTaskId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Mission Task '${invalidTaskId}' is missing, cancelled, or belongs to another Project.`,
+        });
+      }
+      const existing = (readModel.missionRuns ?? []).find(
+        (run) =>
+          run.missionId === mission.id &&
+          run.status !== "completed" &&
+          run.status !== "stopped" &&
+          run.status !== "failed",
+      );
+      if (existing) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Mission '${mission.id}' already has an active supervised Run '${existing.id}'.`,
+        });
+      }
+      if ((readModel.missionRuns ?? []).some((run) => run.id === command.runId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Mission Run '${command.runId}' already exists.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.run.started" as const,
+        payload: {
+          run: {
+            id: command.runId,
+            missionId: mission.id,
+            projectId: mission.projectId,
+            mode: "supervised" as const,
+            status: "running" as const,
+            maxConcurrentTasks: command.maxConcurrentTasks,
+            currentReadyTaskIds: [],
+            scheduledTaskIds: [],
+            attention: [],
+            attentionReason: null,
+            decisions: [],
+            startedAt: command.createdAt,
+            pausedAt: null,
+            completedAt: null,
+            stoppedAt: null,
+            failedAt: null,
+            failureReason: null,
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "mission.run.pause":
+    case "mission.run.resume":
+    case "mission.run.stop": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      if (!run) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Mission Run '${command.runId}' does not exist.`,
+        });
+      }
+      const allowed =
+        command.type === "mission.run.pause"
+          ? run.status === "running" || run.status === "attention"
+          : command.type === "mission.run.resume"
+            ? run.status === "paused" || run.status === "attention"
+            : run.status === "running" || run.status === "paused" || run.status === "attention";
+      if (!allowed) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Mission Run '${run.id}' cannot ${command.type.split(".").at(-1)} from '${run.status}'.`,
+        });
+      }
+      const status =
+        command.type === "mission.run.pause"
+          ? ("paused" as const)
+          : command.type === "mission.run.resume"
+            ? ("running" as const)
+            : ("stopped" as const);
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: run.missionId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type:
+          command.type === "mission.run.pause"
+            ? ("mission.run.paused" as const)
+            : command.type === "mission.run.resume"
+              ? ("mission.run.resumed" as const)
+              : ("mission.run.stopped" as const),
+        payload: {
+          run: {
+            ...run,
+            status,
+            pausedAt: status === "paused" ? command.createdAt : run.pausedAt,
+            stoppedAt: status === "stopped" ? command.createdAt : run.stoppedAt,
+            attention: status === "running" ? [] : run.attention,
+            attentionReason: status === "running" ? null : run.attentionReason,
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "mission.run.reconcile": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      if (
+        !run ||
+        run.status === "completed" ||
+        run.status === "stopped" ||
+        run.status === "failed"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Mission Run '${command.runId}' is not reconcilable.`,
+        });
+      }
+      if (
+        run.status === "paused" &&
+        command.status !== "completed" &&
+        command.status !== "failed"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Paused Mission Run '${run.id}' may only reconcile terminal state.`,
+        });
+      }
+      const decision = command.decision ?? null;
+      const decisions =
+        decision && !run.decisions.some((candidate) => candidate.id === decision.id)
+          ? [...run.decisions, decision]
+          : run.decisions;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: run.missionId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.run.reconciled" as const,
+        payload: {
+          run: {
+            ...run,
+            status: command.status,
+            currentReadyTaskIds: command.currentReadyTaskIds,
+            scheduledTaskIds: command.scheduledTaskIds,
+            attention: command.attention,
+            attentionReason: command.attentionReason,
+            decisions,
+            completedAt: command.completedAt,
+            failedAt: command.status === "failed" ? command.createdAt : run.failedAt,
+            failureReason: command.failureReason,
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
     case "integration.create": {
       const project = yield* requireProject({ readModel, command, projectId: command.projectId });
       const mission = command.missionId

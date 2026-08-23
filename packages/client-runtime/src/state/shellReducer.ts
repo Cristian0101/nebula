@@ -67,6 +67,13 @@ export function applyShellStreamEvent(
         : Arr.append(currentMissions, event.mission);
       return { ...snapshot, missions, snapshotSequence: event.sequence };
     }
+    case "mission-run-upserted": {
+      const currentRuns = snapshot.missionRuns ?? [];
+      const missionRuns = currentRuns.some((run) => run.id === event.missionRun.id)
+        ? Arr.map(currentRuns, (run) => (run.id === event.missionRun.id ? event.missionRun : run))
+        : Arr.append(currentRuns, event.missionRun);
+      return { ...snapshot, missionRuns, snapshotSequence: event.sequence };
+    }
     default:
       return snapshot;
   }

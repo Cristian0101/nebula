@@ -29,6 +29,7 @@ import {
   MissionDependencyPayload,
   MissionLifecyclePayload,
   MissionIntegrationLinkedPayload,
+  MissionRunPayload,
   TaskActivatedPayload,
   TaskCancelledPayload,
   TaskCompletedPayload,
@@ -246,6 +247,7 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
     projects: [],
     tasks: [],
     missions: [],
+    missionRuns: [],
     threads: [],
     updatedAt: nowIso,
   };
@@ -722,6 +724,21 @@ export function projectEvent(
                 }
               : mission,
           ),
+        })),
+      );
+
+    case "mission.run.started":
+    case "mission.run.paused":
+    case "mission.run.resumed":
+    case "mission.run.stopped":
+    case "mission.run.reconciled":
+      return decodeForEvent(MissionRunPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          missionRuns: [
+            ...(nextBase.missionRuns ?? []).filter((run) => run.id !== payload.run.id),
+            payload.run,
+          ],
         })),
       );
 

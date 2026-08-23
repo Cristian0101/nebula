@@ -16,6 +16,7 @@ import {
   SharedResourceId,
   TaskResourceComplianceState,
   OwnershipRequest,
+  MissionRun,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -116,6 +117,7 @@ const encodeOwnershipRequests = Schema.encodeSync(
 const decodeOwnershipRequests = Schema.decodeSync(
   Schema.fromJsonString(Schema.Array(OwnershipRequest)),
 );
+const encodeMissionRun = Schema.encodeSync(Schema.fromJsonString(MissionRun));
 const decodeTaskReviewSnapshot = Schema.decodeSync(Schema.fromJsonString(TaskReviewSnapshot));
 const decodeTaskHandoff = Schema.decodeSync(Schema.fromJsonString(TaskHandoff));
 const decodeTaskRestore = Schema.decodeUnknownEffect(Schema.fromJsonString(TaskRestoreState));
@@ -1863,6 +1865,42 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               occurredAt: event.occurredAt,
             });
           }
+          return;
+        case "mission.run.started":
+        case "mission.run.paused":
+        case "mission.run.resumed":
+        case "mission.run.stopped":
+        case "mission.run.reconciled":
+          yield* sql`
+            INSERT INTO projection_mission_runs (
+              run_id, mission_id, project_id, status, run_json, started_at, updated_at
+            ) VALUES (
+              ${event.payload.run.id}, ${event.payload.run.missionId},
+              ${event.payload.run.projectId}, ${event.payload.run.status},
+              ${encodeMissionRun(event.payload.run)}, ${event.payload.run.startedAt},
+              ${event.payload.run.updatedAt}
+            ) ON CONFLICT (run_id) DO UPDATE SET
+              status = excluded.status,
+              run_json = excluded.run_json,
+              updated_at = excluded.updated_at
+          `.pipe(Effect.mapError(toPersistenceSqlError("ProjectionMissions.run:query")));
+          yield* appendMissionActivity({
+            missionId: event.payload.run.missionId,
+            eventId: event.eventId,
+            type: event.type,
+            summary:
+              event.type === "mission.run.started"
+                ? "Supervised Run started"
+                : event.type === "mission.run.paused"
+                  ? "Supervised Run paused"
+                  : event.type === "mission.run.resumed"
+                    ? "Supervised Run resumed"
+                    : event.type === "mission.run.stopped"
+                      ? "Supervised Run stopped"
+                      : `Supervised Run ${event.payload.run.status}`,
+            taskId: event.payload.run.decisions.at(-1)?.taskId ?? null,
+            occurredAt: event.occurredAt,
+          });
           return;
         default:
           return;

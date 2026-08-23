@@ -1,13 +1,16 @@
 import {
+  ArchitectPlanProposalId,
   CommandId,
   EventId,
   MissionId,
+  MissionRunId,
   ProjectId,
   ProviderInstanceId,
   TaskId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type ArchitectPlanProposal,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -24,6 +27,8 @@ const otherMissionId = MissionId.make("mission-2");
 const taskA = TaskId.make("task-a");
 const taskB = TaskId.make("task-b");
 const taskC = TaskId.make("task-c");
+const proposalId = ArchitectPlanProposalId.make("architect-plan-1");
+const runId = MissionRunId.make("mission-run-1");
 
 const persistedEvent = (
   sequence: number,
@@ -106,7 +111,10 @@ const seed = Effect.gen(function* () {
   return model;
 });
 
-const createMission = (id = missionId): OrchestrationCommand => ({
+const createMission = (
+  id = missionId,
+  architectPlanProposalId?: ArchitectPlanProposalId,
+): OrchestrationCommand => ({
   type: "mission.create",
   commandId: CommandId.make(`create-${id}`),
   missionId: id,
@@ -114,8 +122,48 @@ const createMission = (id = missionId): OrchestrationCommand => ({
   title: `Mission ${id}`,
   objective: "Ship an explicit dependency plan.",
   description: null,
+  ...(architectPlanProposalId ? { architectPlanProposalId } : {}),
   createdAt: now,
 });
+
+const approvedPlan: ArchitectPlanProposal = {
+  id: proposalId,
+  projectId,
+  status: "approved",
+  objective: "Ship an explicit dependency plan.",
+  constraints: null,
+  planningBaseCommit: "abc123",
+  observedHeadCommit: "abc123",
+  architectProviderInstanceId: ProviderInstanceId.make("codex"),
+  architectModelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+  contextFingerprint: "context",
+  contextPaths: [],
+  resourcePolicyFingerprint: "resources",
+  proposal: {
+    title: "Mission plan",
+    objective: "Ship an explicit dependency plan.",
+    tasks: [],
+    dependencies: [],
+    assumptions: [],
+    risks: [],
+    unresolvedQuestions: [],
+  },
+  validation: {
+    status: "valid",
+    errors: [],
+    warnings: [],
+    taskCount: 1,
+    edgeCount: 0,
+    waveCount: 1,
+    validatedAt: now,
+  },
+  revisions: [],
+  materializedMissionId: missionId,
+  failureReason: null,
+  createdAt: now,
+  updatedAt: now,
+  resolvedAt: now,
+};
 
 const addTask = (id: MissionId, taskId: TaskId): OrchestrationCommand => ({
   type: "mission.task.add",
@@ -267,6 +315,103 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
         confirmActiveEdit: true,
       });
       expect(model.missions?.[0]?.dependencies).toHaveLength(1);
+    }),
+  );
+
+  it.effect("starts, pauses, resumes, reconciles, and stops one durable supervised Run", () =>
+    Effect.gen(function* () {
+      let model = yield* seed;
+      model = yield* apply(model, createMission(missionId, proposalId));
+      model = yield* apply(model, addTask(missionId, taskA));
+      model = yield* apply(model, {
+        type: "mission.activate",
+        commandId: CommandId.make("activate-supervised"),
+        missionId,
+        projectId,
+        createdAt: now,
+      });
+      model = {
+        ...model,
+        projects: model.projects.map((project) =>
+          project.id === projectId ? { ...project, architectPlans: [approvedPlan] } : project,
+        ),
+      };
+      model = yield* apply(model, {
+        type: "mission.run.start",
+        commandId: CommandId.make("start-run"),
+        runId,
+        missionId,
+        projectId,
+        maxConcurrentTasks: 2,
+        createdAt: now,
+      });
+      expect(model.missionRuns).toEqual([
+        expect.objectContaining({ id: runId, mode: "supervised", status: "running" }),
+      ]);
+
+      const duplicate = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            type: "mission.run.start",
+            commandId: CommandId.make("duplicate-run"),
+            runId: MissionRunId.make("mission-run-2"),
+            missionId,
+            projectId,
+            maxConcurrentTasks: 2,
+            createdAt: now,
+          },
+        }),
+      );
+      expect(duplicate.message).toContain("already has an active supervised Run");
+
+      model = yield* apply(model, {
+        type: "mission.run.pause",
+        commandId: CommandId.make("pause-run"),
+        runId,
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.status).toBe("paused");
+      model = yield* apply(model, {
+        type: "mission.run.resume",
+        commandId: CommandId.make("resume-run"),
+        runId,
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.status).toBe("running");
+      model = yield* apply(model, {
+        type: "mission.run.reconcile",
+        commandId: CommandId.make("reconcile-run"),
+        runId,
+        status: "attention",
+        currentReadyTaskIds: [taskA],
+        scheduledTaskIds: [],
+        attention: [
+          {
+            taskId: taskA,
+            code: "reviewer_unavailable",
+            detail: "No independent Reviewer is ready.",
+            blocksMission: false,
+          },
+        ],
+        attentionReason: "No independent Reviewer is ready.",
+        decision: null,
+        completedAt: null,
+        failureReason: null,
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]).toMatchObject({
+        status: "attention",
+        currentReadyTaskIds: [taskA],
+        attentionReason: "No independent Reviewer is ready.",
+      });
+      model = yield* apply(model, {
+        type: "mission.run.stop",
+        commandId: CommandId.make("stop-run"),
+        runId,
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.status).toBe("stopped");
     }),
   );
 });
