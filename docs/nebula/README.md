@@ -24,6 +24,8 @@ The current implemented safety boundary combines one Git worktree per writable B
 
 Task Diff, immutable review snapshots, structured handoffs, and safe Task restore are implemented on that same boundary. A managed Task exposes its net Git delta from its immutable base, captures a hidden-ref snapshot after fresh ownership validation, and requires a human-reviewed ready handoff plus a second ownership and freshness check before completion. Restore affects only the isolated unpublished Task branch/worktree, first captures a retained recovery ref, leaves provider conversation history intact, and supports explicit undo.
 
+Command Deck is the implemented desktop-first manual orchestration surface over those canonical primitives. From one Project, a user can create provider-assigned draft Tasks, declare ownership, start several isolated Tasks, monitor provider and review state, open each existing Thread, inspect changes and handoffs, and restore one Task without creating a second Task, provider, Git, event, or persistence system. Manual parallel provider Tasks are implemented. Automated planning, routing, dependencies, shared-resource locks, Reviewer automation, integration, and Swarm Mode are not implemented.
+
 Antigravity CLI is the implemented Google first-party provider for individual Google accounts. Nebula invokes its official headless CLI, keeps authentication provider-owned, and binds each run to the canonical Task worktree. The preserved Gemini CLI prototype remains experimental and blocked for the individual-account authentication path; it is not a mainline provider.
 
 ## Source hierarchy

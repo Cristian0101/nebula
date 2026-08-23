@@ -1,5 +1,13 @@
 # Nebula changelog
 
+## Unreleased — Command Deck
+
+- Added a desktop-first Project Command Deck for creating, assigning, starting, monitoring, inspecting, reviewing, restoring, and cleaning up several canonical Tasks from one surface.
+- Added durable provider/model assignment for draft Tasks without creating placeholder Threads; the bound Thread remains execution authority after Start.
+- Added Project-scoped Task rail, repository summary, provider diversity, selected canonical Thread context, inspector tabs, filtered milestone activity, and derived attention reasons.
+- Reused the existing provider registry, Task workspaces, ownership editor and validation, lazy Task Diff, review handoff, restore, typed commands, shell subscriptions, and desktop shell.
+- Kept Mission, DAG, scheduler, automated planning/routing, shared-resource locks, automated Reviewer, integration, and Swarm Mode out of scope.
+
 ## Unreleased — Task Diff, review handoff, and safe restore
 
 - Added canonical complete Task change sets, line statistics, binary metadata, and lazy file diffs from immutable Task base to current worktree state.

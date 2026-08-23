@@ -20,6 +20,7 @@ import {
   restoreTaskWorkspaceToBaseline,
   taskBranchIsPublished,
   taskRestoreCheckpointRef,
+  taskWorkspacePathsMatch,
   undoTaskWorkspaceRestore,
 } from "./TaskReviewReactor.ts";
 
@@ -57,6 +58,20 @@ describe("TaskReviewReactor restore safety", () => {
       taskBranchIsPublished("refs/remotes/origin/feature/task-two\n", "feature/task-one"),
     ).toBe(false);
   });
+
+  it.effect("accepts lexical aliases for the same managed worktree", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "nebula-task-path-" });
+      const workspace = path.join(root, "workspace");
+      const alias = path.join(root, "workspace-alias");
+      yield* fs.makeDirectory(workspace);
+      yield* fs.symlink(workspace, alias);
+
+      expect(yield* taskWorkspacePathsMatch(alias, workspace)).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 });
 
 it.layer(layer)("TaskReviewReactor restore fixture", (it) => {

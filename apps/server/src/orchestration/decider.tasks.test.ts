@@ -127,9 +127,13 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         title: "Persistent task",
         objective: "Prove the Task lifecycle.",
         role: "reviewer",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
         createdAt: now,
       });
-      expect(model.tasks?.[0]?.status).toBe("draft");
+      expect(model.tasks?.[0]).toMatchObject({
+        status: "draft",
+        modelSelection: { instanceId: "codex", model: "test" },
+      });
 
       model = yield* applyCommand(model, {
         type: "task.bind-thread",

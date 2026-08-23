@@ -98,6 +98,7 @@ it.effect("restores Task status and Thread association after a projection restar
           title: "Persistent Task",
           objective: "Survive a runtime restart.",
           role: "builder",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
           ownershipRequired: true,
           createdAt,
           updatedAt: createdAt,
@@ -281,6 +282,7 @@ it.effect("restores Task status and Thread association after a projection restar
         readonly title: string;
         readonly objective: string;
         readonly status: string;
+        readonly modelSelection: string | null;
         readonly threadId: string | null;
         readonly workspace: string;
         readonly ownershipRules: string;
@@ -294,6 +296,7 @@ it.effect("restores Task status and Thread association after a projection restar
           task.title,
           task.objective,
           task.status,
+          task.model_selection_json AS "modelSelection",
           task.thread_id AS "threadId",
           COALESCE(thread.worktree_path, project.workspace_root) AS workspace
           , task.ownership_rules_json AS "ownershipRules"
@@ -314,6 +317,7 @@ it.effect("restores Task status and Thread association after a projection restar
         title: "Persistent Task",
         objective: "Survive a runtime restart.",
         status: "active",
+        modelSelection: '{"instanceId":"codex","model":"test"}',
         threadId,
         workspace: "/tmp/task-restart-project",
         ownershipRules:

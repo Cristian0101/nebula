@@ -561,24 +561,6 @@ const makeWsRpcLayer = (
                 projectId: event.payload.projectId,
               }),
             );
-          case "task.created":
-          case "task.thread-bound":
-          case "task.activated":
-          case "task.completed":
-          case "task.cancelled":
-          case "task.workspace.prepare-requested":
-          case "task.workspace.preparation-started":
-          case "task.workspace.ready":
-          case "task.workspace.failed":
-          case "task.workspace.missing":
-          case "task.workspace.remove-requested":
-          case "task.workspace.removed":
-          case "task.workspace.cleanup-failed":
-          case "task.ownership-updated":
-          case "task.ownership-validation-requested":
-          case "task.ownership-validated":
-          case "task.ownership-validation-failed":
-            return taskUpsert(event.payload.taskId, event.sequence);
           case "thread.deleted":
           case "thread.archived":
             return Effect.succeed(
@@ -591,6 +573,12 @@ const makeWsRpcLayer = (
           case "thread.unarchived":
             return threadUpsertOrRemove(event.payload.threadId, event.sequence);
           default:
+            // Tasks have one shell projection regardless of which lifecycle facet changed.
+            // Refetch by aggregate id so review, handoff, restore, and future Task events stay
+            // live without maintaining a second event-name allowlist here.
+            if (event.aggregateKind === "task") {
+              return taskUpsert(TaskId.make(event.aggregateId), event.sequence);
+            }
             if (event.aggregateKind !== "thread") {
               return Effect.succeed(Option.none());
             }

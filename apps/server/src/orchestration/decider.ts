@@ -392,6 +392,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           title: command.title,
           objective: command.objective,
           role: command.role,
+          modelSelection: command.modelSelection ?? null,
           ownershipRequired: command.role === "builder",
           createdAt: command.createdAt,
           updatedAt: command.createdAt,

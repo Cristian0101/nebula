@@ -1,6 +1,7 @@
 import {
   ApprovalRequestId,
   type ChatAttachment,
+  ModelSelection,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
@@ -83,6 +84,7 @@ const encodeOwnershipRules = Schema.encodeSync(
 const encodeOwnershipViolations = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(TaskOwnershipViolation)),
 );
+const encodeModelSelection = Schema.encodeSync(Schema.fromJsonString(ModelSelection));
 const encodeTaskReviewSnapshot = Schema.encodeSync(Schema.fromJsonString(TaskReviewSnapshot));
 const encodeTaskHandoff = Schema.encodeSync(Schema.fromJsonString(TaskHandoff));
 const encodeTaskRestore = Schema.encodeSync(Schema.fromJsonString(TaskRestoreState));
@@ -587,6 +589,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               title: event.payload.title,
               objective: event.payload.objective,
               role: event.payload.role,
+              modelSelectionJson: event.payload.modelSelection
+                ? encodeModelSelection(event.payload.modelSelection)
+                : null,
               status: "draft",
               threadId: null,
               createdAt: event.payload.createdAt,

@@ -21,6 +21,7 @@ export const ProjectionTask = Schema.Struct({
   title: Schema.String,
   objective: Schema.String,
   role: NebulaTaskRole,
+  modelSelectionJson: Schema.NullOr(Schema.String),
   status: NebulaTaskStatus,
   threadId: Schema.NullOr(ThreadId),
   createdAt: IsoDateTime,
