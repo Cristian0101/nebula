@@ -8,6 +8,6 @@ The result is a separate durable proposal, not a Mission. It contains proposed T
 
 You can edit the proposal and confirm an actual provider/model for every Task. Architect recommendations remain labeled suggestions. Every edit is revalidated and preserved as a revision. Rejected and failed proposals remain history.
 
-Approval is explicit and atomic. It creates exactly one ordinary draft Mission, its ordinary draft Builder Tasks, ownership rules, membership, and dependency edges. Architect Missions pin the exact planning commit so later Task worktrees share one common base. Approval does not activate the Mission, prepare worktrees, create Threads, acquire leases, or start providers. Use the existing Mission activation and Task start controls afterward.
+Approval is explicit and atomic. It creates exactly one ordinary draft Mission, its ordinary draft Builder Tasks, ownership rules, membership, and dependency edges. Architect Missions pin the exact planning commit so later Task worktrees share one common base. Approval does not activate the Mission, prepare worktrees, create Threads, acquire leases, or start providers. After activation, choose manual Task starts or explicitly authorize a [Supervised Mission Run](supervised-runs.md).
 
-Limitations: Architect does not automatically approve, activate, schedule, advance waves, route providers, approve ownership, create Shared Resources, start Integration, or implement Swarm Mode.
+Limitations: Architect does not automatically approve or activate, route or reassign providers, approve ownership, create Shared Resources, rewrite a plan, remediate failures, start Integration, or implement Swarm Mode. Scheduling begins only after a separate explicit Supervised Run confirmation.

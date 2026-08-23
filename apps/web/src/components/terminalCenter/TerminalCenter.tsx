@@ -15,6 +15,7 @@ import {
   BotIcon,
   CrosshairIcon,
   FocusIcon,
+  GitBranchIcon,
   LayoutDashboardIcon,
   Maximize2Icon,
   PlusIcon,
@@ -154,6 +155,15 @@ function TerminalCenter({
     () => (snapshot?.missions ?? []).filter((mission) => mission.projectId === project.id),
     [project.id, snapshot?.missions],
   );
+  const activeMissionRuns = useMemo(
+    () =>
+      (snapshot?.missionRuns ?? []).filter(
+        (run) =>
+          run.projectId === project.id &&
+          (run.status === "running" || run.status === "paused" || run.status === "attention"),
+      ),
+    [project.id, snapshot?.missionRuns],
+  );
   const taskByThread = useMemo(
     () => new Map(tasks.filter((task) => task.threadId).map((task) => [task.threadId!, task])),
     [tasks],
@@ -207,6 +217,27 @@ function TerminalCenter({
   );
   const canvasRef = useRef<HTMLDivElement>(null);
   const arrangedNodeCountRef = useRef(0);
+  const supervisedThreadIds = useMemo(() => {
+    const taskIds = new Set(
+      activeMissionRuns.flatMap(
+        (run) => missions.find((mission) => mission.id === run.missionId)?.taskIds ?? [],
+      ),
+    );
+    return tasks.flatMap((task) => (taskIds.has(task.id) && task.threadId ? [task.threadId] : []));
+  }, [activeMissionRuns, missions, tasks]);
+
+  useEffect(() => {
+    const missing = supervisedThreadIds.filter(
+      (threadId) => !state.visibleThreadIds.includes(threadId),
+    );
+    missing.forEach((threadId, index) =>
+      showThread(
+        project.id,
+        threadId,
+        nextFreeformPosition(state.positions, state.visibleThreadIds.length + index),
+      ),
+    );
+  }, [project.id, showThread, state.positions, state.visibleThreadIds, supervisedThreadIds]);
 
   const visibleThreads = useMemo(
     () => hydrateTerminalCanvasThreads(state.visibleThreadIds, projectThreads),
@@ -658,6 +689,19 @@ function TerminalCenter({
             </Button>
           </div>
         </section>
+        {activeMissionRuns.length > 0 ? (
+          <div className="flex shrink-0 items-center justify-between gap-4 border-b border-[#ff7f6a]/20 bg-[#ff7f6a]/8 px-4 py-2 text-xs text-slate-200">
+            <span>
+              {activeMissionRuns.length} supervised Mission{" "}
+              {activeMissionRuns.length === 1 ? "Run" : "Runs"} active ·{" "}
+              {supervisedThreadIds.length} Task{" "}
+              {supervisedThreadIds.length === 1 ? "Thread" : "Threads"} on canvas
+            </span>
+            <Button size="xs" variant="outline" onClick={() => applyLayout("mission-flow")}>
+              <GitBranchIcon /> Mission flow
+            </Button>
+          </div>
+        ) : null}
         {sharedCheckout ? (
           <div className="flex shrink-0 items-center justify-between gap-4 border-b border-amber-400/20 bg-amber-400/8 px-4 py-2 text-xs text-amber-100">
             <span className="flex items-center gap-2">

@@ -8,13 +8,13 @@ A Mission is a durable, human-authored objective over existing Tasks in one Proj
 
 Open **Command Deck → Missions**, create a Mission, then create a canonical Task inside it or attach an eligible draft Task from the same Project. Add dependencies with the two accessible Task selectors. An edge `Contract → Backend` means Backend stays blocked until Contract is completed. Nebula rejects self-edges, duplicates, missing members, and cycles on the server and shows the involved Task path.
 
-Graph view shows dependency lines, Task status, provider, role, and computed wave. Waves are deterministic topological layers: independent Tasks appear together and later waves wait for every prerequisite. Waves are derived from the current graph and Task state; Nebula does not persist a scheduler or inferred plan.
+Graph view shows dependency lines, Task status, provider, role, and computed wave. Waves are deterministic topological layers: independent Tasks appear together and later waves wait for every prerequisite. Waves are derived from the current graph and Task state. Approved Architect Missions may also create a durable [Supervised Mission Run](supervised-runs.md); manual Missions keep the explicit start flow.
 
 ## Activate and start work
 
 Activate a valid non-empty draft Mission when the authored graph is ready. Activation does not start anything. A draft Task is **Ready** only when every prerequisite is completed and its provider, ownership, and workspace start configuration is valid. Otherwise Command Deck shows explicit blockers or configuration attention.
 
-Choose one ready Task or **Start ready Tasks**. The wave action starts only the Tasks currently reported ready, using each Task's existing isolated-workspace and provider flow. Nebula never starts a later wave automatically. As canonical Task and provider state changes arrive, the Mission view recomputes readiness live.
+Choose one ready Task or **Start ready Tasks** for manual execution. For an approved, materialized Architect Mission, **Start supervised Run** authorizes deterministic later-wave advancement under the documented concurrency, resource, completion, and attention policies. Both paths use the same canonical Task flow.
 
 Completed Tasks satisfy dependencies. A historical completed Task without a retained Task Result remains compatible but is labeled as degraded evidence. A cancelled prerequisite does not silently satisfy an edge; edit or remove the dependency if the plan was wrong. Provider or workspace failures remain visible attention while downstream work stays blocked.
 
@@ -33,6 +33,6 @@ If the linked Batch fails or is cancelled, the Mission keeps that evidence visib
 Shared Resource blocking is implemented separately from dependency readiness. A Task may be ready by
 dependencies but waiting for an exclusive resource held by another Task. Bulk starts serialize
 deterministically: one contender starts and the other remains waiting. Releasing the lease makes it
-resource-ready, but a human must start it. Automatic Task creation, dependency planning, wave
-progression, capacity scheduling, provider routing, Architect, conflict remediation, and Swarm Mode
-are not implemented.
+resource-ready. A Supervised Run may continue it automatically under the user's prior authorization.
+Automatic Task creation, dependency planning, provider rerouting, remediation, conflict resolution,
+automatic Integration, and Swarm Mode are not implemented.

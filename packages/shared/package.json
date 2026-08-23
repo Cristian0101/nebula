@@ -115,6 +115,10 @@
       "types": "./src/missionGraph.ts",
       "import": "./src/missionGraph.ts"
     },
+    "./missionRunner": {
+      "types": "./src/missionRunner.ts",
+      "import": "./src/missionRunner.ts"
+    },
     "./resourceCoordination": {
       "types": "./src/resourceCoordination.ts",
       "import": "./src/resourceCoordination.ts"

@@ -1039,6 +1039,7 @@ export function CommandDeck({
               environmentId={project.environmentId}
               project={currentProject}
               missions={missions}
+              missionRuns={snapshot?.missionRuns ?? []}
               tasks={tasks}
               threads={snapshot?.threads ?? []}
               unavailableProviderTaskIds={unavailableProviderTaskIds}

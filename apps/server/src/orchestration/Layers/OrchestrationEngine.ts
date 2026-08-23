@@ -2,11 +2,10 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
   ProjectId,
-  MissionId,
   TaskId,
   ThreadId,
 } from "@t3tools/contracts";
-import { OrchestrationCommand } from "@t3tools/contracts";
+import { MissionId, OrchestrationCommand } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
@@ -98,9 +97,18 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "mission.activate":
     case "mission.complete":
     case "mission.cancel":
+    case "mission.run.start":
       return {
         aggregateKind: "mission",
         aggregateId: command.missionId,
+      };
+    case "mission.run.pause":
+    case "mission.run.resume":
+    case "mission.run.stop":
+    case "mission.run.reconcile":
+      return {
+        aggregateKind: "mission",
+        aggregateId: MissionId.make(command.runId),
       };
     case "task.create":
     case "task.acceptance-criteria.set":

@@ -2,7 +2,7 @@
 
 ## Planning status
 
-Architect Plan Proposal, AI-drafted Tasks/DAG/ownership/resource claims, and human plan approval are implemented. Automatic plan execution, scheduling, wave start, provider routing, provider-generated ownership requests, and Swarm Mode remain not implemented.
+Architect Plan Proposal, AI-drafted Tasks/DAG/ownership/resource claims, human plan approval, and explicitly authorized deterministic Supervised Mission Runs are implemented. Provider routing, provider-generated ownership requests, automatic remediation, automatic Integration, and Swarm Mode remain not implemented.
 
 This document constrains future Swarm Mode. It does not describe a currently implemented feature.
 
@@ -66,9 +66,9 @@ A prepared Task review provides:
 - follow-ups; and
 - immutable base, snapshot, and current-head evidence.
 
-The handoff is concise evidence for review and integration, not a duplicate project-management report. Git facts are captured automatically and cannot be edited. Provider-generated narrative is explicitly separate, remains a draft until human review, and has a manual fallback. Quality gates, user-requested independent review, human-created deterministic Integration Batches, and human-authored Mission DAGs are implemented on this boundary. Shared-resource locks, automatic Mission planning, scheduling, automatic routing/remediation, automatic integration queues, Architect, and Swarm automation are not implemented.
+The handoff is concise evidence for review and integration, not a duplicate project-management report. Git facts are captured automatically and cannot be edited. Provider-generated narrative is explicitly separate and has a manual fallback. Quality gates, independent review, human-created deterministic Integration Batches, Shared Resources, approved Architect Mission DAGs, and Supervised Mission scheduling are implemented on this boundary. Automatic routing/remediation, automatic integration queues, and Swarm automation are not implemented.
 
-Missions and the Integration Engine do not imply Swarm automation. Users author dependency edges, activate the Mission, choose which ready Tasks or wave to start, select eligible Task Results and their Integration order, acknowledge overlap, resolve conflicts, and decide what to do with a Ready branch. No agent invents Tasks or dependencies, starts the next wave, acquires locks, merges main, pushes, or opens a PR.
+Missions and the Integration Engine do not imply Swarm automation. Users author or approve dependency edges, activate the Mission, and choose manual execution or one explicitly confirmed Supervised Run. A Run may start later waves and acquire canonical resource leases under deterministic policy, but it cannot invent Tasks or dependencies, rewrite the plan, reroute providers, remediate failures, approve scope, resolve conflicts, create Integration, merge main, push, or open a PR.
 
 Shared-resource coordination is implemented as a deterministic safety primitive before Swarm Mode.
 It does not schedule Tasks, retry blocked Tasks, advance waves, route providers, or authorize an

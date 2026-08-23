@@ -15,6 +15,7 @@ import { TaskReviewReactor } from "../Services/TaskReviewReactor.ts";
 import { TaskQualityReactor } from "../Services/TaskQualityReactor.ts";
 import { IntegrationReactor } from "../Services/IntegrationReactor.ts";
 import { ArchitectPlanReactor } from "../Services/ArchitectPlanReactor.ts";
+import { MissionRunReactor } from "../Services/MissionRunReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
 
 export const makeOrchestrationReactor = Effect.gen(function* () {
@@ -28,6 +29,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const taskQualityReactor = yield* TaskQualityReactor;
   const integrationReactor = yield* IntegrationReactor;
   const architectPlanReactor = yield* ArchitectPlanReactor;
+  const missionRunReactor = yield* MissionRunReactor;
   const agentAwarenessRelay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
 
   const start: OrchestrationReactorShape["start"] = Effect.fn("start")(function* () {
@@ -41,6 +43,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* taskQualityReactor.start();
     yield* integrationReactor.start();
     yield* architectPlanReactor.start();
+    yield* missionRunReactor.start();
     yield* agentAwarenessRelay.start();
   });
 

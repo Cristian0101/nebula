@@ -42,6 +42,10 @@ import {
   activateMission,
   completeMission,
   cancelMission,
+  startMissionRun,
+  pauseMissionRun,
+  resumeMissionRun,
+  stopMissionRun,
   saveArchitectPlan,
   generateArchitectPlan,
   rejectArchitectPlan,
@@ -73,6 +77,10 @@ export type {
   ActivateMissionInput,
   CompleteMissionInput,
   CancelMissionInput,
+  StartMissionRunInput,
+  PauseMissionRunInput,
+  ResumeMissionRunInput,
+  StopMissionRunInput,
   SaveArchitectPlanInput,
   GenerateArchitectPlanInput,
   RejectArchitectPlanInput,
@@ -108,6 +116,11 @@ export function createProjectEnvironmentAtoms<R, E>(
     mode: "serial" as const,
     key: ({ environmentId, input }: { environmentId: string; input: { projectId: string } }) =>
       JSON.stringify([environmentId, input.projectId]),
+  };
+  const missionRunConcurrency = {
+    mode: "serial" as const,
+    key: ({ environmentId, input }: { environmentId: string; input: { runId: string } }) =>
+      JSON.stringify([environmentId, input.runId]),
   };
   return {
     searchEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
@@ -268,6 +281,30 @@ export function createProjectEnvironmentAtoms<R, E>(
       execute: cancelMission,
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
+    }),
+    startMissionRun: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission-run:start",
+      execute: startMissionRun,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    pauseMissionRun: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission-run:pause",
+      execute: pauseMissionRun,
+      scheduler: projectScheduler,
+      concurrency: missionRunConcurrency,
+    }),
+    resumeMissionRun: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission-run:resume",
+      execute: resumeMissionRun,
+      scheduler: projectScheduler,
+      concurrency: missionRunConcurrency,
+    }),
+    stopMissionRun: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission-run:stop",
+      execute: stopMissionRun,
+      scheduler: projectScheduler,
+      concurrency: missionRunConcurrency,
     }),
     saveArchitectPlan: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:architect-plan:save",
