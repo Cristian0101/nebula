@@ -156,6 +156,12 @@ The Task rail and summary remain lightweight. Only the selected Task mounts the 
 
 Command Deck activity is a filtered presentation of durable projected milestones already attached to Tasks. It intentionally excludes token deltas and does not become a second orchestration history. Because Tasks, workspaces, ownership, review, restore, and Threads already hydrate from the orchestration projection, restarting the client or server reconstructs the Deck without Command Deck-specific recovery state.
 
+### Terminal Center composition
+
+Terminal Center is a Project route in the existing web client and desktop shell. Provider buttons are derived from the existing configured provider-instance snapshot. Launch creates the same canonical Thread used by chat; isolated launch first composes the existing Task ownership and worktree preparation commands, then binds that Thread without starting a provider turn.
+
+Canvas visibility, positions, layout, viewport, selection, and quick-launch defaults are client-local UI preferences. They never enter Task, Mission, Thread, or provider projections. The focused node mounts the existing Thread workspace, while unselected nodes render shell summaries only. Mission Flow reads the existing Mission DAG waves, and no edge is rendered without a canonical dependency.
+
 ### Quality gates and independent review
 
 Project quality and review policies extend the existing Project projection. A gate definition persists its command and a separate exact approved command; editing the executable string revokes approval. The Task decider creates immutable `QualityGateRun` records tied to Task ID and review snapshot ID. `TaskQualityReactor` delegates process execution to the inherited `ProcessRunner`, fixes `cwd` to the Task worktree, bounds retained output, enforces timeouts and cancellation, and checks snapshot freshness both before and after each command. A mutation stales the run, snapshot, handoff, and applicable reviews and stops the remaining batch.

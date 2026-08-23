@@ -1,6 +1,15 @@
 import { Debouncer } from "@tanstack/react-pacer";
 import { create } from "zustand";
 import { normalizeProjectPathForComparison } from "./lib/projectPaths";
+import {
+  DEFAULT_TERMINAL_CENTER_STATE,
+  TERMINAL_CENTER_LAYOUTS,
+  type CanvasPoint,
+  type CanvasViewport,
+  type TerminalCenterLayout,
+  type TerminalCenterProjectState,
+  type TerminalCenterQuickLaunchProfile,
+} from "./components/terminalCenter/terminalCenterLogic";
 
 export const PERSISTED_STATE_KEY = "t3code:ui-state:v1";
 const THREAD_CHANGED_FILES_EXPANSION_VERSION = 1;
@@ -27,6 +36,7 @@ export interface PersistedUiState {
   defaultAdvertisedEndpointKey?: string | null;
   threadChangedFilesExpansionVersion?: typeof THREAD_CHANGED_FILES_EXPANSION_VERSION;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
+  terminalCenterByProjectId?: Record<string, TerminalCenterProjectState>;
 }
 
 export interface UiProjectState {
@@ -43,7 +53,12 @@ export interface UiEndpointState {
   defaultAdvertisedEndpointKey: string | null;
 }
 
-export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {}
+export interface UiTerminalCenterState {
+  terminalCenterByProjectId: Record<string, TerminalCenterProjectState>;
+}
+
+export interface UiState
+  extends UiProjectState, UiThreadState, UiEndpointState, UiTerminalCenterState {}
 
 const initialState: UiState = {
   projectExpandedById: {},
@@ -51,7 +66,53 @@ const initialState: UiState = {
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
+  terminalCenterByProjectId: {},
 };
+
+function sanitizeTerminalCenterState(value: unknown): Record<string, TerminalCenterProjectState> {
+  if (!value || typeof value !== "object") return {};
+  const result: Record<string, TerminalCenterProjectState> = {};
+  for (const [projectId, raw] of Object.entries(value)) {
+    if (!projectId || !raw || typeof raw !== "object") continue;
+    const candidate = raw as Partial<TerminalCenterProjectState>;
+    const layout = TERMINAL_CENTER_LAYOUTS.includes(candidate.layout as TerminalCenterLayout)
+      ? (candidate.layout as TerminalCenterLayout)
+      : DEFAULT_TERMINAL_CENTER_STATE.layout;
+    const positions = Object.fromEntries(
+      Object.entries(candidate.positions ?? {}).filter(
+        (entry): entry is [string, CanvasPoint] =>
+          Boolean(entry[0]) && Number.isFinite(entry[1]?.x) && Number.isFinite(entry[1]?.y),
+      ),
+    );
+    const viewport = candidate.viewport;
+    result[projectId] = {
+      visibleThreadIds: sanitizeStringArray(candidate.visibleThreadIds),
+      positions,
+      layout,
+      viewport:
+        viewport &&
+        Number.isFinite(viewport.x) &&
+        Number.isFinite(viewport.y) &&
+        Number.isFinite(viewport.zoom)
+          ? { x: viewport.x, y: viewport.y, zoom: Math.min(2, Math.max(0.35, viewport.zoom)) }
+          : DEFAULT_TERMINAL_CENTER_STATE.viewport,
+      selectedThreadId:
+        typeof candidate.selectedThreadId === "string" ? candidate.selectedThreadId : null,
+      quickLaunch:
+        candidate.quickLaunch &&
+        (candidate.quickLaunch.workspaceMode === "current" ||
+          candidate.quickLaunch.workspaceMode === "isolated") &&
+        typeof candidate.quickLaunch.isolatedWritePattern === "string"
+          ? {
+              workspaceMode: candidate.quickLaunch.workspaceMode,
+              isolatedWritePattern: candidate.quickLaunch.isolatedWritePattern,
+              modelByProvider: candidate.quickLaunch.modelByProvider ?? {},
+            }
+          : null,
+    };
+  }
+  return result;
+}
 
 const LEGACY_PROJECT_CWD_PREFERENCE_PREFIX = "legacy-project-cwd:";
 const LEGACY_PROJECT_EXPANSION_DEFAULT_KEY = "legacy-project-expansion-default";
@@ -135,6 +196,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
       parsed.defaultAdvertisedEndpointKey.length > 0
         ? parsed.defaultAdvertisedEndpointKey
         : null,
+    terminalCenterByProjectId: sanitizeTerminalCenterState(parsed.terminalCenterByProjectId),
   };
 }
 
@@ -207,6 +269,7 @@ export function persistState(state: UiState): void {
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
+        terminalCenterByProjectId: state.terminalCenterByProjectId,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -392,6 +455,25 @@ interface UiStateStore extends UiState {
     draggedProjectIds: readonly string[],
     targetProjectIds: readonly string[],
   ) => void;
+  setTerminalCenterState: (projectId: string, state: TerminalCenterProjectState) => void;
+  showTerminalCenterThread: (projectId: string, threadId: string, point?: CanvasPoint) => void;
+  hideTerminalCenterThread: (projectId: string, threadId: string) => void;
+  setTerminalCenterNodePosition: (projectId: string, threadId: string, point: CanvasPoint) => void;
+  setTerminalCenterLayout: (
+    projectId: string,
+    layout: TerminalCenterLayout,
+    positions: Readonly<Record<string, CanvasPoint>>,
+  ) => void;
+  setTerminalCenterViewport: (projectId: string, viewport: CanvasViewport) => void;
+  setTerminalCenterSelection: (projectId: string, threadId: string | null) => void;
+  setTerminalCenterQuickLaunch: (
+    projectId: string,
+    profile: TerminalCenterQuickLaunchProfile,
+  ) => void;
+}
+
+function projectTerminalState(state: UiState, projectId: string): TerminalCenterProjectState {
+  return state.terminalCenterByProjectId[projectId] ?? DEFAULT_TERMINAL_CENTER_STATE;
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
@@ -410,6 +492,93 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) =>
       reorderProjects(state, currentProjectOrder, draggedProjectIds, targetProjectIds),
     ),
+  setTerminalCenterState: (projectId, terminalState) =>
+    set((state) => ({
+      terminalCenterByProjectId: { ...state.terminalCenterByProjectId, [projectId]: terminalState },
+    })),
+  showTerminalCenterThread: (projectId, threadId, point) =>
+    set((state) => {
+      const current = projectTerminalState(state, projectId);
+      if (current.visibleThreadIds.includes(threadId)) return state;
+      return {
+        terminalCenterByProjectId: {
+          ...state.terminalCenterByProjectId,
+          [projectId]: {
+            ...current,
+            visibleThreadIds: [...current.visibleThreadIds, threadId],
+            selectedThreadId: threadId,
+            positions: point ? { ...current.positions, [threadId]: point } : current.positions,
+          },
+        },
+      };
+    }),
+  hideTerminalCenterThread: (projectId, threadId) =>
+    set((state) => {
+      const current = projectTerminalState(state, projectId);
+      const { [threadId]: _removed, ...positions } = current.positions;
+      return {
+        terminalCenterByProjectId: {
+          ...state.terminalCenterByProjectId,
+          [projectId]: {
+            ...current,
+            visibleThreadIds: current.visibleThreadIds.filter((id) => id !== threadId),
+            selectedThreadId:
+              current.selectedThreadId === threadId ? null : current.selectedThreadId,
+            positions,
+          },
+        },
+      };
+    }),
+  setTerminalCenterNodePosition: (projectId, threadId, point) =>
+    set((state) => {
+      const current = projectTerminalState(state, projectId);
+      return {
+        terminalCenterByProjectId: {
+          ...state.terminalCenterByProjectId,
+          [projectId]: { ...current, positions: { ...current.positions, [threadId]: point } },
+        },
+      };
+    }),
+  setTerminalCenterLayout: (projectId, layout, positions) =>
+    set((state) => {
+      const current = projectTerminalState(state, projectId);
+      return {
+        terminalCenterByProjectId: {
+          ...state.terminalCenterByProjectId,
+          [projectId]: { ...current, layout, positions: { ...positions } },
+        },
+      };
+    }),
+  setTerminalCenterViewport: (projectId, viewport) =>
+    set((state) => {
+      const current = projectTerminalState(state, projectId);
+      return {
+        terminalCenterByProjectId: {
+          ...state.terminalCenterByProjectId,
+          [projectId]: { ...current, viewport },
+        },
+      };
+    }),
+  setTerminalCenterSelection: (projectId, selectedThreadId) =>
+    set((state) => {
+      const current = projectTerminalState(state, projectId);
+      return {
+        terminalCenterByProjectId: {
+          ...state.terminalCenterByProjectId,
+          [projectId]: { ...current, selectedThreadId },
+        },
+      };
+    }),
+  setTerminalCenterQuickLaunch: (projectId, quickLaunch) =>
+    set((state) => {
+      const current = projectTerminalState(state, projectId);
+      return {
+        terminalCenterByProjectId: {
+          ...state.terminalCenterByProjectId,
+          [projectId]: { ...current, quickLaunch },
+        },
+      };
+    }),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

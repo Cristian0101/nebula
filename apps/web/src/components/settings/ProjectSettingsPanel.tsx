@@ -1114,6 +1114,25 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             }
           />
         </SettingsSection>
+        <SettingsSection title="Terminal Center">
+          <SettingsRow
+            title="Spatial provider workspace"
+            description="Launch and organize canonical provider Threads without requiring a Task or Mission."
+            control={
+              <Button
+                size="sm"
+                onClick={() =>
+                  void navigate({
+                    to: "/projects/$projectKey/terminal-center",
+                    params: { projectKey: group.projectKey },
+                  })
+                }
+              >
+                Open Terminal Center
+              </Button>
+            }
+          />
+        </SettingsSection>
         <ProjectQualityAndReviewSettings project={representative} />
         <ProjectSharedResourcesSettings project={representative} />
         <ProjectTasksSection project={representative} />
