@@ -1,5 +1,12 @@
 # Nebula changelog
 
+## Architect Plan Proposal
+
+- Added bounded provider-neutral Architect generation with strict structured decoding.
+- Added deterministic proposal validation, revisions, warnings, rejection, and durable restart hydration.
+- Added atomic human approval into canonical draft Missions/Tasks/edges with no execution side effects.
+- Added optional Architect Mission baseline pinning while preserving manual Mission behavior.
+
 ## Unreleased — Shared-resource coordination
 
 - Added Project Shared Resource definitions and exclusive durable Task leases.

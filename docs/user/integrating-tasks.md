@@ -1,5 +1,7 @@
 # Integrate approved Tasks
 
+Architect-created Missions pin a common base commit for every Task wave, preserving Integration Engine common-base determinism even if the source checkout moves later. Plan approval never starts Integration.
+
 An Integration Batch combines approved completed Task Results into one isolated branch for final review. It does not merge your target branch, push, or open a pull request.
 
 ## Eligibility

@@ -6,6 +6,7 @@ import {
   ProjectSharedResourcePayload as ContractsProjectSharedResourcePayloadSchema,
   ProjectSharedResourceDeletedPayload as ContractsProjectSharedResourceDeletedPayloadSchema,
   ResourceLeasesPayload as ContractsResourceLeasesPayloadSchema,
+  ArchitectPlanPayload as ContractsArchitectPlanPayloadSchema,
   ProjectDeletedPayload as ContractsProjectDeletedPayloadSchema,
   MissionCreatedPayload as ContractsMissionCreatedPayloadSchema,
   MissionUpdatedPayload as ContractsMissionUpdatedPayloadSchema,
@@ -94,6 +95,7 @@ export const ProjectSharedResourcePayload = ContractsProjectSharedResourcePayloa
 export const ProjectSharedResourceDeletedPayload =
   ContractsProjectSharedResourceDeletedPayloadSchema;
 export const ResourceLeasesPayload = ContractsResourceLeasesPayloadSchema;
+export const ArchitectPlanPayload = ContractsArchitectPlanPayloadSchema;
 export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema;
 export const MissionCreatedPayload = ContractsMissionCreatedPayloadSchema;
 export const MissionUpdatedPayload = ContractsMissionUpdatedPayloadSchema;

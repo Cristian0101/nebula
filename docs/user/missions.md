@@ -1,5 +1,7 @@
 # Plan and run a Mission
 
+Missions created from approved Architect plans behave like ordinary Missions but retain the immutable planning base commit. They remain draft after approval. Manual Missions remain unchanged and continue to use the existing workspace-baseline behavior.
+
 A Mission is a durable, human-authored objective over existing Tasks in one Project. It adds ordered membership and explicit prerequisite edges; it does not duplicate Task provider, workspace, ownership, review, or result state. A Task can belong to at most one Mission.
 
 ## Create the plan

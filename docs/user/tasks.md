@@ -1,5 +1,7 @@
 # Review and restore a Task
 
+Architect-generated Tasks are proposals until plan approval. Approval creates ordinary draft Builder Tasks with the human-confirmed provider/model, acceptance criteria, ownership, and Shared Resource requirements. It does not create a Thread or worktree.
+
 For manual multi-Task work, open **Command Deck** from the active Project menu or Project settings. See [Coordinate Tasks in Command Deck](command-deck.md).
 
 A Task may belong to one Mission. It remains the same canonical Task with the same provider, ownership, isolated workspace, review, and result lifecycle; Mission membership adds only explicit dependencies and derived readiness. See [Plan and run a Mission](missions.md).

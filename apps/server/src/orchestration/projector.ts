@@ -21,6 +21,7 @@ import {
   ProjectSharedResourcePayload,
   ProjectSharedResourceDeletedPayload,
   ResourceLeasesPayload,
+  ArchitectPlanPayload,
   MissionCreatedPayload,
   MissionUpdatedPayload,
   MissionTaskMembershipPayload,
@@ -445,6 +446,27 @@ export function projectEvent(
         })),
       );
 
+    case "architect.plan-saved":
+    case "architect.plan-rejected":
+    case "architect.plan-approved":
+      return decodeForEvent(ArchitectPlanPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  architectPlans: [
+                    ...(project.architectPlans ?? []).filter((plan) => plan.id !== payload.plan.id),
+                    payload.plan,
+                  ],
+                  updatedAt: payload.plan.updatedAt,
+                }
+              : project,
+          ),
+        })),
+      );
+
     case "mission.created":
       return decodeForEvent(MissionCreatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
@@ -475,6 +497,8 @@ export function projectEvent(
               activatedAt: null,
               completedAt: null,
               cancelledAt: null,
+              baseCommit: payload.baseCommit ?? null,
+              architectPlanProposalId: payload.architectPlanProposalId ?? null,
             },
           ],
         })),

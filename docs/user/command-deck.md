@@ -1,5 +1,7 @@
 # Coordinate Tasks in Command Deck
 
+The Missions section offers both manual Mission authoring and **Plan with Architect**. Architect proposals have their own review surface and do not appear as Missions until explicit approval. Generation and approval both state that no execution has started.
+
 Command Deck is Nebula's desktop-first manual orchestration surface. Its **Tasks**, **Missions**, and **Integration** sections let you run several coding providers against one repository without putting them in one writable checkout. You choose the work, dependencies, provider, model, ownership, and every Start action; Nebula does not plan, schedule, or route work automatically.
 
 Open an active Project's menu and choose **Command Deck**, or open it from Project settings.

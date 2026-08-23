@@ -119,6 +119,14 @@
       "types": "./src/resourceCoordination.ts",
       "import": "./src/resourceCoordination.ts"
     },
+    "./ownershipPaths": {
+      "types": "./src/ownershipPaths.ts",
+      "import": "./src/ownershipPaths.ts"
+    },
+    "./architectPlan": {
+      "types": "./src/architectPlan.ts",
+      "import": "./src/architectPlan.ts"
+    },
     "./remote": {
       "types": "./src/remote.ts",
       "import": "./src/remote.ts"

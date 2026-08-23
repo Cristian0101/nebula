@@ -42,6 +42,10 @@ import {
   activateMission,
   completeMission,
   cancelMission,
+  saveArchitectPlan,
+  generateArchitectPlan,
+  rejectArchitectPlan,
+  approveArchitectPlan,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 
@@ -69,6 +73,10 @@ export type {
   ActivateMissionInput,
   CompleteMissionInput,
   CancelMissionInput,
+  SaveArchitectPlanInput,
+  GenerateArchitectPlanInput,
+  RejectArchitectPlanInput,
+  ApproveArchitectPlanInput,
 } from "../operations/commands.ts";
 
 export interface OptimisticProjectFile {
@@ -258,6 +266,30 @@ export function createProjectEnvironmentAtoms<R, E>(
     cancelMission: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:mission:cancel",
       execute: cancelMission,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    saveArchitectPlan: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:architect-plan:save",
+      execute: saveArchitectPlan,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    generateArchitectPlan: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:architect-plan:generate",
+      execute: generateArchitectPlan,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    rejectArchitectPlan: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:architect-plan:reject",
+      execute: rejectArchitectPlan,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    approveArchitectPlan: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:architect-plan:approve",
+      execute: approveArchitectPlan,
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
     }),

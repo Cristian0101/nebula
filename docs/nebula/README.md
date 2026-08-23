@@ -1,5 +1,9 @@
 # Nebula source of truth
 
+## Architect Plan Proposal
+
+Nebula can ask a selected provider for a bounded, strict-schema engineering plan against an exact clean Git baseline. The output remains a durable `ArchitectPlanProposal` until a human edits, assigns providers, and explicitly approves it. Approval atomically emits canonical draft Mission/Task/ownership/dependency state and no execution state. See [Architect plans](../user/architect-plans.md).
+
 This directory is the durable product and architecture source of truth for Nebula, the Kaizora Labs multi-agent development orchestration platform built on T3 Code.
 
 ## Document map

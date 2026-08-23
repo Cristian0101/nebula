@@ -1,5 +1,7 @@
 # Review Tasks with Quality Gates
 
+Architect proposal review is plan review, not independent code review. Approving a plan does not satisfy Task quality gates or independent-review policy; those controls still apply after implementation.
+
 Nebula validates one exact Task snapshot at a time. Quality results and independent reviews are evidence for that snapshot only; changing the Task workspace makes them stale and requires a new snapshot.
 
 ## Configure quality and review policy

@@ -111,13 +111,14 @@ const make = Effect.gen(function* () {
       Effect.map((readModel) => ({
         task: (readModel.tasks ?? []).find((candidate) => candidate.id === taskId),
         projects: readModel.projects,
+        missions: readModel.missions ?? [],
       })),
     );
 
   const prepareRequested = Effect.fn("TaskWorkspaceReactor.prepareRequested")(function* (
     taskId: TaskId,
   ) {
-    const { task, projects } = yield* readContext(taskId);
+    const { task, projects, missions } = yield* readContext(taskId);
     if (!task || task.workspace?.status !== "preparing") return;
     const project = projects.find((candidate) => candidate.id === task.projectId);
     if (!project || project.deletedAt !== null) {
@@ -132,9 +133,10 @@ const make = Effect.gen(function* () {
     if (baselineFailure !== null) {
       return yield* failWorkspace(taskId, baselineFailure.code, baselineFailure.reason);
     }
+    const missionBase = missions.find((mission) => mission.taskIds.includes(taskId))?.baseCommit;
     const { commitSha } = yield* git.resolveCommit({
       cwd: project.workspaceRoot,
-      revision: "HEAD",
+      revision: missionBase ?? "HEAD",
     });
     const createdAt = yield* now;
     yield* dispatch({

@@ -1,5 +1,9 @@
 # Nebula architecture
 
+## Architect proposal boundary
+
+`architect.plan.generate` persists a generating project-scoped proposal. `ArchitectPlanReactor` builds a deterministic protected context package and calls provider-neutral structured `TextGeneration`; Codex and Antigravity implement the shared operation. The result returns through `architect.plan.save` and the normal event/projection pipeline. `architect.plan.approve` revalidates and atomically decides canonical `mission.create`, `task.create`, `task.ownership.set`, membership, and dependency commands before recording the proposal link. Mission `baseCommit` is optional for compatibility; Architect materialization sets it, and Task workspace preparation resolves that immutable commit instead of current HEAD.
+
 ## Core architectural thesis
 
 Nebula is not fundamentally a terminal manager, chatbot, or model router. Nebula is:
