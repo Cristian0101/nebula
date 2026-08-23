@@ -13,6 +13,8 @@ import {
   MessageSentPayloadSchema,
   ProjectCreatedPayload,
   ProjectDeletedPayload,
+  IntegrationCreatedPayload,
+  IntegrationUpdatedPayload,
   ProjectMetaUpdatedPayload,
   ProjectQualityPolicyUpdatedPayload,
   ProjectReviewPolicyUpdatedPayload,
@@ -259,6 +261,7 @@ export function projectEvent(
             scripts: payload.scripts,
             qualityPolicy: null,
             reviewPolicy: null,
+            integrationBatches: [],
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -353,6 +356,46 @@ export function projectEvent(
           ),
         })),
       );
+
+    case "integration.created":
+      return decodeForEvent(IntegrationCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  integrationBatches: [...(project.integrationBatches ?? []), payload.batch],
+                  updatedAt: payload.batch.updatedAt,
+                }
+              : project,
+          ),
+        })),
+      );
+
+    case "integration.updated":
+      return decodeForEvent(IntegrationUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  integrationBatches: (project.integrationBatches ?? []).map((batch) =>
+                    batch.id === payload.batch.id ? payload.batch : batch,
+                  ),
+                  updatedAt: payload.batch.updatedAt,
+                }
+              : project,
+          ),
+        })),
+      );
+
+    case "integration.continue-requested":
+    case "integration.abort-requested":
+    case "integration.validation-requested":
+    case "integration.workspace-remove-requested":
+      return Effect.succeed(nextBase);
 
     case "task.created":
       return decodeForEvent(TaskCreatedPayload, event.payload, event.type, "payload").pipe(

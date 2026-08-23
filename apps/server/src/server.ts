@@ -59,6 +59,7 @@ import { TaskWorkspaceReactorLive } from "./orchestration/Layers/TaskWorkspaceRe
 import { TaskOwnershipReactorLive } from "./orchestration/Layers/TaskOwnershipReactor.ts";
 import { TaskReviewReactorLive } from "./orchestration/Layers/TaskReviewReactor.ts";
 import { TaskQualityReactorLive } from "./orchestration/Layers/TaskQualityReactor.ts";
+import { IntegrationReactorLive } from "./orchestration/Layers/IntegrationReactor.ts";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus.ts";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion.ts";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor.ts";
@@ -254,6 +255,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(TaskOwnershipReactorLive),
   Layer.provideMerge(TaskReviewReactorLive),
   Layer.provideMerge(TaskQualityReactorLive),
+  Layer.provideMerge(IntegrationReactorLive),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );

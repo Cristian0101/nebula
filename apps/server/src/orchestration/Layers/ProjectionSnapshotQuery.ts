@@ -36,6 +36,7 @@ import {
   TaskReview,
   ProjectQualityPolicy,
   ProjectReviewPolicy,
+  IntegrationBatch,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -91,6 +92,7 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     qualityPolicy: Schema.NullOr(Schema.fromJsonString(ProjectQualityPolicy)),
     reviewPolicy: Schema.NullOr(Schema.fromJsonString(ProjectReviewPolicy)),
+    integrationBatches: Schema.fromJsonString(Schema.Array(IntegrationBatch)),
   }),
 );
 const ProjectionTaskDbRowSchema = ProjectionTask.mapFields(
@@ -408,6 +410,7 @@ function mapProjectShellRow(
     scripts: row.scripts,
     qualityPolicy: row.qualityPolicy,
     reviewPolicy: row.reviewPolicy,
+    integrationBatches: row.integrationBatches ?? [],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -487,6 +490,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           scripts_json AS "scripts",
           quality_policy_json AS "qualityPolicy",
           review_policy_json AS "reviewPolicy",
+          integration_batches_json AS "integrationBatches",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -996,6 +1000,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           scripts_json AS "scripts",
           quality_policy_json AS "qualityPolicy",
           review_policy_json AS "reviewPolicy",
+          integration_batches_json AS "integrationBatches",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1022,6 +1027,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           scripts_json AS "scripts",
           quality_policy_json AS "qualityPolicy",
           review_policy_json AS "reviewPolicy",
+          integration_batches_json AS "integrationBatches",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1837,6 +1843,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 scripts: row.scripts,
                 qualityPolicy: row.qualityPolicy,
                 reviewPolicy: row.reviewPolicy,
+                integrationBatches: row.integrationBatches ?? [],
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 deletedAt: row.deletedAt,
@@ -1990,6 +1997,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   scripts: row.scripts,
                   qualityPolicy: row.qualityPolicy,
                   reviewPolicy: row.reviewPolicy,
+                  integrationBatches: row.integrationBatches ?? [],
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   deletedAt: row.deletedAt,

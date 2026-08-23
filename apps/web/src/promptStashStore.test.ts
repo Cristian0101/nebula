@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { removeLocalStorageItem } from "./hooks/useLocalStorage";
 
@@ -91,6 +91,7 @@ describe("promptStashStore", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     resetPromptStashStore();
   });
 
@@ -125,6 +126,18 @@ describe("promptStashStore", () => {
     expect(usePromptStashStore.getState().entries.map((entry) => entry.id)).toEqual([
       "memory-only",
     ]);
+  });
+
+  it("falls back to memory when a worker exposes a malformed localStorage global", async () => {
+    vi.stubGlobal("localStorage", {});
+    vi.resetModules();
+    const isolatedStore = await import("./promptStashStore");
+
+    const result = isolatedStore.usePromptStashStore
+      .getState()
+      .stashEntry(makeEntry({ id: "malformed-worker-storage" }));
+
+    expect(result).toMatchObject({ written: true, durable: false });
   });
 
   it("takeEntry removes and returns the entry; second take returns null", () => {

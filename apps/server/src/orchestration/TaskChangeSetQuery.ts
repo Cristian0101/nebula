@@ -5,6 +5,10 @@ import {
   type OrchestrationGetTaskChangesResult,
   type OrchestrationGetTaskFileDiffInput,
   type OrchestrationGetTaskFileDiffResult,
+  type OrchestrationGetIntegrationChangesInput,
+  type OrchestrationGetIntegrationChangesResult,
+  type OrchestrationGetIntegrationFileDiffInput,
+  type OrchestrationGetIntegrationFileDiffResult,
   type OrchestrationTask,
   type TaskChangedFile,
   type TaskChangeSet,
@@ -41,6 +45,12 @@ export interface TaskChangeSetQueryShape {
   readonly getTaskFileDiff: (
     input: OrchestrationGetTaskFileDiffInput,
   ) => Effect.Effect<OrchestrationGetTaskFileDiffResult, OrchestrationGetTaskChangesError>;
+  readonly getIntegrationChanges: (
+    input: OrchestrationGetIntegrationChangesInput,
+  ) => Effect.Effect<OrchestrationGetIntegrationChangesResult, OrchestrationGetTaskChangesError>;
+  readonly getIntegrationFileDiff: (
+    input: OrchestrationGetIntegrationFileDiffInput,
+  ) => Effect.Effect<OrchestrationGetIntegrationFileDiffResult, OrchestrationGetTaskChangesError>;
   readonly collect: (
     task: OrchestrationTask,
   ) => Effect.Effect<TaskChangeSet, OrchestrationGetTaskChangesError>;
@@ -69,6 +79,8 @@ export class TaskChangeSetQuery extends Context.Reference<TaskChangeSetQueryShap
     defaultValue: () => ({
       getTaskChanges: unavailable,
       getTaskFileDiff: unavailable,
+      getIntegrationChanges: unavailable,
+      getIntegrationFileDiff: unavailable,
       collect: unavailable,
       capture: unavailable,
       isCurrent: unavailable,
@@ -439,9 +451,112 @@ const make = Effect.gen(function* () {
     Effect.mapError(mapError("Task review diff query")),
   );
 
+  const resolveIntegration = Effect.fn("TaskChangeSetQuery.resolveIntegration")(function* (
+    input: OrchestrationGetIntegrationChangesInput,
+  ) {
+    const model = yield* snapshots.getCommandReadModel();
+    const project = model.projects.find((candidate) => candidate.id === input.projectId);
+    const batch = (project?.integrationBatches ?? []).find(
+      (candidate) => candidate.id === input.batchId,
+    );
+    if (!batch?.workspacePath) {
+      return yield* new OrchestrationGetTaskChangesError({
+        message: `Integration Batch '${input.batchId}' has no retained workspace.`,
+      });
+    }
+    return { model, batch, workspacePath: batch.workspacePath } as const;
+  });
+
+  const getIntegrationChanges: TaskChangeSetQueryShape["getIntegrationChanges"] = Effect.fn(
+    "TaskChangeSetQuery.getIntegrationChanges",
+  )(
+    function* (input) {
+      const { model, batch, workspacePath } = yield* resolveIntegration(input);
+      const headCommit = (yield* git.execute({
+        operation: "IntegrationChangeSet.resolveHead",
+        cwd: workspacePath,
+        args: ["rev-parse", "--verify", "HEAD"],
+      })).stdout.trim();
+      const changed = yield* git.execute({
+        operation: "IntegrationChangeSet.files",
+        cwd: workspacePath,
+        args: ["diff", "--name-only", "-z", batch.baseCommit, headCommit, "--"],
+      });
+      const taskById = new Map((model.tasks ?? []).map((task) => [task.id, task] as const));
+      return {
+        batchId: batch.id,
+        baseCommit: batch.baseCommit,
+        headCommit,
+        files: changed.stdout
+          .split("\0")
+          .filter(Boolean)
+          .sort()
+          .map((path) => ({
+            path,
+            taskIds: batch.tasks
+              .filter((entry) =>
+                (taskById.get(entry.taskId)?.result?.files ?? []).some(
+                  (file) => file.path === path || file.previousPath === path,
+                ),
+              )
+              .map((entry) => entry.taskId),
+            humanChange: batch.humanChanges.some((change) => change.files.includes(path)),
+          })),
+      };
+    },
+    Effect.mapError(mapError("Integration change query")),
+  );
+
+  const getIntegrationFileDiff: TaskChangeSetQueryShape["getIntegrationFileDiff"] = Effect.fn(
+    "TaskChangeSetQuery.getIntegrationFileDiff",
+  )(
+    function* (input) {
+      const { batch, workspacePath } = yield* resolveIntegration(input);
+      const files = yield* getIntegrationChanges(input);
+      if (!files.files.some((file) => file.path === input.path)) {
+        return yield* new OrchestrationGetTaskChangesError({
+          message: `Integration change '${input.path}' was not found.`,
+        });
+      }
+      const numstat = yield* git.execute({
+        operation: "IntegrationChangeSet.numstat",
+        cwd: workspacePath,
+        args: ["diff", "--numstat", batch.baseCommit, "HEAD", "--", input.path],
+      });
+      const binary = numstat.stdout.startsWith("-\t-\t");
+      if (binary) return { path: input.path, patch: "", binary: true, truncated: false };
+      const result = yield* git.execute({
+        operation: "IntegrationChangeSet.fileDiff",
+        cwd: workspacePath,
+        args: [
+          "diff",
+          "--patch",
+          "--no-color",
+          "--no-ext-diff",
+          "--no-textconv",
+          batch.baseCommit,
+          "HEAD",
+          "--",
+          input.path,
+        ],
+        maxOutputBytes: TASK_DIFF_MAX_OUTPUT_BYTES,
+        appendTruncationMarker: true,
+      });
+      return {
+        path: input.path,
+        patch: result.stdout,
+        binary: false,
+        truncated: result.stdoutTruncated,
+      };
+    },
+    Effect.mapError(mapError("Integration file diff query")),
+  );
+
   return TaskChangeSetQuery.of({
     getTaskChanges,
     getTaskFileDiff,
+    getIntegrationChanges,
+    getIntegrationFileDiff,
     collect,
     capture,
     isCurrent,

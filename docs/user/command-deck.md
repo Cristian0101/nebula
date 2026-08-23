@@ -42,4 +42,4 @@ Use **Prepare completion** to validate ownership and capture the current review 
 
 Command Deck, manual parallel provider Tasks, Quality Gates, Reviewer, and cross-provider review are **implemented**.
 
-Integration, shared-resource locks, Mission, Task DAG, scheduler, automated planning/provider routing, automatic remediation, and Swarm Mode are **not implemented**. Providers do not share hidden context; findings enter the existing Builder Thread only when the user chooses **Send Review Findings to Builder**.
+Manual deterministic Integration Batches are **implemented** in Command Deck. Select eligible completed Tasks, arrange their order, acknowledge overlapping paths, then create an isolated Integration branch. Command Deck shows apply progress, conflicts, final gates, and Ready state. It does not merge main or open a PR. Shared-resource locks, Mission, Task DAG, scheduler, automated planning/provider routing, automatic remediation, automatic integration queues, and Swarm Mode are **not implemented**. Providers do not share hidden context; findings enter the existing Builder Thread only when the user chooses **Send Review Findings to Builder**.

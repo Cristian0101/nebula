@@ -1,4 +1,9 @@
-import { type EnvironmentId, type ProjectReadFileResult, WS_METHODS } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  ORCHESTRATION_WS_METHODS,
+  type ProjectReadFileResult,
+  WS_METHODS,
+} from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import { Atom } from "effect/unstable/reactivity";
 
@@ -19,6 +24,11 @@ import {
   updateProject,
   updateProjectQualityPolicy,
   updateProjectReviewPolicy,
+  createIntegration,
+  continueIntegration,
+  abortIntegration,
+  validateIntegration,
+  removeIntegrationWorkspace,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 
@@ -28,6 +38,11 @@ export type {
   UpdateProjectInput,
   UpdateProjectQualityPolicyInput,
   UpdateProjectReviewPolicyInput,
+  CreateIntegrationInput,
+  ContinueIntegrationInput,
+  AbortIntegrationInput,
+  ValidateIntegrationInput,
+  RemoveIntegrationWorkspaceInput,
 } from "../operations/commands.ts";
 
 export interface OptimisticProjectFile {
@@ -78,6 +93,14 @@ export function createProjectEnvironmentAtoms<R, E>(
       staleTimeMs: 30_000,
       idleTtlMs: 5 * 60_000,
     }),
+    integrationChanges: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:queries:integration:changes",
+      tag: ORCHESTRATION_WS_METHODS.getIntegrationChanges,
+    }),
+    integrationFileDiff: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:queries:integration:file-diff",
+      tag: ORCHESTRATION_WS_METHODS.getIntegrationFileDiff,
+    }),
     optimisticFile: (target: OptimisticProjectFileTarget) =>
       optimisticFileFamily(optimisticProjectFileKey(target)),
     create: createEnvironmentCommand(runtime, {
@@ -101,6 +124,36 @@ export function createProjectEnvironmentAtoms<R, E>(
     updateReviewPolicy: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:project:review-policy:update",
       execute: (input: UpdateProjectReviewPolicyInput) => updateProjectReviewPolicy(input),
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    createIntegration: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:integration:create",
+      execute: createIntegration,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    continueIntegration: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:integration:continue",
+      execute: continueIntegration,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    abortIntegration: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:integration:abort",
+      execute: abortIntegration,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    validateIntegration: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:integration:validate",
+      execute: validateIntegration,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    removeIntegrationWorkspace: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:integration:workspace:remove",
+      execute: removeIntegrationWorkspace,
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
     }),

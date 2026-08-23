@@ -26,7 +26,7 @@ Task Diff, immutable review snapshots, structured handoffs, and safe Task restor
 
 Command Deck is the implemented desktop-first manual orchestration surface over those canonical primitives. From one Project, a user can create provider-assigned draft Tasks with optional acceptance criteria, declare ownership, start several isolated Tasks, monitor provider and review state, open each existing Thread, inspect changes and handoffs, and restore one Task without creating a second Task, provider, Git, event, or persistence system.
 
-Quality Gates and independent Reviewer are implemented. A local Project quality policy stores user-approved exact commands; Nebula runs them only in the managed Task worktree and binds each bounded result to an immutable review snapshot. A Project review policy can require a provider-neutral structured review before completion, prefer a different provider driver, retain every review round, and visibly fall back to same-provider review. Findings reach the existing Builder Thread only through the user's explicit **Send Review Findings to Builder** action. Integration, shared-resource locks, Mission/DAG planning, scheduling, automatic routing/remediation, and Swarm Mode are not implemented.
+Quality Gates, independent Reviewer, and the deterministic Integration Engine are implemented. A local Project quality policy stores user-approved exact commands; Nebula runs them in managed Task or Integration worktrees and binds each bounded result to immutable evidence. Approved completed Task Results sharing one exact base can be ordered into an isolated Integration Batch. Nebula creates deduplicated artifact commits from approved snapshot trees, applies them sequentially, pauses with durable Git conflict evidence, and reaches Ready only after final validation. It never merges main or opens a PR from this workflow. Shared-resource locks, Mission/DAG planning, scheduling, automatic routing/remediation, and Swarm Mode are not implemented.
 
 Antigravity CLI is the implemented Google first-party provider for individual Google accounts. Nebula invokes its official headless CLI, keeps authentication provider-owned, and binds each run to the canonical Task worktree. The preserved Gemini CLI prototype remains experimental and blocked for the individual-account authentication path; it is not a mainline provider.
 
@@ -43,6 +43,25 @@ When sources disagree, use this order:
 When a document conflicts with current verified repository reality, call out the conflict rather than silently forcing old architecture onto the current codebase.
 
 The code is authoritative for current behavior. These documents are authoritative for accepted Nebula intent only where they do not misdescribe that behavior.
+
+## Capability status
+
+| Capability            | Status          |
+| --------------------- | --------------- |
+| Task                  | Implemented     |
+| Worktree isolation    | Implemented     |
+| Ownership             | Implemented     |
+| Structured handoff    | Implemented     |
+| Quality gates         | Implemented     |
+| Reviewer              | Implemented     |
+| Command Deck          | Implemented     |
+| Integration Engine    | Implemented     |
+| Automatic main merge  | Not implemented |
+| Shared-resource locks | Not implemented |
+| Mission               | Not implemented |
+| DAG                   | Not implemented |
+| Scheduler             | Not implemented |
+| Swarm                 | Not implemented |
 
 ## Change discipline
 

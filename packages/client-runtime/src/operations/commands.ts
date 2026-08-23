@@ -33,6 +33,11 @@ export type UpdateProjectInput = CommandInput<"project.meta.update">;
 export type UpdateProjectQualityPolicyInput = CommandInput<"project.quality-policy.update">;
 export type UpdateProjectReviewPolicyInput = CommandInput<"project.review-policy.update">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
+export type CreateIntegrationInput = CommandInput<"integration.create">;
+export type ContinueIntegrationInput = CommandInput<"integration.continue">;
+export type AbortIntegrationInput = CommandInput<"integration.abort">;
+export type ValidateIntegrationInput = CommandInput<"integration.validate">;
+export type RemoveIntegrationWorkspaceInput = CommandInput<"integration.workspace.remove">;
 export type CreateTaskInput = CommandInput<"task.create">;
 export type SetTaskAcceptanceCriteriaInput = CommandInput<"task.acceptance-criteria.set">;
 export type BindTaskThreadInput = CommandInput<"task.bind-thread">;
@@ -149,6 +154,40 @@ export const deleteProject: (input: DeleteProjectInput) => CommandEffect = Effec
     commandId: yield* commandId(input),
   });
 });
+
+export const createIntegration: (input: CreateIntegrationInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.createIntegration",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "integration.create", ...metadata });
+});
+
+export const continueIntegration: (input: ContinueIntegrationInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.continueIntegration",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "integration.continue", ...metadata });
+});
+
+export const abortIntegration: (input: AbortIntegrationInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.abortIntegration",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "integration.abort", ...metadata });
+});
+
+export const validateIntegration: (input: ValidateIntegrationInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.validateIntegration",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "integration.validate", ...metadata });
+});
+
+export const removeIntegrationWorkspace: (input: RemoveIntegrationWorkspaceInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.removeIntegrationWorkspace")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "integration.workspace.remove", ...metadata });
+  });
 
 export const createTask: (input: CreateTaskInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.createTask",

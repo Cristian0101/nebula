@@ -7,6 +7,7 @@ import * as Struct from "effect/Struct";
 
 import {
   ModelSelection,
+  IntegrationBatch,
   ProjectQualityPolicy,
   ProjectReviewPolicy,
   ProjectScript,
@@ -26,6 +27,7 @@ const ProjectionProjectDbRow = ProjectionProject.mapFields(
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     qualityPolicy: Schema.NullOr(Schema.fromJsonString(ProjectQualityPolicy)),
     reviewPolicy: Schema.NullOr(Schema.fromJsonString(ProjectReviewPolicy)),
+    integrationBatches: Schema.fromJsonString(Schema.Array(IntegrationBatch)),
   }),
 );
 type ProjectionProjectDbRow = typeof ProjectionProjectDbRow.Type;
@@ -47,6 +49,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           scripts_json,
           quality_policy_json,
           review_policy_json,
+          integration_batches_json,
           created_at,
           updated_at,
           deleted_at
@@ -61,6 +64,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           ${JSON.stringify(row.scripts)},
           ${row.qualityPolicy !== null ? JSON.stringify(row.qualityPolicy) : null},
           ${row.reviewPolicy !== null ? JSON.stringify(row.reviewPolicy) : null},
+          ${JSON.stringify(row.integrationBatches ?? [])},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.deletedAt}
@@ -75,6 +79,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           scripts_json = excluded.scripts_json,
           quality_policy_json = excluded.quality_policy_json,
           review_policy_json = excluded.review_policy_json,
+          integration_batches_json = excluded.integration_batches_json,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           deleted_at = excluded.deleted_at
@@ -96,6 +101,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           scripts_json AS "scripts",
           quality_policy_json AS "qualityPolicy",
           review_policy_json AS "reviewPolicy",
+          integration_batches_json AS "integrationBatches",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -119,6 +125,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           scripts_json AS "scripts",
           quality_policy_json AS "qualityPolicy",
           review_policy_json AS "reviewPolicy",
+          integration_batches_json AS "integrationBatches",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"

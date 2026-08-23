@@ -31,7 +31,7 @@ import {
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
-  type ProjectId,
+  ProjectId,
   TaskId,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
@@ -578,6 +578,9 @@ const makeWsRpcLayer = (
             // live without maintaining a second event-name allowlist here.
             if (event.aggregateKind === "task") {
               return taskUpsert(TaskId.make(event.aggregateId), event.sequence);
+            }
+            if (event.aggregateKind === "project") {
+              return projectUpsertOrRemove(ProjectId.make(event.aggregateId), event.sequence);
             }
             if (event.aggregateKind !== "thread") {
               return Effect.succeed(Option.none());
@@ -1228,6 +1231,18 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.getTaskFileDiff,
             taskChangeSetQuery.getTaskFileDiff(input),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getIntegrationChanges]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getIntegrationChanges,
+            taskChangeSetQuery.getIntegrationChanges(input),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getIntegrationFileDiff]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getIntegrationFileDiff,
+            taskChangeSetQuery.getIntegrationFileDiff(input),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.searchThreads]: (input) =>

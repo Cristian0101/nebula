@@ -26,6 +26,7 @@ import {
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
 import { validateOwnershipRules } from "./taskOwnership.ts";
+import { buildIntegrationBatch, integrationEligibility } from "./integrationPolicy.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -451,6 +452,154 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           deletedAt: occurredAt,
         },
+      };
+    }
+
+    case "integration.create": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if ((project.integrationBatches ?? []).some((batch) => batch.id === command.batchId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Integration Batch '${command.batchId}' already exists.`,
+        });
+      }
+      if (
+        command.taskIds.length === 0 ||
+        new Set(command.taskIds).size !== command.taskIds.length
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Select at least one unique completed Task.",
+        });
+      }
+      const tasks = command.taskIds.map((taskId) =>
+        (readModel.tasks ?? []).find((candidate) => candidate.id === taskId),
+      );
+      if (tasks.some((task) => task === undefined)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Every selected Task must exist.",
+        });
+      }
+      for (const task of tasks) {
+        const eligibility = integrationEligibility(project, task!);
+        if (!eligibility.eligible) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Task '${task!.id}' is ineligible: ${eligibility.reasons.join(" ")}`,
+          });
+        }
+      }
+      const batch = yield* Effect.try({
+        try: () =>
+          buildIntegrationBatch({
+            project,
+            batchId: command.batchId,
+            taskIds: command.taskIds,
+            tasks: tasks.filter((task) => task !== undefined),
+            acknowledgeOverlaps: command.acknowledgeOverlaps,
+            createdAt: command.createdAt,
+          }),
+        catch: (cause) =>
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: cause instanceof Error ? cause.message : "Invalid Integration Batch.",
+          }),
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "integration.created" as const,
+        payload: { projectId: command.projectId, batch },
+      };
+    }
+
+    case "integration.continue":
+    case "integration.abort":
+    case "integration.validate":
+    case "integration.workspace.remove": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const batch = (project.integrationBatches ?? []).find(
+        (candidate) => candidate.id === command.batchId,
+      );
+      if (batch === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Integration Batch '${command.batchId}' does not exist.`,
+        });
+      }
+      if (command.type === "integration.continue" && batch.status !== "conflict") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Only a conflicted Integration Batch can continue.",
+        });
+      }
+      if (
+        command.type === "integration.abort" &&
+        !["preparing", "applying", "conflict", "validating"].includes(batch.status)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Only an active Integration Batch can be aborted.",
+        });
+      }
+      if (
+        command.type === "integration.workspace.remove" &&
+        !["ready", "failed", "cancelled"].includes(batch.status)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Integration workspace cleanup requires a terminal Batch.",
+        });
+      }
+      const eventType =
+        command.type === "integration.continue"
+          ? "integration.continue-requested"
+          : command.type === "integration.abort"
+            ? "integration.abort-requested"
+            : command.type === "integration.validate"
+              ? "integration.validation-requested"
+              : "integration.workspace-remove-requested";
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: eventType,
+        payload: {
+          projectId: command.projectId,
+          batchId: command.batchId,
+          ...(command.type === "integration.validate"
+            ? { acknowledgeExternalChanges: command.acknowledgeExternalChanges ?? false }
+            : {}),
+          requestedAt: command.createdAt,
+        },
+      } as PlannedOrchestrationEvent;
+    }
+
+    case "integration.update": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (!(project.integrationBatches ?? []).some((batch) => batch.id === command.batch.id)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Integration Batch '${command.batch.id}' does not exist.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "integration.updated" as const,
+        payload: { projectId: command.projectId, batch: command.batch, reason: command.reason },
       };
     }
 

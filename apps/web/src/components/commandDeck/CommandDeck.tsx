@@ -63,6 +63,7 @@ import {
   type OwnershipRuleDraft,
 } from "../ProjectTasksSection";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { IntegrationPanel } from "./IntegrationPanel";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -258,6 +259,8 @@ export function CommandDeck({
     () => selectProjectTasks(snapshot?.tasks ?? [], project.id),
     [project.id, snapshot?.tasks],
   );
+  const currentProject =
+    snapshot?.projects.find((candidate) => candidate.id === project.id) ?? null;
   const threadById = useMemo(
     () => new Map((snapshot?.threads ?? []).map((thread) => [thread.id, thread] as const)),
     [snapshot?.threads],
@@ -794,6 +797,14 @@ export function CommandDeck({
             </div>
           ) : null}
         </section>
+
+        {currentProject ? (
+          <IntegrationPanel
+            environmentId={project.environmentId}
+            project={currentProject}
+            tasks={tasks}
+          />
+        ) : null}
 
         {tasks.length === 0 ? (
           <section className="flex min-h-[26rem] flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-card/75 p-8 text-center">

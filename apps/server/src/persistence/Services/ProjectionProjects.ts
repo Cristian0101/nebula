@@ -8,6 +8,7 @@
  */
 import {
   IsoDateTime,
+  IntegrationBatch,
   ModelSelection,
   ProjectId,
   ProjectQualityPolicy,
@@ -32,6 +33,7 @@ export const ProjectionProject = Schema.Struct({
   scripts: Schema.Array(ProjectScript),
   qualityPolicy: Schema.NullOr(ProjectQualityPolicy),
   reviewPolicy: Schema.NullOr(ProjectReviewPolicy),
+  integrationBatches: Schema.optional(Schema.Array(IntegrationBatch)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
