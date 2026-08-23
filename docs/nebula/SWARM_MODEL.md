@@ -62,4 +62,4 @@ A prepared Task review provides:
 - follow-ups; and
 - immutable base, snapshot, and current-head evidence.
 
-The handoff is concise evidence for review and integration, not a duplicate project-management report. Git facts are captured automatically and cannot be edited. Provider-generated narrative is explicitly separate, remains a draft until human review, and has a manual fallback. This does not implement an independent Reviewer, quality gates, integration, Mission/DAG planning, or Swarm automation.
+The handoff is concise evidence for review and future integration, not a duplicate project-management report. Git facts are captured automatically and cannot be edited. Provider-generated narrative is explicitly separate, remains a draft until human review, and has a manual fallback. Quality gates and user-requested independent review are implemented on this boundary. Integration, shared-resource locks, Mission/DAG planning, scheduling, automatic routing/remediation, and Swarm automation are not implemented.

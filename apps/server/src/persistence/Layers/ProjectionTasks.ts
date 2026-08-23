@@ -19,7 +19,9 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
     Request: ProjectionTask,
     execute: (row) => sql`
       INSERT INTO projection_tasks (
-        task_id, project_id, title, objective, role, model_selection_json, status, thread_id,
+        task_id, project_id, title, objective, role, model_selection_json,
+        acceptance_criteria_json, review_required, prefer_different_reviewer_provider,
+        status, thread_id,
         created_at, updated_at, activated_at, completed_at, cancelled_at
         , workspace_status, workspace_source_repository, workspace_base_commit,
         workspace_branch, workspace_path, workspace_created_at, workspace_removed_at,
@@ -27,10 +29,12 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         , ownership_required, ownership_rules_json, ownership_status, ownership_validated_at,
         ownership_changed_path_count, ownership_violations_json, ownership_error_reason,
         ownership_updated_at
-        , review_snapshot_json, handoff_json, restore_json, review_error, result_json
+        , review_snapshot_json, handoff_json, restore_json, review_error, result_json,
+          quality_gate_runs_json, reviews_json
       ) VALUES (
         ${row.taskId}, ${row.projectId}, ${row.title}, ${row.objective}, ${row.role},
-        ${row.modelSelectionJson}, ${row.status},
+        ${row.modelSelectionJson}, ${row.acceptanceCriteriaJson}, ${row.reviewRequired},
+        ${row.preferDifferentReviewerProvider}, ${row.status},
         ${row.threadId}, ${row.createdAt}, ${row.updatedAt}, ${row.activatedAt},
         ${row.completedAt}, ${row.cancelledAt}
         , ${row.workspaceStatus}, ${row.workspaceSourceRepository}, ${row.workspaceBaseCommit},
@@ -41,7 +45,7 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         ${row.ownershipValidatedAt}, ${row.ownershipChangedPathCount},
         ${row.ownershipViolationsJson}, ${row.ownershipErrorReason}, ${row.ownershipUpdatedAt}
         , ${row.reviewSnapshotJson}, ${row.handoffJson}, ${row.restoreJson}, ${row.reviewError},
-          ${row.resultJson}
+          ${row.resultJson}, ${row.qualityGateRunsJson}, ${row.reviewsJson}
       )
       ON CONFLICT (task_id) DO UPDATE SET
         project_id = excluded.project_id,
@@ -49,6 +53,9 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         objective = excluded.objective,
         role = excluded.role,
         model_selection_json = excluded.model_selection_json,
+        acceptance_criteria_json = excluded.acceptance_criteria_json,
+        review_required = excluded.review_required,
+        prefer_different_reviewer_provider = excluded.prefer_different_reviewer_provider,
         status = excluded.status,
         thread_id = excluded.thread_id,
         created_at = excluded.created_at,
@@ -79,6 +86,8 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         , restore_json = excluded.restore_json
         , review_error = excluded.review_error
         , result_json = excluded.result_json
+        , quality_gate_runs_json = excluded.quality_gate_runs_json
+        , reviews_json = excluded.reviews_json
     `,
   });
 
@@ -89,6 +98,9 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
     objective,
     role,
     model_selection_json AS "modelSelectionJson",
+    acceptance_criteria_json AS "acceptanceCriteriaJson",
+    review_required AS "reviewRequired",
+    prefer_different_reviewer_provider AS "preferDifferentReviewerProvider",
     status,
     thread_id AS "threadId",
     created_at AS "createdAt",
@@ -119,6 +131,8 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
     , restore_json AS "restoreJson"
     , review_error AS "reviewError"
     , result_json AS "resultJson"
+    , quality_gate_runs_json AS "qualityGateRunsJson"
+    , reviews_json AS "reviewsJson"
   `;
 
   const getRow = SqlSchema.findOneOption({

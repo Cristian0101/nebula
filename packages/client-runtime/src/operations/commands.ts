@@ -30,8 +30,11 @@ type CommandInput<T extends CommandType> = Omit<
 
 export type CreateProjectInput = CommandInput<"project.create">;
 export type UpdateProjectInput = CommandInput<"project.meta.update">;
+export type UpdateProjectQualityPolicyInput = CommandInput<"project.quality-policy.update">;
+export type UpdateProjectReviewPolicyInput = CommandInput<"project.review-policy.update">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
 export type CreateTaskInput = CommandInput<"task.create">;
+export type SetTaskAcceptanceCriteriaInput = CommandInput<"task.acceptance-criteria.set">;
 export type BindTaskThreadInput = CommandInput<"task.bind-thread">;
 export type ActivateTaskInput = CommandInput<"task.activate">;
 export type CompleteTaskInput = CommandInput<"task.complete">;
@@ -42,6 +45,10 @@ export type SetTaskOwnershipInput = CommandInput<"task.ownership.set">;
 export type ValidateTaskOwnershipInput = CommandInput<"task.ownership.validate">;
 export type PrepareTaskReviewInput = CommandInput<"task.review.prepare">;
 export type UpdateTaskHandoffInput = CommandInput<"task.handoff.update">;
+export type RunTaskQualityGatesInput = CommandInput<"task.quality.run">;
+export type CancelTaskQualityGateInput = CommandInput<"task.quality.cancel">;
+export type RequestTaskIndependentReviewInput = CommandInput<"task.independent-review.request">;
+export type SendTaskReviewFindingsInput = CommandInput<"task.review.findings.send">;
 export type RequestTaskRestoreInput = CommandInput<"task.restore.request">;
 export type UndoTaskRestoreInput = CommandInput<"task.restore.undo">;
 export type CreateThreadInput = CommandInput<"thread.create">;
@@ -121,6 +128,18 @@ export const updateProject: (input: UpdateProjectInput) => CommandEffect = Effec
   });
 });
 
+export const updateProjectQualityPolicy: (input: UpdateProjectQualityPolicyInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.updateProjectQualityPolicy")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "project.quality-policy.update", ...metadata });
+  });
+
+export const updateProjectReviewPolicy: (input: UpdateProjectReviewPolicyInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.updateProjectReviewPolicy")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "project.review-policy.update", ...metadata });
+  });
+
 export const deleteProject: (input: DeleteProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.deleteProject",
 )(function* (input) {
@@ -137,6 +156,12 @@ export const createTask: (input: CreateTaskInput) => CommandEffect = Effect.fn(
   const metadata = yield* timestampedCommandMetadata(input);
   return yield* dispatch({ ...input, type: "task.create", ...metadata });
 });
+
+export const setTaskAcceptanceCriteria: (input: SetTaskAcceptanceCriteriaInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.setTaskAcceptanceCriteria")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "task.acceptance-criteria.set", ...metadata });
+  });
 
 export const bindTaskThread: (input: BindTaskThreadInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.bindTaskThread",
@@ -206,6 +231,34 @@ export const updateTaskHandoff: (input: UpdateTaskHandoffInput) => CommandEffect
   const metadata = yield* timestampedCommandMetadata(input);
   return yield* dispatch({ ...input, type: "task.handoff.update", ...metadata });
 });
+
+export const runTaskQualityGates: (input: RunTaskQualityGatesInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.runTaskQualityGates",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "task.quality.run", ...metadata });
+});
+
+export const cancelTaskQualityGate: (input: CancelTaskQualityGateInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.cancelTaskQualityGate")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "task.quality.cancel", ...metadata });
+  });
+
+export const requestTaskIndependentReview: (
+  input: RequestTaskIndependentReviewInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.requestTaskIndependentReview")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "task.independent-review.request", ...metadata });
+  },
+);
+
+export const sendTaskReviewFindings: (input: SendTaskReviewFindingsInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.sendTaskReviewFindings")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "task.review.findings.send", ...metadata });
+  });
 
 export const requestTaskRestore: (input: RequestTaskRestoreInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.requestTaskRestore",

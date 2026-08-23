@@ -11,6 +11,8 @@ import {
   TaskHandoff,
   TaskRestoreState,
   TaskResult,
+  QualityGateRun,
+  TaskReview,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -85,10 +87,21 @@ const encodeOwnershipViolations = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(TaskOwnershipViolation)),
 );
 const encodeModelSelection = Schema.encodeSync(Schema.fromJsonString(ModelSelection));
+const encodeAcceptanceCriteria = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(Schema.String)),
+);
 const encodeTaskReviewSnapshot = Schema.encodeSync(Schema.fromJsonString(TaskReviewSnapshot));
 const encodeTaskHandoff = Schema.encodeSync(Schema.fromJsonString(TaskHandoff));
 const encodeTaskRestore = Schema.encodeSync(Schema.fromJsonString(TaskRestoreState));
 const encodeTaskResult = Schema.encodeSync(Schema.fromJsonString(TaskResult));
+const encodeQualityGateRuns = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(QualityGateRun)),
+);
+const decodeQualityGateRuns = Schema.decodeSync(
+  Schema.fromJsonString(Schema.Array(QualityGateRun)),
+);
+const encodeTaskReviews = Schema.encodeSync(Schema.fromJsonString(Schema.Array(TaskReview)));
+const decodeTaskReviews = Schema.decodeSync(Schema.fromJsonString(Schema.Array(TaskReview)));
 const decodeTaskReviewSnapshot = Schema.decodeSync(Schema.fromJsonString(TaskReviewSnapshot));
 const decodeTaskHandoff = Schema.decodeSync(Schema.fromJsonString(TaskHandoff));
 const decodeTaskRestore = Schema.decodeUnknownEffect(Schema.fromJsonString(TaskRestoreState));
@@ -525,6 +538,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             defaultThreadEnvMode: null,
             faviconPath: event.payload.faviconPath ?? null,
             scripts: event.payload.scripts,
+            qualityPolicy: null,
+            reviewPolicy: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -554,6 +569,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ? { faviconPath: event.payload.faviconPath }
               : {}),
             ...(event.payload.scripts !== undefined ? { scripts: event.payload.scripts } : {}),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "project.quality-policy-updated":
+        case "project.review-policy-updated": {
+          const existingRow = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isNone(existingRow)) return;
+          yield* projectionProjectRepository.upsert({
+            ...existingRow.value,
+            ...(event.type === "project.quality-policy-updated"
+              ? { qualityPolicy: event.payload.policy }
+              : { reviewPolicy: event.payload.policy }),
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -592,6 +623,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               modelSelectionJson: event.payload.modelSelection
                 ? encodeModelSelection(event.payload.modelSelection)
                 : null,
+              acceptanceCriteriaJson: encodeAcceptanceCriteria(
+                event.payload.acceptanceCriteria ?? [],
+              ),
+              reviewRequired: event.payload.reviewRequired === true ? 1 : 0,
+              preferDifferentReviewerProvider:
+                event.payload.preferDifferentReviewerProvider === false ? 0 : 1,
               status: "draft",
               threadId: null,
               createdAt: event.payload.createdAt,
@@ -623,8 +660,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               restoreJson: null,
               reviewError: null,
               resultJson: null,
+              qualityGateRunsJson: "[]",
+              reviewsJson: "[]",
             });
             return;
+          case "task.acceptance-criteria-updated": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            yield* projectionTaskRepository.upsert({
+              ...existing.value,
+              acceptanceCriteriaJson: encodeAcceptanceCriteria(event.payload.criteria),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
           case "task.thread-bound":
           case "task.activated":
           case "task.completed":
@@ -867,6 +916,103 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                       ...decodeTaskHandoff(row.handoffJson),
                       status: "stale",
                     }),
+              qualityGateRunsJson: encodeQualityGateRuns(
+                decodeQualityGateRuns(row.qualityGateRunsJson).map((run) =>
+                  run.snapshotId === decodeTaskReviewSnapshot(row.reviewSnapshotJson!).id
+                    ? { ...run, status: "stale" as const }
+                    : run,
+                ),
+              ),
+              reviewsJson: encodeTaskReviews(
+                decodeTaskReviews(row.reviewsJson).map((review) =>
+                  review.snapshotId === decodeTaskReviewSnapshot(row.reviewSnapshotJson!).id
+                    ? { ...review, status: "stale" as const }
+                    : review,
+                ),
+              ),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "task.quality.run-requested": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            yield* projectionTaskRepository.upsert({
+              ...existing.value,
+              qualityGateRunsJson: encodeQualityGateRuns([
+                ...decodeQualityGateRuns(existing.value.qualityGateRunsJson),
+                ...event.payload.runs,
+              ]),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "task.quality.run-started":
+          case "task.quality.run-finished": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            yield* projectionTaskRepository.upsert({
+              ...existing.value,
+              qualityGateRunsJson: encodeQualityGateRuns(
+                decodeQualityGateRuns(existing.value.qualityGateRunsJson).map((run) =>
+                  run.id === event.payload.run.id ? event.payload.run : run,
+                ),
+              ),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "task.quality.run-cancel-requested":
+            return;
+          case "task.independent-review.requested": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            yield* projectionTaskRepository.upsert({
+              ...existing.value,
+              reviewsJson: encodeTaskReviews([
+                ...decodeTaskReviews(existing.value.reviewsJson),
+                event.payload.review,
+              ]),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "task.independent-review.started":
+          case "task.independent-review.failed":
+          case "task.review.findings-sent": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            const reviews = decodeTaskReviews(existing.value.reviewsJson).map((review) => {
+              if (review.id !== event.payload.reviewId) return review;
+              if (event.type === "task.independent-review.started") {
+                return { ...review, status: "running" as const };
+              }
+              if (event.type === "task.independent-review.failed") {
+                return {
+                  ...review,
+                  status: "failed" as const,
+                  failureReason: event.payload.failureReason,
+                };
+              }
+              return { ...review, findingsSentAt: event.payload.sentAt };
+            });
+            yield* projectionTaskRepository.upsert({
+              ...existing.value,
+              reviewsJson: encodeTaskReviews(reviews),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "task.independent-review.completed": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            yield* projectionTaskRepository.upsert({
+              ...existing.value,
+              reviewsJson: encodeTaskReviews(
+                decodeTaskReviews(existing.value.reviewsJson).map((review) =>
+                  review.id === event.payload.review.id ? event.payload.review : review,
+                ),
+              ),
               updatedAt: event.payload.updatedAt,
             });
             return;

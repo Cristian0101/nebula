@@ -22,6 +22,9 @@ export const ProjectionTask = Schema.Struct({
   objective: Schema.String,
   role: NebulaTaskRole,
   modelSelectionJson: Schema.NullOr(Schema.String),
+  acceptanceCriteriaJson: Schema.String,
+  reviewRequired: Schema.Number,
+  preferDifferentReviewerProvider: Schema.Number,
   status: NebulaTaskStatus,
   threadId: Schema.NullOr(ThreadId),
   createdAt: IsoDateTime,
@@ -52,6 +55,8 @@ export const ProjectionTask = Schema.Struct({
   restoreJson: Schema.NullOr(Schema.String),
   reviewError: Schema.NullOr(Schema.String),
   resultJson: Schema.NullOr(Schema.String),
+  qualityGateRunsJson: Schema.String,
+  reviewsJson: Schema.String,
 });
 export type ProjectionTask = typeof ProjectionTask.Type;
 

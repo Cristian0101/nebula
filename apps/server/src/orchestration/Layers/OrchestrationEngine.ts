@@ -66,12 +66,15 @@ function commandToAggregateRef(command: OrchestrationCommand): {
   switch (command.type) {
     case "project.create":
     case "project.meta.update":
+    case "project.quality-policy.update":
+    case "project.review-policy.update":
     case "project.delete":
       return {
         aggregateKind: "project",
         aggregateId: command.projectId,
       };
     case "task.create":
+    case "task.acceptance-criteria.set":
     case "task.bind-thread":
     case "task.activate":
     case "task.complete":
@@ -90,6 +93,15 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "task.ownership.validation-failed":
     case "task.review.prepare":
     case "task.handoff.update":
+    case "task.quality.run":
+    case "task.quality.cancel":
+    case "task.quality.run-started":
+    case "task.quality.run-finished":
+    case "task.independent-review.request":
+    case "task.independent-review.started":
+    case "task.independent-review.completed":
+    case "task.independent-review.failed":
+    case "task.review.findings.send":
     case "task.restore.request":
     case "task.restore.undo":
     case "task.review.prepared":

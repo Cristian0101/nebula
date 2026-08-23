@@ -16,6 +16,7 @@ import type {
   ContextMenuItem,
   ModelSelection,
   ProviderDriverKind,
+  QualityGateDefinition,
   SidebarProjectGroupingMode,
   T3ProjectFileScript,
   ThreadEnvMode,
@@ -47,6 +48,7 @@ import { useT3ProjectFileState } from "../../hooks/useT3ProjectFileScripts";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { keybindingValueForCommand } from "../../lib/projectScriptKeybindings";
 import { readLocalApi } from "../../localApi";
+import { randomUUID } from "../../lib/utils";
 import {
   buildProjectScript,
   commandForProjectScript,
@@ -286,6 +288,215 @@ export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
     );
   }
   return <ProjectDetail key={selected.projectKey} group={selected} />;
+}
+
+function ProjectQualityAndReviewSettings({ project }: { project: SidebarProjectGroupMember }) {
+  const updateQuality = useAtomCommand(projectEnvironment.updateQualityPolicy, {
+    reportFailure: false,
+  });
+  const updateReview = useAtomCommand(projectEnvironment.updateReviewPolicy, {
+    reportFailure: false,
+  });
+  const [gates, setGates] = useState<QualityGateDefinition[]>([
+    ...(project.qualityPolicy?.gates ?? []),
+  ]);
+  const [requireReview, setRequireReview] = useState(
+    project.reviewPolicy?.requireIndependentReview ?? true,
+  );
+  const [preferDifferent, setPreferDifferent] = useState(
+    project.reviewPolicy?.preferDifferentProvider ?? true,
+  );
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setGates([...(project.qualityPolicy?.gates ?? [])]);
+    setRequireReview(project.reviewPolicy?.requireIndependentReview ?? true);
+    setPreferDifferent(project.reviewPolicy?.preferDifferentProvider ?? true);
+  }, [project.id, project.qualityPolicy, project.reviewPolicy]);
+
+  const updateGate = (index: number, patch: Partial<QualityGateDefinition>) => {
+    setGates((current) =>
+      current.map((gate, gateIndex) =>
+        gateIndex === index
+          ? {
+              ...gate,
+              ...patch,
+              ...(patch.command !== undefined && patch.command !== gate.command
+                ? { approvedCommand: null }
+                : {}),
+            }
+          : gate,
+      ),
+    );
+  };
+
+  const save = async () => {
+    if (gates.some((gate) => !gate.label.trim() || !gate.command.trim())) {
+      toastManager.add({ type: "warning", title: "Every quality gate needs a label and command" });
+      return;
+    }
+    setSaving(true);
+    const qualityResult = await updateQuality({
+      environmentId: project.environmentId,
+      input: { projectId: project.id, gates },
+    });
+    if (qualityResult._tag === "Failure") {
+      toastManager.add({ type: "error", title: "Could not save quality gates" });
+      setSaving(false);
+      return;
+    }
+    const reviewResult = await updateReview({
+      environmentId: project.environmentId,
+      input: {
+        projectId: project.id,
+        requireIndependentReview: requireReview,
+        preferDifferentProvider: preferDifferent,
+      },
+    });
+    setSaving(false);
+    toastManager.add({
+      type: reviewResult._tag === "Failure" ? "error" : "success",
+      title:
+        reviewResult._tag === "Failure"
+          ? "Quality gates saved, but review policy failed"
+          : "Quality and review policy saved",
+    });
+  };
+
+  return (
+    <SettingsSection title="Quality gates and review">
+      <SettingsRow
+        title="Independent review"
+        description="New managed Builder Tasks require an approved review by default. A different provider is recommended when ready."
+        control={
+          <div className="flex flex-col items-end gap-2 text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={requireReview}
+                onChange={(event) => setRequireReview(event.currentTarget.checked)}
+              />
+              Require review
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={preferDifferent}
+                onChange={(event) => setPreferDifferent(event.currentTarget.checked)}
+              />
+              Prefer different provider
+            </label>
+          </div>
+        }
+      />
+      <div className="space-y-3 rounded-lg border border-black/[0.08] p-3">
+        <div>
+          <p className="text-sm font-medium">Quality gate commands</p>
+          <p className="text-xs text-muted-foreground">
+            Commands run only in a Task worktree after the exact command is approved here. Editing a
+            command revokes approval.
+          </p>
+        </div>
+        {gates.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No quality gates configured.</p>
+        ) : null}
+        {gates.map((gate, index) => (
+          <div key={gate.id} className="grid gap-2 rounded-md bg-muted/30 p-3 sm:grid-cols-12">
+            <Input
+              aria-label={`Quality gate ${index + 1} label`}
+              className="sm:col-span-3"
+              value={gate.label}
+              onChange={(event) => updateGate(index, { label: event.currentTarget.value })}
+            />
+            <Input
+              aria-label={`${gate.label} command`}
+              className="font-mono text-xs sm:col-span-6"
+              value={gate.command}
+              onChange={(event) => updateGate(index, { command: event.currentTarget.value })}
+            />
+            <Input
+              aria-label={`${gate.label} timeout seconds`}
+              className="sm:col-span-2"
+              type="number"
+              min={1}
+              max={3600}
+              value={gate.timeoutSeconds}
+              onChange={(event) =>
+                updateGate(index, {
+                  timeoutSeconds: Math.max(1, Number(event.currentTarget.value) || 1),
+                })
+              }
+            />
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              aria-label={`Delete ${gate.label}`}
+              onClick={() => setGates((current) => current.filter((_, item) => item !== index))}
+            >
+              <Trash2Icon />
+            </Button>
+            <div className="flex flex-wrap gap-4 text-xs sm:col-span-12">
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={gate.enabled}
+                  onChange={(event) => updateGate(index, { enabled: event.currentTarget.checked })}
+                />
+                Enabled
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={gate.required}
+                  onChange={(event) => updateGate(index, { required: event.currentTarget.checked })}
+                />
+                Required
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={gate.approvedCommand === gate.command}
+                  onChange={(event) =>
+                    updateGate(index, {
+                      approvedCommand: event.currentTarget.checked ? gate.command : null,
+                    })
+                  }
+                />
+                I approve this exact command
+              </label>
+            </div>
+          </div>
+        ))}
+        <div className="flex justify-between gap-2">
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={() =>
+              setGates((current) => [
+                ...current,
+                {
+                  id: `gate-${randomUUID()}`,
+                  label: "Tests",
+                  command: "npm test",
+                  enabled: true,
+                  required: true,
+                  timeoutSeconds: 600,
+                  approvedCommand: null,
+                },
+              ])
+            }
+          >
+            <PlusIcon /> Add gate
+          </Button>
+          <Button type="button" size="sm" disabled={saving} onClick={() => void save()}>
+            Save policy
+          </Button>
+        </div>
+      </div>
+    </SettingsSection>
+  );
 }
 
 function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
@@ -775,6 +986,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             }
           />
         </SettingsSection>
+        <ProjectQualityAndReviewSettings project={representative} />
         <ProjectTasksSection project={representative} />
         <SettingsSection title="Project">
           <SettingsRow

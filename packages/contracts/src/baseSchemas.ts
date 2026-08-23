@@ -93,3 +93,7 @@ export const TaskHandoffId = makeEntityId("TaskHandoffId");
 export type TaskHandoffId = typeof TaskHandoffId.Type;
 export const TaskRestoreId = makeEntityId("TaskRestoreId");
 export type TaskRestoreId = typeof TaskRestoreId.Type;
+export const QualityGateRunId = makeEntityId("QualityGateRunId");
+export type QualityGateRunId = typeof QualityGateRunId.Type;
+export const TaskReviewId = makeEntityId("TaskReviewId");
+export type TaskReviewId = typeof TaskReviewId.Type;

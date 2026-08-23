@@ -28,6 +28,12 @@ interface CapturedTaskState {
   readonly checkpointRef: CheckpointRef;
 }
 
+export interface TaskReviewDiffPackage {
+  readonly patch: string;
+  readonly coverage: "complete" | "manual-required";
+  readonly reason: string | null;
+}
+
 export interface TaskChangeSetQueryShape {
   readonly getTaskChanges: (
     input: OrchestrationGetTaskChangesInput,
@@ -45,6 +51,9 @@ export interface TaskChangeSetQueryShape {
   readonly isCurrent: (
     task: OrchestrationTask,
   ) => Effect.Effect<boolean, OrchestrationGetTaskChangesError>;
+  readonly getReviewDiff: (
+    task: OrchestrationTask,
+  ) => Effect.Effect<TaskReviewDiffPackage, OrchestrationGetTaskChangesError>;
 }
 
 const unavailable = () =>
@@ -63,6 +72,7 @@ export class TaskChangeSetQuery extends Context.Reference<TaskChangeSetQueryShap
       collect: unavailable,
       capture: unavailable,
       isCurrent: unavailable,
+      getReviewDiff: unavailable,
     }),
   },
 ) {}
@@ -377,7 +387,66 @@ const make = Effect.gen(function* () {
     Effect.mapError(mapError("Task file diff query")),
   );
 
-  return TaskChangeSetQuery.of({ getTaskChanges, getTaskFileDiff, collect, capture, isCurrent });
+  const getReviewDiff: TaskChangeSetQueryShape["getReviewDiff"] = Effect.fn(
+    "TaskChangeSetQuery.getReviewDiff",
+  )(
+    function* (task) {
+      const workspace = yield* Effect.try({
+        try: () => requireWorkspace(task),
+        catch: mapError("Task workspace validation"),
+      });
+      const snapshot = task.reviewSnapshot;
+      if (!snapshot || snapshot.status !== "current") {
+        return yield* new OrchestrationGetTaskChangesError({
+          message: "A current immutable Task review snapshot is required.",
+        });
+      }
+      const protectedPath = (path: string) =>
+        /(^|\/)(\.env(?:\.|$)|\.ssh(?:\/|$)|\.aws(?:\/|$)|\.config\/gh(?:\/|$)|credentials?(?:\.|$)|.*\.pem$|.*\.key$)/i.test(
+          path,
+        );
+      if ((snapshot.files ?? []).some((file) => protectedPath(file.path))) {
+        return {
+          patch: "",
+          coverage: "manual-required" as const,
+          reason: "The snapshot changes a protected path that is excluded from provider review.",
+        };
+      }
+      const result = yield* git.execute({
+        operation: "TaskChangeSet.reviewDiff",
+        cwd: workspace.cwd,
+        args: [
+          "diff",
+          "--patch",
+          "--no-color",
+          "--no-ext-diff",
+          "--no-textconv",
+          workspace.baseCommit,
+          snapshot.checkpointRef,
+          "--",
+        ],
+        maxOutputBytes: 120_000,
+        appendTruncationMarker: true,
+      });
+      return result.stdoutTruncated
+        ? {
+            patch: "",
+            coverage: "manual-required" as const,
+            reason: "The immutable diff exceeds the bounded automatic-review package.",
+          }
+        : { patch: result.stdout, coverage: "complete" as const, reason: null };
+    },
+    Effect.mapError(mapError("Task review diff query")),
+  );
+
+  return TaskChangeSetQuery.of({
+    getTaskChanges,
+    getTaskFileDiff,
+    collect,
+    capture,
+    isCurrent,
+    getReviewDiff,
+  });
 });
 
 export const layer = Layer.effect(TaskChangeSetQuery, make);

@@ -1,5 +1,14 @@
 # Nebula changelog
 
+## Unreleased — Quality Gates and independent Reviewer
+
+- Added optional durable Task acceptance criteria and explicit confirmation for edits after execution starts.
+- Added local Project quality policies with exact-command approval, Task-worktree execution, bounded output, timeout, cancellation, mutation detection, and snapshot-bound run history.
+- Added Project review policy, cross-provider recommendation, visible same-provider fallback, provider-neutral structured ReviewResult rounds, fail-closed verdict invariants, and human-controlled findings handoff.
+- Required-review Tasks now need current required gate passes and a current approving review before the existing ownership/freshness completion flow can finish.
+- Reused the inherited process runner, provider instances and TextGeneration, Task ChangeSet/checkpoints, orchestration events, SQLite projections, client runtime, and Command Deck.
+- Kept integration, shared-resource locks, Mission/DAG, scheduling, automatic planning/routing/remediation, and Swarm Mode out of scope.
+
 ## Unreleased — Command Deck
 
 - Added a desktop-first Project Command Deck for creating, assigning, starting, monitoring, inspecting, reviewing, restoring, and cleaning up several canonical Tasks from one surface.

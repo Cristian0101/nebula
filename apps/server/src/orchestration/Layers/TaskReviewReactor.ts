@@ -2,15 +2,18 @@ import {
   CheckpointRef,
   CommandId,
   EventId,
+  MessageId,
   TaskHandoffId,
   TaskRestoreId,
   TaskReviewSnapshotId,
   type OrchestrationEvent,
   type OrchestrationTask,
+  type TaskReview,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -18,6 +21,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
 import { forkParked } from "../../serverActivation.ts";
 import * as TextGeneration from "../../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
@@ -26,6 +30,11 @@ import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts"
 import { TaskReviewReactor, type TaskReviewReactorShape } from "../Services/TaskReviewReactor.ts";
 import { TaskChangeSetQuery } from "../TaskChangeSetQuery.ts";
 import { parseGeneratedTaskHandoff } from "../taskHandoff.ts";
+import {
+  buildIndependentReviewPrompt,
+  parseStructuredReviewOutput,
+  resolveReviewDiversity,
+} from "../taskIndependentReview.ts";
 
 type ReviewEvent = Extract<
   OrchestrationEvent,
@@ -35,9 +44,16 @@ type ReviewEvent = Extract<
       | "task.completion.freshness-requested"
       | "task.restore.requested"
       | "task.restore.undo-requested"
+      | "task.independent-review.requested"
+      | "task.review.findings-sent"
       | "thread.turn-diff-completed";
   }
 >;
+
+class IndependentReviewParseError extends Data.TaggedError("IndependentReviewParseError")<{
+  readonly message: string;
+  readonly cause: unknown;
+}> {}
 
 export const taskRestoreCheckpointRef = (taskId: string, restoreId: TaskRestoreId) =>
   CheckpointRef.make(`refs/t3/checkpoints/tasks/${taskId}/restore/${restoreId}`);
@@ -121,6 +137,7 @@ const make = Effect.gen(function* () {
   const checkpoints = yield* CheckpointStore.CheckpointStore;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const textGeneration = yield* TextGeneration.TextGeneration;
+  const providerInstances = yield* ProviderInstanceRegistry;
   const fileSystem = yield* FileSystem.FileSystem;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const commandId = (tag: string) =>
@@ -277,6 +294,167 @@ const make = Effect.gen(function* () {
       taskId: task.id,
       current: yield* taskChanges.isCurrent(task),
       createdAt: yield* now,
+    });
+  });
+
+  const failIndependentReview = Effect.fn("TaskReviewReactor.failIndependentReview")(function* (
+    taskId: OrchestrationTask["id"],
+    reviewId: TaskReview["id"],
+    error: unknown,
+  ) {
+    yield* engine.dispatch({
+      type: "task.independent-review.failed",
+      commandId: yield* commandId("task-independent-review-failed"),
+      taskId,
+      reviewId,
+      failureReason:
+        typeof error === "object" && error !== null && "message" in error
+          ? String(error.message)
+          : "Independent review failed.",
+      createdAt: yield* now,
+    });
+  });
+
+  const runIndependentReview = Effect.fn("TaskReviewReactor.runIndependentReview")(function* (
+    taskId: OrchestrationTask["id"],
+    reviewId: TaskReview["id"],
+  ) {
+    const task = yield* resolveTask(taskId);
+    const review = task?.reviews?.find((candidate) => candidate.id === reviewId);
+    if (!task || !review || !task.reviewSnapshot || !task.handoff) return;
+    const reviewSnapshot = task.reviewSnapshot;
+    if (!(yield* taskChanges.isCurrent(task))) {
+      yield* markStale(task);
+      return;
+    }
+    const diff = yield* taskChanges.getReviewDiff(task);
+    if (diff.coverage === "manual-required") {
+      return yield* Effect.fail(diff.reason ?? "This snapshot requires manual review.");
+    }
+    const model = yield* snapshots.getCommandReadModel();
+    const builderThread = model.threads.find((candidate) => candidate.id === task.threadId);
+    const [builderProvider, reviewerProvider] = yield* Effect.all([
+      builderThread
+        ? providerInstances.getInstance(builderThread.modelSelection.instanceId)
+        : Effect.succeed(undefined),
+      providerInstances.getInstance(review.reviewerModelSelection.instanceId),
+    ]);
+    const diversity = resolveReviewDiversity({
+      builderDriverKind: builderProvider?.driverKind,
+      reviewerDriverKind: reviewerProvider?.driverKind,
+      fallback: review.diversity,
+    });
+    const startedAt = yield* now;
+    yield* engine.dispatch({
+      type: "task.independent-review.started",
+      commandId: yield* commandId("task-independent-review-started"),
+      taskId: task.id,
+      reviewId,
+      createdAt: startedAt,
+    });
+    const prompt = buildIndependentReviewPrompt({
+      title: task.title,
+      objective: task.objective,
+      acceptanceCriteria: task.acceptanceCriteria ?? [],
+      snapshot: task.reviewSnapshot,
+      files: (task.reviewSnapshot.files ?? []).map((file) => file.path),
+      patch: diff.patch,
+      handoffSummary: task.handoff.summary,
+      reportedTests: task.handoff.testsRun,
+      quality: (task.qualityGateRuns ?? [])
+        .filter((run) => run.snapshotId === task.reviewSnapshot!.id)
+        .map((run) => ({ label: run.label, status: run.status, exitCode: run.exitCode })),
+    });
+    const generated = yield* Effect.scoped(
+      Effect.gen(function* () {
+        // The reviewer receives only the bounded prompt. Its provider process
+        // starts in an empty disposable directory, not the source checkout or
+        // writable Builder worktree.
+        const reviewCwd = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-task-review-",
+        });
+        return yield* textGeneration.generatePrContent({
+          cwd: reviewCwd,
+          baseBranch: reviewSnapshot.baseCommit,
+          headBranch: reviewSnapshot.branchHead,
+          commitSummary: `Independent review for Task ${task.id}`,
+          diffSummary: "The immutable bounded review package is embedded below.",
+          diffPatch: prompt,
+          changeRequestTemplate:
+            "Return the requested JSON object verbatim in the body. The title may be 'Task review'.",
+          modelSelection: review.reviewerModelSelection,
+        });
+      }),
+    );
+    const result = yield* Effect.try({
+      try: () => parseStructuredReviewOutput(generated.body),
+      catch: (cause) =>
+        new IndependentReviewParseError({
+          message:
+            cause instanceof Error ? cause.message : "Independent review output was invalid.",
+          cause,
+        }),
+    });
+    const completedAt = yield* now;
+    yield* engine.dispatch({
+      type: "task.independent-review.completed",
+      commandId: yield* commandId("task-independent-review-completed"),
+      taskId: task.id,
+      review: {
+        ...review,
+        diversity,
+        status: "completed",
+        verdict: result.verdict,
+        findings: result.findings,
+        criteria: result.criteria,
+        securityConcerns: result.securityConcerns,
+        requiredChanges: result.requiredChanges,
+        summary: result.summary,
+        coverage: "complete",
+        failureReason: null,
+        completedAt,
+      },
+      createdAt: completedAt,
+    });
+  });
+
+  const sendFindingsToBuilder = Effect.fn("TaskReviewReactor.sendFindingsToBuilder")(function* (
+    taskId: OrchestrationTask["id"],
+    reviewId: TaskReview["id"],
+  ) {
+    const model = yield* snapshots.getCommandReadModel();
+    const task = (model.tasks ?? []).find((candidate) => candidate.id === taskId);
+    const review = task?.reviews?.find((candidate) => candidate.id === reviewId);
+    const thread = model.threads.find((candidate) => candidate.id === task?.threadId);
+    if (!task || !review || !thread) return;
+    const required = review.requiredChanges.map((change, index) => `${index + 1}. ${change}`);
+    const blocking = review.findings
+      .filter((finding) => finding.severity === "blocking" || finding.severity === "security")
+      .map((finding) => `- [${finding.severity}] ${finding.title}: ${finding.detail}`);
+    const createdAt = yield* now;
+    yield* engine.dispatch({
+      type: "thread.turn.start",
+      commandId: yield* commandId("task-review-findings-builder-turn"),
+      threadId: thread.id,
+      message: {
+        messageId: MessageId.make(yield* crypto.randomUUIDv4),
+        role: "user",
+        text: [
+          `Human-requested review handoff for Task ${task.id}.`,
+          `Reviewed snapshot: ${review.snapshotId}`,
+          `Verdict: ${review.verdict ?? review.status}`,
+          "Required changes:",
+          ...(required.length > 0 ? required : ["None listed."]),
+          "Blocking findings:",
+          ...(blocking.length > 0 ? blocking : ["None listed."]),
+          "Inspect the current Task workspace before editing. Do not change files outside Task ownership.",
+        ].join("\n"),
+        attachments: [],
+      },
+      modelSelection: thread.modelSelection,
+      runtimeMode: thread.runtimeMode,
+      interactionMode: thread.interactionMode,
+      createdAt,
     });
   });
 
@@ -464,6 +642,24 @@ const make = Effect.gen(function* () {
       );
       return;
     }
+    if (event.type === "task.independent-review.requested") {
+      yield* runIndependentReview(event.payload.taskId, event.payload.review.id).pipe(
+        Effect.catch((error) =>
+          failIndependentReview(event.payload.taskId, event.payload.review.id, error),
+        ),
+      );
+      return;
+    }
+    if (event.type === "task.review.findings-sent") {
+      yield* sendFindingsToBuilder(event.payload.taskId, event.payload.reviewId).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Sending Task review findings to Builder failed", {
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
+      return;
+    }
     const model = yield* snapshots.getCommandReadModel();
     const task = (model.tasks ?? []).find(
       (candidate) => candidate.threadId === event.payload.threadId && candidate.status === "active",
@@ -502,6 +698,19 @@ const make = Effect.gen(function* () {
           "Restore was interrupted after the safety snapshot; retry from the retained ref.",
         );
       }
+      for (const review of task.reviews ?? []) {
+        if (review.status === "queued") {
+          yield* runIndependentReview(task.id, review.id).pipe(
+            Effect.catch((error) => failIndependentReview(task.id, review.id, error)),
+          );
+        } else if (review.status === "running") {
+          yield* failIndependentReview(
+            task.id,
+            review.id,
+            "Independent review was interrupted by server restart.",
+          );
+        }
+      }
     }
   }).pipe(
     Effect.catchCause((cause) =>
@@ -519,6 +728,8 @@ const make = Effect.gen(function* () {
           event.type === "task.completion.freshness-requested" ||
           event.type === "task.restore.requested" ||
           event.type === "task.restore.undo-requested" ||
+          event.type === "task.independent-review.requested" ||
+          event.type === "task.review.findings-sent" ||
           event.type === "thread.turn-diff-completed"
         ) {
           return worker.enqueue(event as ReviewEvent);

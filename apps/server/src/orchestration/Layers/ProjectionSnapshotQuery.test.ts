@@ -39,6 +39,46 @@ const projectionSnapshotLayer = it.layer(
 );
 
 projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
+  it.effect("hydrates project quality and review policies into the command read model", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_state`;
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          quality_policy_json,
+          review_policy_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-policy',
+          'Policy project',
+          '/tmp/project-policy',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '{"gates":[{"id":"gate-test","label":"Tests","command":"npm test","enabled":true,"required":true,"timeoutSeconds":600,"approvedCommand":"npm test"}],"updatedAt":"2026-08-23T00:00:00.000Z"}',
+          '{"requireIndependentReview":true,"preferDifferentProvider":true,"updatedAt":"2026-08-23T00:00:00.000Z"}',
+          '2026-08-23T00:00:00.000Z',
+          '2026-08-23T00:00:00.000Z',
+          NULL
+        )
+      `;
+
+      const readModel = yield* snapshotQuery.getCommandReadModel();
+      assert.equal(readModel.projects[0]?.qualityPolicy?.gates[0]?.command, "npm test");
+      assert.equal(readModel.projects[0]?.reviewPolicy?.requireIndependentReview, true);
+    }),
+  );
+
   it.effect("hydrates read model from projection tables and computes snapshot sequence", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
@@ -286,6 +326,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             },
           ],
           defaultThreadEnvMode: null,
+          qualityPolicy: null,
+          reviewPolicy: null,
           createdAt: "2026-02-24T00:00:00.000Z",
           updatedAt: "2026-02-24T00:00:01.000Z",
           deletedAt: null,
@@ -406,6 +448,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             },
           ],
           defaultThreadEnvMode: null,
+          qualityPolicy: null,
+          reviewPolicy: null,
           createdAt: "2026-02-24T00:00:00.000Z",
           updatedAt: "2026-02-24T00:00:01.000Z",
         },

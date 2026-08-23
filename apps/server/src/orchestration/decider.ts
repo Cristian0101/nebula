@@ -1,5 +1,6 @@
 import {
   EventId,
+  QualityGateRunId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -144,6 +145,38 @@ function threadHasQueuedTurnStart(
     latestUserMessageAtMs > latestTurnAtMs &&
     Math.abs(queuedAgeMs) <= QUEUED_TURN_START_GRACE_MS
   );
+}
+
+function requiredQualityGateFailure(
+  readModel: OrchestrationReadModel,
+  task: NonNullable<OrchestrationReadModel["tasks"]>[number],
+): string | null {
+  const project = readModel.projects.find((candidate) => candidate.id === task.projectId);
+  const required = (project?.qualityPolicy?.gates ?? []).filter(
+    (gate) => gate.enabled && gate.required,
+  );
+  for (const gate of required) {
+    const passed = (task.qualityGateRuns ?? []).some(
+      (run) =>
+        run.snapshotId === task.reviewSnapshot?.id &&
+        run.gateId === gate.id &&
+        run.command === gate.command &&
+        run.status === "passed",
+    );
+    if (!passed) return gate.label;
+  }
+  return null;
+}
+
+function currentApprovedReview(task: NonNullable<OrchestrationReadModel["tasks"]>[number]) {
+  return (task.reviews ?? [])
+    .filter(
+      (review) =>
+        review.snapshotId === task.reviewSnapshot?.id &&
+        review.status === "completed" &&
+        (review.verdict === "approve" || review.verdict === "approve_with_notes"),
+    )
+    .at(-1);
 }
 
 function withEventBase(
@@ -302,6 +335,62 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "project.quality-policy.update": {
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      const ids = new Set<string>();
+      for (const gate of command.gates) {
+        if (ids.has(gate.id)) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Quality gate id '${gate.id}' is duplicated.`,
+          });
+        }
+        ids.add(gate.id);
+        if (gate.approvedCommand !== null && gate.approvedCommand !== gate.command) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Quality gate '${gate.label}' approval does not match its command.`,
+          });
+        }
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "project.quality-policy-updated",
+        payload: {
+          projectId: command.projectId,
+          policy: { gates: command.gates, updatedAt: command.createdAt },
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "project.review-policy.update": {
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "project.review-policy-updated",
+        payload: {
+          projectId: command.projectId,
+          policy: {
+            requireIndependentReview: command.requireIndependentReview,
+            preferDifferentProvider: command.preferDifferentProvider,
+            updatedAt: command.createdAt,
+          },
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
     case "project.delete": {
       yield* requireProject({
         readModel,
@@ -378,6 +467,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       yield* requireTaskAbsent({ readModel, command, taskId: command.taskId });
+      const projectReviewPolicy = project.reviewPolicy;
       return {
         ...(yield* withEventBase({
           aggregateKind: "task",
@@ -393,11 +483,65 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           objective: command.objective,
           role: command.role,
           modelSelection: command.modelSelection ?? null,
+          acceptanceCriteria: command.acceptanceCriteria ?? [],
+          reviewRequired:
+            command.reviewRequired ??
+            (command.role === "builder"
+              ? (projectReviewPolicy?.requireIndependentReview ?? true)
+              : false),
+          preferDifferentReviewerProvider:
+            command.preferDifferentReviewerProvider ??
+            projectReviewPolicy?.preferDifferentProvider ??
+            true,
           ownershipRequired: command.role === "builder",
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
       };
+    }
+
+    case "task.acceptance-criteria.set": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.status === "completed" || task.status === "cancelled") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Terminal Task '${command.taskId}' acceptance criteria cannot be changed.`,
+        });
+      }
+      if (task.status !== "draft" && command.confirmStartedTaskChange !== true) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Changing acceptance criteria after Task execution starts requires explicit confirmation.`,
+        });
+      }
+      const updated = {
+        ...(yield* withEventBase({
+          aggregateKind: "task" as const,
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.acceptance-criteria-updated" as const,
+        payload: {
+          taskId: command.taskId,
+          criteria: command.criteria,
+          updatedAt: command.createdAt,
+        },
+      };
+      if (!task.reviewSnapshot) return updated;
+      return [
+        updated,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "task",
+            aggregateId: command.taskId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "task.review.stale" as const,
+          payload: { taskId: command.taskId, updatedAt: command.createdAt },
+        },
+      ];
     }
 
     case "task.bind-thread": {
@@ -570,6 +714,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
             detail: `Task '${command.taskId}' requires a current review snapshot and ready handoff before completion.`,
+          });
+        }
+        const failedGate = requiredQualityGateFailure(readModel, task);
+        if (failedGate !== null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Task '${command.taskId}' requires quality gate '${failedGate}' to pass for the current snapshot.`,
+          });
+        }
+        if (task.reviewRequired === true && !currentApprovedReview(task)) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Task '${command.taskId}' requires an approved independent review for the current snapshot.`,
           });
         }
         if (!task.ownership.rules.some((rule) => rule.access === "write")) {
@@ -946,6 +1103,275 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "task.quality.run": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      const project = yield* requireProject({ readModel, command, projectId: task.projectId });
+      if (
+        task.status !== "active" ||
+        task.reviewSnapshot?.id !== command.snapshotId ||
+        task.reviewSnapshot.status !== "current" ||
+        task.workspace?.status !== "ready" ||
+        !task.workspace.path
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' quality gates must target its current managed review snapshot.`,
+        });
+      }
+      const gates = (project.qualityPolicy?.gates ?? []).filter((gate) => gate.enabled);
+      const unapproved = gates.find((gate) => gate.approvedCommand !== gate.command);
+      if (unapproved) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Quality gate '${unapproved.label}' must be explicitly approved before execution.`,
+        });
+      }
+      const crypto = yield* Crypto.Crypto;
+      const runs = [];
+      for (const gate of gates) {
+        runs.push({
+          id: QualityGateRunId.make(yield* crypto.randomUUIDv4),
+          taskId: task.id,
+          snapshotId: command.snapshotId,
+          gateId: gate.id,
+          label: gate.label,
+          command: gate.command,
+          required: gate.required,
+          timeoutSeconds: gate.timeoutSeconds,
+          status: "queued" as const,
+          cwd: task.workspace.path,
+          exitCode: null,
+          startedAt: null,
+          completedAt: null,
+          outputSummary: "",
+          outputTruncated: false,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: task.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.quality.run-requested",
+        payload: {
+          taskId: task.id,
+          snapshotId: command.snapshotId,
+          runs,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.quality.cancel": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      const run = (task.qualityGateRuns ?? []).find((candidate) => candidate.id === command.runId);
+      if (!run || (run.status !== "queued" && run.status !== "running")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Quality gate run '${command.runId}' is not cancellable.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: task.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.quality.run-cancel-requested",
+        payload: { taskId: task.id, runId: command.runId, updatedAt: command.createdAt },
+      };
+    }
+
+    case "task.quality.run-started":
+    case "task.quality.run-finished": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      const existing = (task.qualityGateRuns ?? []).find(
+        (candidate) => candidate.id === command.run.id,
+      );
+      if (!existing || existing.snapshotId !== command.run.snapshotId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Quality gate run '${command.run.id}' does not belong to this Task snapshot.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: task.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type:
+          command.type === "task.quality.run-started"
+            ? ("task.quality.run-started" as const)
+            : ("task.quality.run-finished" as const),
+        payload: { taskId: task.id, run: command.run, updatedAt: command.createdAt },
+      };
+    }
+
+    case "task.independent-review.request": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      const failedGate = requiredQualityGateFailure(readModel, task);
+      if (
+        task.status !== "active" ||
+        task.reviewSnapshot?.id !== command.snapshotId ||
+        task.reviewSnapshot.status !== "current" ||
+        task.handoff?.status !== "ready" ||
+        task.handoff.snapshotId !== command.snapshotId ||
+        failedGate !== null
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' requires a current ready handoff and all required quality gates before review.`,
+        });
+      }
+      const thread = readModel.threads.find((candidate) => candidate.id === task.threadId);
+      const diversity =
+        thread?.modelSelection.instanceId === command.reviewerModelSelection.instanceId
+          ? ("same-provider" as const)
+          : ("cross-provider" as const);
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: task.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.independent-review.requested",
+        payload: {
+          taskId: task.id,
+          review: {
+            id: command.reviewId,
+            taskId: task.id,
+            snapshotId: command.snapshotId,
+            reviewerModelSelection: command.reviewerModelSelection,
+            diversity,
+            status: "queued",
+            verdict: null,
+            findings: [],
+            criteria: [],
+            securityConcerns: [],
+            requiredChanges: [],
+            summary: "",
+            coverage: "complete",
+            failureReason: null,
+            findingsSentAt: null,
+            createdAt: command.createdAt,
+            completedAt: null,
+          },
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.independent-review.started": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      const review = (task.reviews ?? []).find((candidate) => candidate.id === command.reviewId);
+      if (!review || review.status !== "queued") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Review '${command.reviewId}' is not queued.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: task.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.independent-review.started",
+        payload: { taskId: task.id, reviewId: command.reviewId, updatedAt: command.createdAt },
+      };
+    }
+
+    case "task.independent-review.completed": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      const existing = (task.reviews ?? []).find((candidate) => candidate.id === command.review.id);
+      if (!existing || existing.snapshotId !== command.review.snapshotId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Review '${command.review.id}' does not belong to this Task snapshot.`,
+        });
+      }
+      const hasBlocking = command.review.findings.some(
+        (finding) => finding.severity === "blocking" || finding.severity === "security",
+      );
+      if (
+        hasBlocking &&
+        (command.review.verdict === "approve" || command.review.verdict === "approve_with_notes")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Blocking or security findings cannot be persisted with an approving verdict.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: task.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.independent-review.completed",
+        payload: { taskId: task.id, review: command.review, updatedAt: command.createdAt },
+      };
+    }
+
+    case "task.independent-review.failed": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (!(task.reviews ?? []).some((review) => review.id === command.reviewId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Review '${command.reviewId}' was not found.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: task.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.independent-review.failed",
+        payload: {
+          taskId: task.id,
+          reviewId: command.reviewId,
+          failureReason: command.failureReason,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "task.review.findings.send": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      const review = (task.reviews ?? []).find((candidate) => candidate.id === command.reviewId);
+      if (!review || review.status !== "completed" || task.threadId === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Completed review findings require an existing Builder thread.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: task.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.review.findings-sent",
+        payload: {
+          taskId: task.id,
+          reviewId: command.reviewId,
+          sentAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
     case "task.completion.freshness-validated": {
       const task = yield* requireTask({ readModel, command, taskId: command.taskId });
       if (!command.current) {
@@ -968,6 +1394,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Task '${command.taskId}' cannot complete without a current snapshot and ready handoff.`,
+        });
+      }
+      const failedGate = requiredQualityGateFailure(readModel, task);
+      if (failedGate !== null || (task.reviewRequired === true && !currentApprovedReview(task))) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' no longer satisfies its current quality and review policy.`,
         });
       }
       const thread = readModel.threads.find((candidate) => candidate.id === task.threadId);

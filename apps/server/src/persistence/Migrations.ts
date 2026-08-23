@@ -58,6 +58,7 @@ import Migration0042 from "./Migrations/042_TaskWorkspaces.ts";
 import Migration0043 from "./Migrations/043_TaskOwnership.ts";
 import Migration0044 from "./Migrations/044_TaskReviewHandoffRestore.ts";
 import Migration0045 from "./Migrations/045_TaskModelSelection.ts";
+import Migration0046 from "./Migrations/046_TaskQualityReview.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -115,6 +116,7 @@ export const migrationEntries = [
   [43, "TaskOwnership", Migration0043],
   [44, "TaskReviewHandoffRestore", Migration0044],
   [45, "TaskModelSelection", Migration0045],
+  [46, "TaskQualityReview", Migration0046],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

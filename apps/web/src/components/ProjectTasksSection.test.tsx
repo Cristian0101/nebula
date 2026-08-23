@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   ownershipDraftsValid,
   ProjectTaskCard,
+  setEntireRepositoryWritable,
   TaskCreateFields,
   TaskOwnershipEditor,
 } from "./ProjectTasksSection";
@@ -227,6 +228,12 @@ describe("TaskCreateFields", () => {
     expect(
       ownershipDraftsValid([{ access: "write", pattern: "apps/web/src/**", reason: "" }]),
     ).toBe(true);
+  });
+
+  it("replaces the initial empty rule when the entire repository is selected", () => {
+    const rules = setEntireRepositoryWritable([{ access: "write", pattern: "", reason: "" }], true);
+    expect(rules.map((rule) => rule.pattern)).toEqual(["**"]);
+    expect(ownershipDraftsValid(rules)).toBe(true);
   });
 
   it("renders write, read-only, deny, and Entire Repository controls", () => {

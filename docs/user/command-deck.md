@@ -25,7 +25,7 @@ Select a Task to see its canonical execution context and inspector:
 - **Overview** — objective, provider/model, role, timestamps, cancellation, and terminal workspace cleanup.
 - **Ownership** — write, read-only, and deny rules, validation evidence, editing, and manual revalidation.
 - **Changes** — the existing base-to-current Task Diff with lazy file patches.
-- **Review** — immutable snapshot, structured handoff, Prepare completion, Mark ready, and Complete Task.
+- **Review** — immutable snapshot, structured handoff, approved quality commands and results, reviewer selection, structured review rounds, findings handoff, and Complete Task.
 - **Workspace** — isolation state, branch, base commit, worktree path, restore, and undo.
 
 Choose **Open Thread** to continue with the existing provider stream, composer, tools, and terminal. Command Deck does not copy provider output into a second chat. **Stop current turn** is shown only while a cancellable turn is running; there is no invented universal pause control.
@@ -34,12 +34,12 @@ The activity area shows meaningful persisted Task, workspace, ownership, review,
 
 ## Review, restore, and clean up
 
-Use **Prepare completion** to validate ownership and capture the current review evidence. Review or edit the provider-neutral handoff, mark it ready, then complete the Task. Any later workspace change makes the review stale.
+Use **Prepare completion** to validate ownership and capture the current review evidence. Review or edit the provider-neutral handoff and mark it ready. Run every required approved quality gate, then request a review when the effective policy requires one. A different provider is recommended when ready; a same-provider choice remains available and is labeled degraded. Any later workspace change makes the snapshot, gate results, and applicable review stale. See [Review Tasks with Quality Gates](reviewing-tasks.md).
 
 **Restore Task** changes only the selected managed worktree and retains a recovery snapshot first. It does not change another Task or the source checkout. Use **Undo restore** while the recovery reference is available. A terminal Task's clean workspace can then be removed explicitly.
 
 ## Current scope
 
-Command Deck is **implemented**. Manual parallel provider Tasks are **implemented**.
+Command Deck, manual parallel provider Tasks, Quality Gates, Reviewer, and cross-provider review are **implemented**.
 
-Automated Swarm planning is **not implemented**. This release also has no Mission, Task DAG, scheduler, automated provider routing, shared-resource lock manager, automated Reviewer, or integration engine. Tasks do not message one another or share hidden context; the user remains the coordinator.
+Integration, shared-resource locks, Mission, Task DAG, scheduler, automated planning/provider routing, automatic remediation, and Swarm Mode are **not implemented**. Providers do not share hidden context; findings enter the existing Builder Thread only when the user chooses **Send Review Findings to Builder**.

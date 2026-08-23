@@ -35,6 +35,8 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         },
         defaultThreadEnvMode: null,
         scripts: [],
+        qualityPolicy: null,
+        reviewPolicy: null,
         createdAt: "2026-03-24T00:00:00.000Z",
         updatedAt: "2026-03-24T00:00:00.000Z",
         deletedAt: null,

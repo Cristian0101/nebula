@@ -97,8 +97,12 @@ The current repository already provides:
 - a desktop-first Command Deck that composes Project-scoped Tasks, provider readiness, workspaces, ownership, changes, review, restore, and the existing Thread execution surface;
 - durable manual provider/model assignment for draft Tasks before a Thread exists; and
 - manual parallel execution of independent provider-backed Tasks in separate managed worktrees.
+- optional durable Task acceptance criteria with explicit confirmation for post-start edits;
+- local Project quality policies whose exact commands require user approval before execution;
+- snapshot-bound, bounded quality results with timeout, cancellation, mutation detection, and restart-safe history; and
+- provider-neutral independent review with cross-provider preference, same-provider fallback, structured verdict invariants, human-controlled findings handoff, and multiple review rounds.
 
-The current repository does **not** yet provide agent-generated ownership requests, shared-resource locks, an independent Reviewer role, automated quality gates, deterministic swarm, Mission planning, or integration queues.
+The current repository does **not** yet provide agent-generated ownership requests, shared-resource locks, deterministic Swarm automation, Mission/DAG planning, scheduling, automatic provider routing, automatic remediation, or integration queues.
 
 ### IMPLEMENTED v0.1 — Command Deck
 
@@ -119,7 +123,11 @@ Command Deck now provides:
 
 The user remains the coordinator: provider/model choice, ownership, Start, review, completion, restore, and cleanup are explicit actions. Command Deck derives presentation and attention state from canonical Task, Thread, provider, workspace, ownership, and review projections. It does not persist a Command Deck entity or duplicate provider output. Draft Task assignment is stored on the Task because no Thread exists yet; once execution starts, the bound Thread's model selection is authoritative for that execution.
 
-Manual parallel provider Tasks are implemented. Automated planning, provider routing, Task dependencies, shared-resource locks, independent Reviewer automation, integration, and Swarm Mode remain out of scope.
+Manual parallel provider Tasks, quality gates, and user-requested independent reviews are implemented. Automated planning, provider routing, Task dependencies, shared-resource locks, integration, automatic remediation loops, and Swarm Mode remain out of scope.
+
+### IMPLEMENTED v0.2 — Quality Gates and Reviewer
+
+New managed Builder Tasks require independent review by default while historical Tasks keep their prior completion behavior. Users may change the Project policy or the Task-level requirement. Required approved gates must pass against the current immutable snapshot before review; a workspace mutation stales that snapshot and its results. Reviewer generation uses the selected provider instance's shared `TextGeneration` capability against a bounded, data-minimized evidence package. Schema decoding and server invariants fail closed, and a blocking or security finding cannot coexist with an approving verdict.
 
 ### ROADMAP v0.2 — Deterministic Swarm
 
