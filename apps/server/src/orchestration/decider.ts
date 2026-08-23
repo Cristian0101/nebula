@@ -11,6 +11,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 import { computeMissionPlan, validateMissionGraph } from "@t3tools/shared/missionGraph";
+import { validateArchitectPlan } from "@t3tools/shared/architectPlan";
 import {
   resourceBlockers,
   validateSharedResourceDefinition,
@@ -681,6 +682,296 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "architect.plan.generate": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (project.deletedAt !== null)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Architect planning requires an active Project.",
+        });
+      if ((project.architectPlans ?? []).some((plan) => plan.id === command.proposalId))
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Architect Plan ID already exists.",
+        });
+      const selection = {
+        instanceId: command.modelSelection.instanceId,
+        model: command.modelSelection.model,
+        ...(command.modelSelection.options !== undefined
+          ? { options: command.modelSelection.options }
+          : {}),
+      };
+      const plan = {
+        id: command.proposalId,
+        projectId: project.id,
+        status: "generating" as const,
+        objective: command.objective,
+        constraints: command.constraints ?? null,
+        planningBaseCommit: "pending",
+        observedHeadCommit: null,
+        architectProviderInstanceId: selection.instanceId,
+        architectModelSelection: selection,
+        contextFingerprint: "pending",
+        contextPaths: command.contextPaths ?? [],
+        resourcePolicyFingerprint: "pending",
+        proposal: null,
+        validation: null,
+        revisions: [],
+        materializedMissionId: null,
+        failureReason: null,
+        createdAt: command.createdAt,
+        updatedAt: command.createdAt,
+        resolvedAt: null,
+      };
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: project.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "architect.plan-saved" as const,
+        payload: { projectId: project.id, plan },
+      };
+    }
+
+    case "architect.plan.save": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (project.deletedAt !== null || command.plan.projectId !== project.id) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Architect Plans must belong to an active Project.",
+        });
+      }
+      const existing = (project.architectPlans ?? []).find((plan) => plan.id === command.plan.id);
+      if (existing?.status === "approved" || existing?.status === "rejected") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Resolved Architect Plans are immutable.",
+        });
+      }
+      if (command.plan.proposal !== null) {
+        const validation = validateArchitectPlan({
+          proposal: command.plan.proposal,
+          planningBaseCommit: command.plan.planningBaseCommit,
+          resources: project.sharedResources ?? [],
+          validatedAt: command.createdAt,
+        });
+        const supplied = command.plan.validation;
+        if (
+          !supplied ||
+          JSON.stringify({ ...validation, validatedAt: null }) !==
+            JSON.stringify({ ...supplied, validatedAt: null })
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Architect Plan validation is stale. Revalidate before saving.",
+          });
+        }
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: project.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "architect.plan-saved" as const,
+        payload: { projectId: project.id, plan: command.plan },
+      };
+    }
+
+    case "architect.plan.reject": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const plan = (project.architectPlans ?? []).find(
+        (candidate) => candidate.id === command.proposalId,
+      );
+      if (!plan)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Architect Plan not found.",
+        });
+      if (plan.status === "approved")
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "An approved Architect Plan cannot be rejected.",
+        });
+      const rejected = {
+        ...plan,
+        status: "rejected" as const,
+        updatedAt: command.createdAt,
+        resolvedAt: command.createdAt,
+      };
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: project.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "architect.plan-rejected" as const,
+        payload: { projectId: project.id, plan: rejected },
+      };
+    }
+
+    case "architect.plan.approve": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const plan = (project.architectPlans ?? []).find(
+        (candidate) => candidate.id === command.proposalId,
+      );
+      if (!plan || !plan.proposal)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ready Architect Plan not found.",
+        });
+      if (plan.status === "approved") {
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: "project",
+            aggregateId: project.id,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "architect.plan-approved" as const,
+          payload: { projectId: project.id, plan },
+        };
+      }
+      const validation = validateArchitectPlan({
+        proposal: plan.proposal,
+        planningBaseCommit: plan.planningBaseCommit,
+        resources: project.sharedResources ?? [],
+        validatedAt: command.createdAt,
+      });
+      if (validation.errors.length > 0)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: validation.errors.map((entry) => entry.message).join(" "),
+        });
+      if (validation.warnings.length > 0 && !command.acknowledgeWarnings)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Acknowledge Architect Plan warnings before approval.",
+        });
+      if (plan.proposal.tasks.some((task) => !task.assignedModelSelection))
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Every proposed Task requires a human-confirmed provider and model assignment.",
+        });
+      const taskIds = new Map(command.tasks.map((task) => [task.key, task.taskId] as const));
+      if (
+        taskIds.size !== plan.proposal.tasks.length ||
+        plan.proposal.tasks.some((task) => !taskIds.has(task.key))
+      )
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Materialization must provide exactly one canonical Task ID per proposed Task.",
+        });
+      const commands: OrchestrationCommand[] = [
+        {
+          type: "mission.create",
+          commandId: command.commandId,
+          missionId: command.missionId,
+          projectId: project.id,
+          title: plan.proposal.title,
+          objective: plan.proposal.objective,
+          description: plan.proposal.description ?? null,
+          baseCommit: plan.planningBaseCommit,
+          architectPlanProposalId: plan.id,
+          createdAt: command.createdAt,
+        },
+      ];
+      for (const task of plan.proposal.tasks) {
+        const taskId = taskIds.get(task.key)!;
+        const assigned = task.assignedModelSelection!;
+        commands.push({
+          type: "task.create",
+          commandId: command.commandId,
+          taskId,
+          projectId: project.id,
+          title: task.title,
+          objective: task.objective,
+          role: "builder",
+          modelSelection: {
+            instanceId: assigned.instanceId,
+            model: assigned.model,
+            ...(assigned.options !== undefined ? { options: assigned.options } : {}),
+          },
+          acceptanceCriteria: task.acceptanceCriteria,
+          requiredResourceIds: task.requiredResourceIds,
+          createdAt: command.createdAt,
+        });
+        commands.push({
+          type: "task.ownership.set",
+          commandId: command.commandId,
+          taskId,
+          rules: [
+            ...task.ownership.write.map((pattern, index) => ({
+              id: `architect:${task.key}:write:${index}`,
+              pattern,
+              access: "write" as const,
+              reason: "Approved Architect Plan",
+              createdAt: command.createdAt,
+            })),
+            ...task.ownership.read.map((pattern, index) => ({
+              id: `architect:${task.key}:read:${index}`,
+              pattern,
+              access: "read" as const,
+              reason: "Approved Architect Plan",
+              createdAt: command.createdAt,
+            })),
+            ...task.ownership.deny.map((pattern, index) => ({
+              id: `architect:${task.key}:deny:${index}`,
+              pattern,
+              access: "deny" as const,
+              reason: "Approved Architect Plan",
+              createdAt: command.createdAt,
+            })),
+          ],
+          createdAt: command.createdAt,
+        });
+        commands.push({
+          type: "mission.task.add",
+          commandId: command.commandId,
+          missionId: command.missionId,
+          projectId: project.id,
+          taskId,
+          createdAt: command.createdAt,
+        });
+      }
+      for (const edge of plan.proposal.dependencies)
+        commands.push({
+          type: "mission.dependency.add",
+          commandId: command.commandId,
+          missionId: command.missionId,
+          projectId: project.id,
+          prerequisiteTaskId: taskIds.get(edge.prerequisiteKey)!,
+          dependentTaskId: taskIds.get(edge.dependentKey)!,
+          createdAt: command.createdAt,
+        });
+      const events = yield* decideCommandSequence({ readModel, commands });
+      const approved = {
+        ...plan,
+        status: "approved" as const,
+        validation,
+        materializedMissionId: command.missionId,
+        updatedAt: command.createdAt,
+        resolvedAt: command.createdAt,
+      };
+      return [
+        ...events,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "project",
+            aggregateId: project.id,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "architect.plan-approved" as const,
+          payload: { projectId: project.id, plan: approved },
+        },
+      ];
+    }
+
     case "mission.create": {
       const project = yield* requireProject({ readModel, command, projectId: command.projectId });
       if (project.deletedAt !== null) {
@@ -704,6 +995,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           title: command.title,
           objective: command.objective,
           description: command.description ?? null,
+          baseCommit: command.baseCommit ?? null,
+          architectPlanProposalId: command.architectPlanProposalId ?? null,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },

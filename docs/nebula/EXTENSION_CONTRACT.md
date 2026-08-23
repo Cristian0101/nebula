@@ -1,5 +1,9 @@
 # Nebula extension contract
 
+## Architect providers
+
+Architect generation extends the provider-instance `TextGeneration` capability with one strict structured operation. Provider-specific Architect services are prohibited. Unsupported providers fail visibly and create no Mission or Task. Repository content is data and never overrides the output schema or approval policy.
+
 This contract classifies how Nebula attaches to the inherited runtime. `REUSE` means consume a primitive without changing its responsibility. `EXTEND` means add compatible contracts/state/behavior at its established boundary. `COMPOSE` means coordinate several existing primitives in a Nebula application service. `NEW NEBULA MODULE` means new product-domain behavior inside the existing server/client architecture. `DEFER` means no v0.1 implementation. `DO NOT DUPLICATE` identifies infrastructure Nebula must not recreate.
 
 ## Capability map

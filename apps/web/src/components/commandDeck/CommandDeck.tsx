@@ -70,6 +70,7 @@ import {
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { IntegrationPanel } from "./IntegrationPanel";
 import { MissionPanel } from "./MissionPanel";
+import { ArchitectPlanPanel } from "./ArchitectPlanPanel";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -1026,23 +1027,32 @@ export function CommandDeck({
         ) : null}
 
         {deckSection === "missions" && currentProject ? (
-          <MissionPanel
-            environmentId={project.environmentId}
-            project={currentProject}
-            missions={missions}
-            tasks={tasks}
-            threads={snapshot?.threads ?? []}
-            unavailableProviderTaskIds={unavailableProviderTaskIds}
-            onStartTask={startTask}
-            onOpenTask={(taskId) => {
-              setSelectedTaskId(taskId);
-              setDeckSection("tasks");
-            }}
-            onCreateTask={(missionId) => {
-              setCreateMissionId(missionId);
-              setCreateOpen(true);
-            }}
-          />
+          <div className="space-y-3">
+            <ArchitectPlanPanel
+              environmentId={project.environmentId}
+              project={currentProject}
+              instanceEntries={instanceEntries}
+              modelOptionsByInstance={modelOptionsByInstance}
+              fallbackSelection={fallbackSelection}
+            />
+            <MissionPanel
+              environmentId={project.environmentId}
+              project={currentProject}
+              missions={missions}
+              tasks={tasks}
+              threads={snapshot?.threads ?? []}
+              unavailableProviderTaskIds={unavailableProviderTaskIds}
+              onStartTask={startTask}
+              onOpenTask={(taskId) => {
+                setSelectedTaskId(taskId);
+                setDeckSection("tasks");
+              }}
+              onCreateTask={(missionId) => {
+                setCreateMissionId(missionId);
+                setCreateOpen(true);
+              }}
+            />
+          </div>
         ) : null}
 
         {deckSection === "tasks" &&

@@ -7,6 +7,7 @@ import { ProviderOptionSelections } from "./model.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import {
   ApprovalRequestId,
+  ArchitectPlanProposalId,
   CheckpointRef,
   CommandId,
   EventId,
@@ -35,6 +36,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { ArchitectPlanMaterializationTask, ArchitectPlanProposal } from "./architectPlan.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -434,6 +436,9 @@ export const Mission = Schema.Struct({
   activatedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   cancelledAt: Schema.NullOr(IsoDateTime),
+  // Architect-approved Missions pin every Task workspace to one immutable common base.
+  baseCommit: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  architectPlanProposalId: Schema.optional(Schema.NullOr(ArchitectPlanProposalId)),
 });
 export type Mission = typeof Mission.Type;
 
@@ -479,6 +484,7 @@ export const OrchestrationProject = Schema.Struct({
   integrationBatches: Schema.optional(Schema.Array(IntegrationBatch)),
   sharedResources: Schema.optional(Schema.Array(SharedResourceDefinition)),
   resourceLeases: Schema.optional(Schema.Array(ResourceLease)),
+  architectPlans: Schema.optional(Schema.Array(ArchitectPlanProposal)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -1051,6 +1057,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   integrationBatches: Schema.optional(Schema.Array(IntegrationBatch)),
   sharedResources: Schema.optional(Schema.Array(SharedResourceDefinition)),
   resourceLeases: Schema.optional(Schema.Array(ResourceLease)),
+  architectPlans: Schema.optional(Schema.Array(ArchitectPlanProposal)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1324,6 +1331,48 @@ const MissionCreateCommand = Schema.Struct({
   title: TrimmedNonEmptyString,
   objective: TrimmedNonEmptyString,
   description: Schema.optional(Schema.NullOr(TrimmedString)),
+  baseCommit: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  architectPlanProposalId: Schema.optional(Schema.NullOr(ArchitectPlanProposalId)),
+  createdAt: IsoDateTime,
+});
+
+const ArchitectPlanSaveCommand = Schema.Struct({
+  type: Schema.Literal("architect.plan.save"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  plan: ArchitectPlanProposal,
+  createdAt: IsoDateTime,
+});
+
+const ArchitectPlanGenerateCommand = Schema.Struct({
+  type: Schema.Literal("architect.plan.generate"),
+  commandId: CommandId,
+  proposalId: ArchitectPlanProposalId,
+  projectId: ProjectId,
+  objective: TrimmedNonEmptyString,
+  constraints: Schema.optional(TrimmedString),
+  modelSelection: ModelSelection,
+  contextPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  createdAt: IsoDateTime,
+});
+
+const ArchitectPlanRejectCommand = Schema.Struct({
+  type: Schema.Literal("architect.plan.reject"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  proposalId: ArchitectPlanProposalId,
+  createdAt: IsoDateTime,
+});
+
+const ArchitectPlanApproveCommand = Schema.Struct({
+  type: Schema.Literal("architect.plan.approve"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  proposalId: ArchitectPlanProposalId,
+  missionId: MissionId,
+  tasks: Schema.Array(ArchitectPlanMaterializationTask),
+  acknowledgeWarnings: Schema.Boolean,
+  acknowledgeOriginalBaseline: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
 });
 
@@ -1929,6 +1978,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectSharedResourceUpdateCommand,
   ProjectSharedResourceDeleteCommand,
   ProjectDeleteCommand,
+  ArchitectPlanSaveCommand,
+  ArchitectPlanGenerateCommand,
+  ArchitectPlanRejectCommand,
+  ArchitectPlanApproveCommand,
   MissionCreateCommand,
   MissionUpdateCommand,
   MissionTaskAddCommand,
@@ -2000,6 +2053,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectSharedResourceUpdateCommand,
   ProjectSharedResourceDeleteCommand,
   ProjectDeleteCommand,
+  ArchitectPlanSaveCommand,
+  ArchitectPlanGenerateCommand,
+  ArchitectPlanRejectCommand,
+  ArchitectPlanApproveCommand,
   MissionCreateCommand,
   MissionUpdateCommand,
   MissionTaskAddCommand,
@@ -2399,6 +2456,9 @@ export const OrchestrationEventType = Schema.Literals([
   "resource.leases-acquired",
   "resource.leases-released",
   "project.deleted",
+  "architect.plan-saved",
+  "architect.plan-rejected",
+  "architect.plan-approved",
   "mission.created",
   "mission.updated",
   "mission.task-added",
@@ -2557,6 +2617,13 @@ export const MissionCreatedPayload = Schema.Struct({
   description: Schema.NullOr(TrimmedString),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  baseCommit: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  architectPlanProposalId: Schema.optional(Schema.NullOr(ArchitectPlanProposalId)),
+});
+
+export const ArchitectPlanPayload = Schema.Struct({
+  projectId: ProjectId,
+  plan: ArchitectPlanProposal,
 });
 
 export const MissionUpdatedPayload = Schema.Struct({
@@ -3182,6 +3249,21 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("architect.plan-saved"),
+    payload: ArchitectPlanPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("architect.plan-rejected"),
+    payload: ArchitectPlanPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("architect.plan-approved"),
+    payload: ArchitectPlanPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

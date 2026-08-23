@@ -1,5 +1,9 @@
 # Nebula swarm model
 
+## Planning status
+
+Architect Plan Proposal, AI-drafted Tasks/DAG/ownership/resource claims, and human plan approval are implemented. Automatic plan execution, scheduling, wave start, provider routing, provider-generated ownership requests, and Swarm Mode remain not implemented.
+
 This document constrains future Swarm Mode. It does not describe a currently implemented feature.
 
 ## Primary principle

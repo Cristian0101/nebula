@@ -48,6 +48,8 @@ import {
   SharedResourceId,
   TaskResourceComplianceState,
   OwnershipRequest,
+  ArchitectPlanProposal,
+  ArchitectPlanProposalId,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -106,6 +108,7 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     integrationBatches: Schema.fromJsonString(Schema.Array(IntegrationBatch)),
     sharedResources: Schema.fromJsonString(Schema.Array(SharedResourceDefinition)),
     resourceLeases: Schema.fromJsonString(Schema.Array(ResourceLease)),
+    architectPlans: Schema.fromJsonString(Schema.Array(ArchitectPlanProposal)),
   }),
 );
 const ProjectionTaskDbRowSchema = ProjectionTask.mapFields(
@@ -195,6 +198,8 @@ const ProjectionMissionRow = Schema.Struct({
   activatedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   cancelledAt: Schema.NullOr(IsoDateTime),
+  baseCommit: Schema.NullOr(Schema.String),
+  architectPlanProposalId: Schema.NullOr(ArchitectPlanProposalId),
 });
 const ProjectionMissionTaskRow = Schema.Struct({
   missionId: MissionId,
@@ -263,6 +268,8 @@ function mapMissionRows(input: {
     activatedAt: row.activatedAt,
     completedAt: row.completedAt,
     cancelledAt: row.cancelledAt,
+    baseCommit: row.baseCommit,
+    architectPlanProposalId: row.architectPlanProposalId,
   }));
 }
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -516,6 +523,7 @@ function mapProjectShellRow(
     integrationBatches: row.integrationBatches ?? [],
     sharedResources: row.sharedResources ?? [],
     resourceLeases: row.resourceLeases ?? [],
+    architectPlans: row.architectPlans ?? [],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -598,6 +606,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           integration_batches_json AS "integrationBatches",
           shared_resources_json AS "sharedResources",
           resource_leases_json AS "resourceLeases",
+          architect_plans_json AS "architectPlans",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -670,6 +679,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         created_at AS "createdAt", updated_at AS "updatedAt",
         activated_at AS "activatedAt", completed_at AS "completedAt",
         cancelled_at AS "cancelledAt"
+        , base_commit AS "baseCommit"
+        , architect_plan_proposal_id AS "architectPlanProposalId"
       FROM projection_missions ORDER BY created_at, mission_id
     `,
   });
@@ -1170,6 +1181,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           integration_batches_json AS "integrationBatches",
           shared_resources_json AS "sharedResources",
           resource_leases_json AS "resourceLeases",
+          architect_plans_json AS "architectPlans",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1199,6 +1211,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           integration_batches_json AS "integrationBatches",
           shared_resources_json AS "sharedResources",
           resource_leases_json AS "resourceLeases",
+          architect_plans_json AS "architectPlans",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -2019,6 +2032,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 integrationBatches: row.integrationBatches ?? [],
                 sharedResources: row.sharedResources ?? [],
                 resourceLeases: row.resourceLeases ?? [],
+                architectPlans: row.architectPlans ?? [],
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 deletedAt: row.deletedAt,
@@ -2180,6 +2194,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   integrationBatches: row.integrationBatches ?? [],
                   sharedResources: row.sharedResources ?? [],
                   resourceLeases: row.resourceLeases ?? [],
+                  architectPlans: row.architectPlans ?? [],
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   deletedAt: row.deletedAt,

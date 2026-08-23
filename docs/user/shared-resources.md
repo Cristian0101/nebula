@@ -1,5 +1,7 @@
 # Shared Resources
 
+Architect can reference only enabled Shared Resources already configured for the Project. A suggested missing policy is shown as a resource-policy gap; Architect never creates resources or acquires leases. Runtime lease enforcement remains authoritative when a Task later starts.
+
 Shared Resources let a Project name repository paths that should have only one active Task editor at a
 time. Examples include `package.json` plus a lockfile, migration directories, generated schemas, or a
 shared contract surface. Each definition has a name, optional description, one or more safe

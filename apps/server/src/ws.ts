@@ -1151,6 +1151,41 @@ const makeWsRpcLayer = (
                     ),
                   )
                 : false;
+              if (
+                normalizedCommand.type === "architect.plan.approve" &&
+                normalizedCommand.acknowledgeOriginalBaseline !== true
+              ) {
+                const project = yield* projectionSnapshotQuery.getProjectShellById(
+                  normalizedCommand.projectId,
+                );
+                if (Option.isSome(project)) {
+                  const plan = (project.value.architectPlans ?? []).find(
+                    (candidate) => candidate.id === normalizedCommand.proposalId,
+                  );
+                  if (plan?.proposal) {
+                    const { commitSha } = yield* gitWorkflow.resolveCommit({
+                      cwd: project.value.workspaceRoot,
+                      revision: "HEAD",
+                    });
+                    if (commitSha !== plan.planningBaseCommit) {
+                      const checkedAt = yield* nowIso;
+                      const staleCommand = yield* normalizeDispatchCommand({
+                        type: "architect.plan.save",
+                        commandId: normalizedCommand.commandId,
+                        projectId: normalizedCommand.projectId,
+                        plan: {
+                          ...plan,
+                          status: "stale",
+                          observedHeadCommit: commitSha,
+                          updatedAt: checkedAt,
+                        },
+                        createdAt: checkedAt,
+                      });
+                      return yield* dispatchNormalizedCommand(staleCommand);
+                    }
+                  }
+                }
+              }
               const result = yield* dispatchNormalizedCommand(normalizedCommand);
               if (parkingCommand) {
                 const parkingKind = parkingCommand.type === "thread.archive" ? "archive" : "settle";

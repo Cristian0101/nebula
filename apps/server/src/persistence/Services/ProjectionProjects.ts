@@ -17,6 +17,7 @@ import {
   ThreadEnvMode,
   SharedResourceDefinition,
   ResourceLease,
+  ArchitectPlanProposal,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -38,6 +39,7 @@ export const ProjectionProject = Schema.Struct({
   integrationBatches: Schema.optional(Schema.Array(IntegrationBatch)),
   sharedResources: Schema.optional(Schema.Array(SharedResourceDefinition)),
   resourceLeases: Schema.optional(Schema.Array(ResourceLease)),
+  architectPlans: Schema.optional(Schema.Array(ArchitectPlanProposal)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),

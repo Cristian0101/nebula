@@ -7,6 +7,7 @@ import { TextGenerationError } from "@t3tools/contracts";
 import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";
+import type * as Schema from "effect/Schema";
 
 export type TextGenerationProvider =
   | "codex"
@@ -79,6 +80,13 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
+export interface StructuredGenerationInput {
+  cwd: string;
+  prompt: string;
+  outputSchema: Schema.Codec<unknown, unknown>;
+  modelSelection: ModelSelection;
+}
+
 export interface TextGenerationService {
   generateCommitMessage(
     input: CommitMessageGenerationInput,
@@ -86,6 +94,7 @@ export interface TextGenerationService {
   generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
+  generateStructured?(input: StructuredGenerationInput): Promise<unknown>;
 }
 
 /**
@@ -119,6 +128,9 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+    readonly generateStructured?: (
+      input: StructuredGenerationInput,
+    ) => Effect.Effect<unknown, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -129,7 +141,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "generateStructured";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -168,6 +181,19 @@ export const makeTextGenerationFromRegistry = (
     generateThreadTitle: (input) =>
       resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+      ),
+    generateStructured: (input) =>
+      resolveInstance(registry, "generateStructured", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) =>
+          textGeneration.generateStructured
+            ? textGeneration.generateStructured(input)
+            : Effect.fail(
+                new TextGenerationError({
+                  operation: "generateStructured",
+                  detail: "This provider does not support structured Architect generation.",
+                }),
+              ),
+        ),
       ),
   });
 

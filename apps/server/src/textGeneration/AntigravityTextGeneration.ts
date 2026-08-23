@@ -60,7 +60,8 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateStructured";
     readonly cwd: string;
     readonly prompt: string;
     readonly schema: S;
@@ -243,6 +244,15 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
         modelSelection: input.modelSelection,
       });
       return { title: sanitizeThreadTitle(generated.title) };
+    }),
+    generateStructured: Effect.fn("AntigravityText.generateStructured")(function* (input) {
+      return yield* runJson({
+        operation: "generateStructured",
+        cwd: input.cwd,
+        prompt: input.prompt,
+        schema: input.outputSchema,
+        modelSelection: input.modelSelection,
+      });
     }),
   } satisfies TextGeneration.TextGeneration["Service"];
 });

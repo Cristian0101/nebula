@@ -654,6 +654,26 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "architect.plan-saved":
+        case "architect.plan-rejected":
+        case "architect.plan-approved": {
+          const existingRow = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isNone(existingRow)) return;
+          yield* projectionProjectRepository.upsert({
+            ...existingRow.value,
+            architectPlans: [
+              ...(existingRow.value.architectPlans ?? []).filter(
+                (plan) => plan.id !== event.payload.plan.id,
+              ),
+              event.payload.plan,
+            ],
+            updatedAt: event.payload.plan.updatedAt,
+          });
+          return;
+        }
+
         case "project.deleted": {
           const existingRow = yield* projectionProjectRepository.getById({
             projectId: event.payload.projectId,
@@ -1668,15 +1688,19 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* sql`
             INSERT INTO projection_missions (
               mission_id, project_id, title, objective, description, status,
-              integration_batch_id, created_at, updated_at, activated_at, completed_at, cancelled_at
+              integration_batch_id, created_at, updated_at, activated_at, completed_at, cancelled_at,
+              base_commit, architect_plan_proposal_id
             ) VALUES (
               ${event.payload.missionId}, ${event.payload.projectId}, ${event.payload.title},
               ${event.payload.objective}, ${event.payload.description}, 'draft', NULL,
-              ${event.payload.createdAt}, ${event.payload.updatedAt}, NULL, NULL, NULL
+              ${event.payload.createdAt}, ${event.payload.updatedAt}, NULL, NULL, NULL,
+              ${event.payload.baseCommit ?? null}, ${event.payload.architectPlanProposalId ?? null}
             ) ON CONFLICT (mission_id) DO UPDATE SET
               project_id = excluded.project_id, title = excluded.title,
               objective = excluded.objective, description = excluded.description,
-              updated_at = excluded.updated_at
+              updated_at = excluded.updated_at,
+              base_commit = excluded.base_commit,
+              architect_plan_proposal_id = excluded.architect_plan_proposal_id
           `.pipe(Effect.mapError(toPersistenceSqlError("ProjectionMissions.created:query")));
           yield* appendMissionActivity({
             missionId: event.payload.missionId,

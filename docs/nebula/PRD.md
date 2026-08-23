@@ -1,5 +1,9 @@
 # Nebula product requirements
 
+## Architect planning
+
+Architect planning is proposal-first AI assistance. Repository context is bounded and protected, model output is strictly decoded, deterministic policy validation is authoritative, provider recommendations are advisory, and approval is human-only. Approved plans become draft Missions and draft Builder Tasks pinned to one planning commit; activation and execution remain separate explicit actions.
+
 ## Identity
 
 | Field           | Definition                                                  |

@@ -72,6 +72,10 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.shared-resource.create":
     case "project.shared-resource.update":
     case "project.shared-resource.delete":
+    case "architect.plan.save":
+    case "architect.plan.generate":
+    case "architect.plan.reject":
+    case "architect.plan.approve":
     case "project.resource-leases.reconcile":
     case "project.delete":
     case "integration.create":

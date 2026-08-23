@@ -36,6 +36,10 @@ export type CreateProjectSharedResourceInput = CommandInput<"project.shared-reso
 export type UpdateProjectSharedResourceInput = CommandInput<"project.shared-resource.update">;
 export type DeleteProjectSharedResourceInput = CommandInput<"project.shared-resource.delete">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
+export type SaveArchitectPlanInput = CommandInput<"architect.plan.save">;
+export type GenerateArchitectPlanInput = CommandInput<"architect.plan.generate">;
+export type RejectArchitectPlanInput = CommandInput<"architect.plan.reject">;
+export type ApproveArchitectPlanInput = CommandInput<"architect.plan.approve">;
 export type CreateMissionInput = CommandInput<"mission.create">;
 export type UpdateMissionInput = CommandInput<"mission.update">;
 export type AddMissionTaskInput = CommandInput<"mission.task.add">;
@@ -162,6 +166,33 @@ export const updateProjectReviewPolicy: (input: UpdateProjectReviewPolicyInput) 
     const metadata = yield* timestampedCommandMetadata(input);
     return yield* dispatch({ ...input, type: "project.review-policy.update", ...metadata });
   });
+
+export const saveArchitectPlan: (input: SaveArchitectPlanInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.saveArchitectPlan",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "architect.plan.save", ...metadata });
+});
+
+export const generateArchitectPlan: (input: GenerateArchitectPlanInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.generateArchitectPlan")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "architect.plan.generate", ...metadata });
+  });
+
+export const rejectArchitectPlan: (input: RejectArchitectPlanInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.rejectArchitectPlan",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "architect.plan.reject", ...metadata });
+});
+
+export const approveArchitectPlan: (input: ApproveArchitectPlanInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.approveArchitectPlan",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, type: "architect.plan.approve", ...metadata });
+});
 
 const sharedResourceCommand = <
   T extends
