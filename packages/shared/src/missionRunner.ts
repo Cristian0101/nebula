@@ -44,6 +44,7 @@ function configurationAttention(input: {
   readonly task: OrchestrationTask;
   readonly project: Pick<OrchestrationProject, "sharedResources">;
   readonly providerReadyTaskIds: ReadonlySet<TaskId>;
+  readonly autoRoutableTaskIds?: ReadonlySet<TaskId>;
 }): MissionRunAttention[] {
   const { task, project, providerReadyTaskIds } = input;
   const attention: MissionRunAttention[] = [];
@@ -54,14 +55,18 @@ function configurationAttention(input: {
       detail: `Role '${task.role}' has no managed supervised start flow.`,
       blocksMission: false,
     });
-  if (!task.modelSelection)
+  if (!task.modelSelection && !input.autoRoutableTaskIds?.has(task.id))
     attention.push({
       taskId: task.id,
       code: "provider_unassigned",
       detail: "Provider assignment is missing.",
       blocksMission: false,
     });
-  else if (!providerReadyTaskIds.has(task.id))
+  else if (
+    task.modelSelection &&
+    !providerReadyTaskIds.has(task.id) &&
+    !input.autoRoutableTaskIds?.has(task.id)
+  )
     attention.push({
       taskId: task.id,
       code: "provider_unavailable",
@@ -110,6 +115,7 @@ export function planMissionRunScheduling(input: {
   readonly project: Pick<OrchestrationProject, "sharedResources" | "resourceLeases">;
   readonly providerReadyTaskIds: ReadonlySet<TaskId>;
   readonly blockedTaskIds?: ReadonlySet<TaskId>;
+  readonly autoRoutableTaskIds?: ReadonlySet<TaskId>;
 }): MissionRunSchedulingPlan {
   const taskById = new Map(input.tasks.map((task) => [task.id, task] as const));
   const prerequisites = new Map<TaskId, TaskId[]>();
@@ -147,6 +153,7 @@ export function planMissionRunScheduling(input: {
         task,
         project: input.project,
         providerReadyTaskIds: input.providerReadyTaskIds,
+        ...(input.autoRoutableTaskIds ? { autoRoutableTaskIds: input.autoRoutableTaskIds } : {}),
       }),
     );
   }
@@ -170,6 +177,7 @@ export function planMissionRunScheduling(input: {
       task,
       project: input.project,
       providerReadyTaskIds: input.providerReadyTaskIds,
+      ...(input.autoRoutableTaskIds ? { autoRoutableTaskIds: input.autoRoutableTaskIds } : {}),
     });
     if (taskAttention.length > 0) {
       attention.push(...taskAttention);

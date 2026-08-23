@@ -794,6 +794,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               yield* projectionTaskRepository.upsert({
                 ...row,
                 threadId: event.payload.threadId,
+                modelSelectionJson: event.payload.modelSelection
+                  ? encodeModelSelection(event.payload.modelSelection)
+                  : row.modelSelectionJson,
                 updatedAt: event.payload.updatedAt,
               });
             } else if (event.type === "task.activated") {

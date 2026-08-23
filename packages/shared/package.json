@@ -119,6 +119,10 @@
       "types": "./src/missionRunner.ts",
       "import": "./src/missionRunner.ts"
     },
+    "./recoveryRouting": {
+      "types": "./src/recoveryRouting.ts",
+      "import": "./src/recoveryRouting.ts"
+    },
     "./resourceCoordination": {
       "types": "./src/resourceCoordination.ts",
       "import": "./src/resourceCoordination.ts"
