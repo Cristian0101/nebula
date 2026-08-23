@@ -131,7 +131,14 @@ export function partitionStashAttachments(
 function resolveBaseStorage(): { storage: StateStorage; durable: boolean } {
   try {
     if (typeof localStorage !== "undefined") {
-      return { storage: localStorage, durable: true };
+      const candidate: Partial<StateStorage> = localStorage;
+      if (
+        typeof candidate.getItem === "function" &&
+        typeof candidate.setItem === "function" &&
+        typeof candidate.removeItem === "function"
+      ) {
+        return { storage: candidate as StateStorage, durable: true };
+      }
     }
   } catch {
     // Fall through to the in-memory store.
