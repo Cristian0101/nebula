@@ -32,6 +32,10 @@ import {
   TaskHandoff,
   TaskRestoreState,
   TaskResult,
+  QualityGateRun,
+  TaskReview,
+  ProjectQualityPolicy,
+  ProjectReviewPolicy,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -85,6 +89,8 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
+    qualityPolicy: Schema.NullOr(Schema.fromJsonString(ProjectQualityPolicy)),
+    reviewPolicy: Schema.NullOr(Schema.fromJsonString(ProjectReviewPolicy)),
   }),
 );
 const ProjectionTaskDbRowSchema = ProjectionTask.mapFields(
@@ -96,6 +102,9 @@ const ProjectionTaskDbRowSchema = ProjectionTask.mapFields(
     handoffJson: Schema.NullOr(Schema.fromJsonString(TaskHandoff)),
     restoreJson: Schema.NullOr(Schema.fromJsonString(TaskRestoreState)),
     resultJson: Schema.NullOr(Schema.fromJsonString(TaskResult)),
+    acceptanceCriteriaJson: Schema.fromJsonString(Schema.Array(Schema.String)),
+    qualityGateRunsJson: Schema.fromJsonString(Schema.Array(QualityGateRun)),
+    reviewsJson: Schema.fromJsonString(Schema.Array(TaskReview)),
   }),
 );
 type ProjectionTaskRow = typeof ProjectionTaskDbRowSchema.Type;
@@ -106,6 +115,9 @@ const mapTaskRow = (row: ProjectionTaskRow): OrchestrationTask => ({
   objective: row.objective,
   role: row.role,
   modelSelection: row.modelSelectionJson,
+  acceptanceCriteria: row.acceptanceCriteriaJson,
+  reviewRequired: row.reviewRequired === 1,
+  preferDifferentReviewerProvider: row.preferDifferentReviewerProvider === 1,
   status: row.status,
   threadId: row.threadId,
   createdAt: row.createdAt,
@@ -146,6 +158,8 @@ const mapTaskRow = (row: ProjectionTaskRow): OrchestrationTask => ({
   restore: row.restoreJson,
   reviewError: row.reviewError,
   result: row.resultJson,
+  qualityGateRuns: row.qualityGateRunsJson,
+  reviews: row.reviewsJson,
 });
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   Struct.assign({
@@ -392,6 +406,8 @@ function mapProjectShellRow(
     defaultThreadEnvMode: row.defaultThreadEnvMode,
     faviconPath: row.faviconPath ?? null,
     scripts: row.scripts,
+    qualityPolicy: row.qualityPolicy,
+    reviewPolicy: row.reviewPolicy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -469,6 +485,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           default_thread_env_mode AS "defaultThreadEnvMode",
           favicon_path AS "faviconPath",
           scripts_json AS "scripts",
+          quality_policy_json AS "qualityPolicy",
+          review_policy_json AS "reviewPolicy",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -489,6 +507,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           objective,
           role,
           model_selection_json AS "modelSelectionJson",
+          acceptance_criteria_json AS "acceptanceCriteriaJson",
+          review_required AS "reviewRequired",
+          prefer_different_reviewer_provider AS "preferDifferentReviewerProvider",
           status,
           thread_id AS "threadId",
           created_at AS "createdAt",
@@ -519,6 +540,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           , restore_json AS "restoreJson"
           , review_error AS "reviewError"
           , result_json AS "resultJson"
+          , quality_gate_runs_json AS "qualityGateRunsJson"
+          , reviews_json AS "reviewsJson"
         FROM projection_tasks
         ORDER BY created_at ASC, task_id ASC
       `,
@@ -971,6 +994,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           default_thread_env_mode AS "defaultThreadEnvMode",
           favicon_path AS "faviconPath",
           scripts_json AS "scripts",
+          quality_policy_json AS "qualityPolicy",
+          review_policy_json AS "reviewPolicy",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -995,6 +1020,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           default_thread_env_mode AS "defaultThreadEnvMode",
           favicon_path AS "faviconPath",
           scripts_json AS "scripts",
+          quality_policy_json AS "qualityPolicy",
+          review_policy_json AS "reviewPolicy",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1808,6 +1835,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 defaultThreadEnvMode: row.defaultThreadEnvMode,
                 faviconPath: row.faviconPath ?? null,
                 scripts: row.scripts,
+                qualityPolicy: row.qualityPolicy,
+                reviewPolicy: row.reviewPolicy,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 deletedAt: row.deletedAt,
@@ -1959,6 +1988,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   defaultThreadEnvMode: row.defaultThreadEnvMode,
                   faviconPath: row.faviconPath ?? null,
                   scripts: row.scripts,
+                  qualityPolicy: row.qualityPolicy,
+                  reviewPolicy: row.reviewPolicy,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   deletedAt: row.deletedAt,

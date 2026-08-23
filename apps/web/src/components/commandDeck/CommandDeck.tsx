@@ -4,13 +4,15 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import { createModelSelection } from "@t3tools/shared/model";
-import { TaskRestoreId } from "@t3tools/contracts";
+import { TaskRestoreId, TaskReviewId } from "@t3tools/contracts";
 import type {
   EnvironmentId,
   ModelSelection,
   OrchestrationTask,
   ProjectId,
   TaskId,
+  ProjectQualityPolicy,
+  ProjectReviewPolicy,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -102,6 +104,8 @@ interface CommandDeckProject {
   readonly title: string;
   readonly workspaceRoot: string;
   readonly defaultModelSelection: ModelSelection | null;
+  readonly qualityPolicy?: ProjectQualityPolicy | null | undefined;
+  readonly reviewPolicy?: ProjectReviewPolicy | null | undefined;
 }
 
 type InspectorSection = "overview" | "ownership" | "changes" | "review" | "workspace";
@@ -337,6 +341,21 @@ export function CommandDeck({
   });
   const prepareReview = useAtomCommand(taskEnvironment.prepareReview, { reportFailure: false });
   const updateHandoff = useAtomCommand(taskEnvironment.updateHandoff, { reportFailure: false });
+  const setAcceptanceCriteria = useAtomCommand(taskEnvironment.setAcceptanceCriteria, {
+    reportFailure: false,
+  });
+  const runQualityGates = useAtomCommand(taskEnvironment.runQualityGates, {
+    reportFailure: false,
+  });
+  const cancelQualityGate = useAtomCommand(taskEnvironment.cancelQualityGate, {
+    reportFailure: false,
+  });
+  const requestIndependentReview = useAtomCommand(taskEnvironment.requestIndependentReview, {
+    reportFailure: false,
+  });
+  const sendReviewFindings = useAtomCommand(taskEnvironment.sendReviewFindings, {
+    reportFailure: false,
+  });
   const requestRestore = useAtomCommand(taskEnvironment.requestRestore, { reportFailure: false });
   const undoRestore = useAtomCommand(taskEnvironment.undoRestore, { reportFailure: false });
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
@@ -346,6 +365,7 @@ export function CommandDeck({
   const [createOpen, setCreateOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createObjective, setCreateObjective] = useState("");
+  const [createCriteria, setCreateCriteria] = useState<string[]>([]);
   const [createSelection, setCreateSelection] = useState<ModelSelection | null>(fallbackSelection);
   const [createOwnership, setCreateOwnership] = useState<ReadonlyArray<OwnershipRuleDraft>>([
     { draftId: randomUUID(), access: "write", pattern: "", reason: "" },
@@ -356,9 +376,39 @@ export function CommandDeck({
   const [pendingStartTaskId, setPendingStartTaskId] = useState<TaskId | null>(null);
   const [inspectorSection, setInspectorSection] = useState<InspectorSection>("overview");
   const [handoffSummary, setHandoffSummary] = useState("");
+  const [criteriaText, setCriteriaText] = useState("");
+  const [reviewerSelection, setReviewerSelection] = useState<ModelSelection | null>(null);
 
   useEffect(() => setCreateSelection(fallbackSelection), [fallbackSelection]);
   useEffect(() => setHandoffSummary(selectedTask?.handoff?.summary ?? ""), [selectedTask?.handoff]);
+  useEffect(
+    () => setCriteriaText((selectedTask?.acceptanceCriteria ?? []).join("\n")),
+    [selectedTask?.acceptanceCriteria],
+  );
+  const selectedTaskIdForReviewer = selectedTask?.id ?? null;
+  const selectedBuilderSelection = selectedTaskIdForReviewer
+    ? (modelSelectionByTaskId.get(selectedTaskIdForReviewer) ?? null)
+    : null;
+  useEffect(() => {
+    if (!selectedTaskIdForReviewer) return setReviewerSelection(null);
+    const builderEntry = instanceEntries.find(
+      (entry) => entry.instanceId === selectedBuilderSelection?.instanceId,
+    );
+    const different = instanceEntries.find(
+      (entry) =>
+        entry.driverKind !== builderEntry?.driverKind &&
+        entry.enabled &&
+        entry.isAvailable &&
+        entry.status === "ready",
+    );
+    const fallback = instanceEntries.find(
+      (entry) => entry.enabled && entry.isAvailable && entry.status === "ready",
+    );
+    const entry = different ?? fallback;
+    setReviewerSelection(
+      entry ? createModelSelection(entry.instanceId, entry.models[0]?.slug ?? "auto") : null,
+    );
+  }, [instanceEntries, selectedBuilderSelection?.instanceId, selectedTaskIdForReviewer]);
 
   const reportError = useCallback((title: string, description: string) => {
     toastManager.add(stackedThreadToast({ type: "error", title, description }));
@@ -378,6 +428,7 @@ export function CommandDeck({
           objective: createObjective.trim(),
           role: "builder",
           modelSelection: createSelection,
+          acceptanceCriteria: createCriteria.map((criterion) => criterion.trim()).filter(Boolean),
         },
       }),
     );
@@ -397,6 +448,7 @@ export function CommandDeck({
     setSelectedTaskId(taskId);
     setCreateTitle("");
     setCreateObjective("");
+    setCreateCriteria([]);
     setCreateOwnership([{ draftId: randomUUID(), access: "write", pattern: "", reason: "" }]);
     setCreateOpen(false);
   };
@@ -609,6 +661,46 @@ export function CommandDeck({
     );
   };
 
+  const saveCriteria = async (task: OrchestrationTask) => {
+    const criteria = criteriaText
+      .split("\n")
+      .map((criterion) => criterion.trim())
+      .filter(Boolean);
+    const started = task.status !== "draft";
+    if (
+      started &&
+      !window.confirm(
+        "Changing acceptance criteria after execution starts invalidates the current quality and review evidence. Continue?",
+      )
+    )
+      return;
+    await runTaskCommand(task, "Could not update acceptance criteria", () =>
+      setAcceptanceCriteria({
+        environmentId: project.environmentId,
+        input: {
+          taskId: task.id,
+          criteria,
+          ...(started ? { confirmStartedTaskChange: true } : {}),
+        },
+      }),
+    );
+  };
+
+  const requestReview = async (task: OrchestrationTask) => {
+    if (!task.reviewSnapshot || !reviewerSelection) return;
+    await runTaskCommand(task, "Could not request independent review", () =>
+      requestIndependentReview({
+        environmentId: project.environmentId,
+        input: {
+          taskId: task.id,
+          snapshotId: task.reviewSnapshot!.id,
+          reviewId: TaskReviewId.make(randomUUID()),
+          reviewerModelSelection: reviewerSelection,
+        },
+      }),
+    );
+  };
+
   const confirmRestore = async (task: OrchestrationTask) => {
     if (
       !window.confirm(
@@ -631,6 +723,32 @@ export function CommandDeck({
     ? (providerEntryByTaskId.get(selectedTask.id) ?? null)
     : null;
   const selectedAttention = selectedTask ? (attentionByTaskId.get(selectedTask.id) ?? []) : [];
+  const configuredGates = (project.qualityPolicy?.gates ?? []).filter((gate) => gate.enabled);
+  const currentQualityRuns = selectedTask?.reviewSnapshot
+    ? (selectedTask.qualityGateRuns ?? []).filter(
+        (run) => run.snapshotId === selectedTask.reviewSnapshot?.id,
+      )
+    : [];
+  const requiredGatesPassed = configuredGates
+    .filter((gate) => gate.required)
+    .every((gate) =>
+      currentQualityRuns.some(
+        (run) => run.gateId === gate.id && run.command === gate.command && run.status === "passed",
+      ),
+    );
+  const latestReview = selectedTask?.reviews?.at(-1) ?? null;
+  const currentApprovedReview =
+    selectedTask?.reviews?.findLast(
+      (review) =>
+        review.snapshotId === selectedTask.reviewSnapshot?.id &&
+        review.status === "completed" &&
+        (review.verdict === "approve" || review.verdict === "approve_with_notes"),
+    ) ?? null;
+  const completionEligible =
+    selectedTask?.handoff?.status === "ready" &&
+    selectedTask.reviewSnapshot?.status === "current" &&
+    requiredGatesPassed &&
+    (selectedTask.reviewRequired !== true || currentApprovedReview !== null);
 
   return (
     <main className="min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_top_right,color-mix(in_srgb,var(--primary)_8%,transparent),transparent_32%)] p-3 sm:p-4">
@@ -1082,6 +1200,24 @@ export function CommandDeck({
                             value={selectedTask.handoff?.status ?? "Not prepared"}
                           />
                         </div>
+                        <div className="space-y-1.5 rounded-lg border border-black/[0.08] p-3">
+                          <p className="text-xs font-medium">Acceptance criteria</p>
+                          <Textarea
+                            aria-label="Task acceptance criteria"
+                            rows={4}
+                            placeholder="One optional criterion per line"
+                            value={criteriaText}
+                            onChange={(event) => setCriteriaText(event.currentTarget.value)}
+                          />
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={busyTaskId === selectedTask.id}
+                            onClick={() => void saveCriteria(selectedTask)}
+                          >
+                            Save criteria
+                          </Button>
+                        </div>
                         {selectedTask.handoff ? (
                           <label className="block space-y-1.5 text-xs">
                             <span className="text-muted-foreground">Handoff summary</span>
@@ -1097,6 +1233,265 @@ export function CommandDeck({
                             structured handoff.
                           </p>
                         )}
+                        <div className="space-y-2 rounded-lg border border-black/[0.08] p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <p className="text-xs font-medium">Quality gates</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {configuredGates.length === 0
+                                  ? "No project quality gates configured"
+                                  : `${configuredGates.filter((gate) => gate.required).length} required`}
+                              </p>
+                            </div>
+                            {selectedTask.reviewSnapshot?.status === "current" &&
+                            selectedTask.handoff?.status === "ready" ? (
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                disabled={
+                                  busyTaskId === selectedTask.id ||
+                                  configuredGates.some(
+                                    (gate) => gate.approvedCommand !== gate.command,
+                                  )
+                                }
+                                onClick={() =>
+                                  void runTaskCommand(
+                                    selectedTask,
+                                    "Could not run quality gates",
+                                    () =>
+                                      runQualityGates({
+                                        environmentId: project.environmentId,
+                                        input: {
+                                          taskId: selectedTask.id,
+                                          snapshotId: selectedTask.reviewSnapshot!.id,
+                                        },
+                                      }),
+                                  )
+                                }
+                              >
+                                Run gates
+                              </Button>
+                            ) : null}
+                          </div>
+                          {configuredGates.length > 0 ? (
+                            <div className="rounded-md bg-muted/30 p-2 font-mono text-[11px]">
+                              {configuredGates.map((gate) => (
+                                <p key={gate.id}>{gate.command}</p>
+                              ))}
+                            </div>
+                          ) : null}
+                          <div className="space-y-1">
+                            {configuredGates.map((gate) => {
+                              const run = currentQualityRuns.findLast(
+                                (candidate) =>
+                                  candidate.gateId === gate.id &&
+                                  candidate.command === gate.command,
+                              );
+                              return (
+                                <div key={gate.id} className="space-y-1 text-xs">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span>
+                                      {run?.status === "passed" ? "✓" : run ? "○" : "–"}{" "}
+                                      {gate.label}
+                                      {gate.required ? " · Required" : " · Optional"}
+                                    </span>
+                                    <span className="text-muted-foreground">
+                                      {run?.status ?? "Not run"}
+                                      {run?.exitCode === null || run?.exitCode === undefined
+                                        ? ""
+                                        : ` · exit ${run.exitCode}`}
+                                    </span>
+                                    {run?.status === "running" || run?.status === "queued" ? (
+                                      <Button
+                                        size="xs"
+                                        variant="ghost"
+                                        onClick={() =>
+                                          void runTaskCommand(
+                                            selectedTask,
+                                            "Could not cancel quality gate",
+                                            () =>
+                                              cancelQualityGate({
+                                                environmentId: project.environmentId,
+                                                input: { taskId: selectedTask.id, runId: run.id },
+                                              }),
+                                          )
+                                        }
+                                      >
+                                        Cancel
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                  {run?.outputSummary ? (
+                                    <details className="rounded bg-muted/30 px-2 py-1">
+                                      <summary className="cursor-pointer text-muted-foreground">
+                                        Output summary{run.outputTruncated ? " · Truncated" : ""}
+                                      </summary>
+                                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[10px]">
+                                        {run.outputSummary}
+                                      </pre>
+                                    </details>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div className="space-y-2 rounded-lg border border-black/[0.08] p-3">
+                          <div>
+                            <p className="text-xs font-medium">Independent review</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {latestReview
+                                ? `${latestReview.status}${latestReview.verdict ? ` · ${latestReview.verdict}` : ""}`
+                                : selectedTask.reviewRequired
+                                  ? "Required for this Task"
+                                  : "Optional for this Task"}
+                            </p>
+                          </div>
+                          {reviewerSelection ? (
+                            <ProviderModelPicker
+                              activeInstanceId={reviewerSelection.instanceId}
+                              model={reviewerSelection.model}
+                              lockedProvider={null}
+                              instanceEntries={instanceEntries}
+                              modelOptionsByInstance={modelOptionsByInstance}
+                              triggerVariant="outline"
+                              triggerClassName="max-w-full"
+                              triggerAriaLabel="Reviewer provider and model"
+                              onInstanceModelChange={(instanceId, model) =>
+                                setReviewerSelection(createModelSelection(instanceId, model))
+                              }
+                            />
+                          ) : (
+                            <p className="text-xs text-destructive">No ready reviewer provider.</p>
+                          )}
+                          <p className="text-xs text-muted-foreground">
+                            Review diversity:{" "}
+                            {instanceEntries.find(
+                              (entry) => entry.instanceId === reviewerSelection?.instanceId,
+                            )?.driverKind === selectedProviderEntry?.driverKind
+                              ? "Same provider · Degraded"
+                              : "Cross-provider"}
+                          </p>
+                          <Button
+                            size="xs"
+                            disabled={
+                              !reviewerSelection ||
+                              !requiredGatesPassed ||
+                              selectedTask.handoff?.status !== "ready" ||
+                              selectedTask.reviewSnapshot?.status !== "current" ||
+                              busyTaskId === selectedTask.id
+                            }
+                            onClick={() => void requestReview(selectedTask)}
+                          >
+                            Request review
+                          </Button>
+                          {latestReview?.summary ? (
+                            <div className="space-y-2 rounded-md bg-muted/30 p-2 text-xs">
+                              <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                                <span>
+                                  Reviewer:{" "}
+                                  {instanceEntries.find(
+                                    (entry) =>
+                                      entry.instanceId ===
+                                      latestReview.reviewerModelSelection.instanceId,
+                                  )?.displayName ?? latestReview.reviewerModelSelection.instanceId}
+                                </span>
+                                <span>Snapshot: {latestReview.snapshotId}</span>
+                                <span>
+                                  Diversity:{" "}
+                                  {latestReview.diversity === "cross-provider"
+                                    ? "Cross-provider"
+                                    : "Same provider · Degraded"}
+                                </span>
+                              </div>
+                              <p className="font-medium">{latestReview.verdict}</p>
+                              <p>{latestReview.summary}</p>
+                              {latestReview.findings.length > 0 ? (
+                                <div className="space-y-1">
+                                  {latestReview.findings.map((finding) => (
+                                    <div
+                                      key={`${finding.severity}:${finding.title}:${finding.detail}:${finding.file ?? ""}:${finding.line ?? ""}`}
+                                      className="rounded border border-black/[0.08] p-2"
+                                    >
+                                      <p className="font-medium">
+                                        {finding.severity} · {finding.title}
+                                      </p>
+                                      <p className="text-muted-foreground">{finding.detail}</p>
+                                      {finding.file ? (
+                                        <p className="font-mono text-[10px] text-muted-foreground">
+                                          {finding.file}
+                                          {finding.line ? `:${finding.line}` : ""}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {latestReview.criteria.length > 0 ? (
+                                <div className="space-y-1">
+                                  <p className="font-medium">Acceptance criteria</p>
+                                  {latestReview.criteria.map((criterion) => (
+                                    <p
+                                      key={`${criterion.criterion}:${criterion.status}:${criterion.detail}`}
+                                    >
+                                      {criterion.status} · {criterion.criterion}
+                                    </p>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {latestReview.requiredChanges.length > 0 ? (
+                                <ol className="list-decimal space-y-1 pl-4">
+                                  {latestReview.requiredChanges.map((change) => (
+                                    <li key={change}>{change}</li>
+                                  ))}
+                                </ol>
+                              ) : null}
+                              {latestReview.verdict === "request_changes" ||
+                              latestReview.verdict === "reject" ? (
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  disabled={busyTaskId === selectedTask.id}
+                                  onClick={() =>
+                                    void runTaskCommand(
+                                      selectedTask,
+                                      "Could not send findings to Builder",
+                                      () =>
+                                        sendReviewFindings({
+                                          environmentId: project.environmentId,
+                                          input: {
+                                            taskId: selectedTask.id,
+                                            reviewId: latestReview.id,
+                                          },
+                                        }),
+                                    )
+                                  }
+                                >
+                                  Send review findings to Builder
+                                </Button>
+                              ) : null}
+                            </div>
+                          ) : null}
+                          {(selectedTask.reviews?.length ?? 0) > 0 ? (
+                            <details className="text-[11px] text-muted-foreground">
+                              <summary className="cursor-pointer">
+                                Review history: {selectedTask.reviews?.length} round
+                                {selectedTask.reviews?.length === 1 ? "" : "s"} preserved
+                              </summary>
+                              <ol className="mt-1 space-y-1 pl-4">
+                                {selectedTask.reviews?.map((review, index) => (
+                                  <li key={review.id}>
+                                    Round {index + 1} · {review.status}
+                                    {review.verdict ? ` · ${review.verdict}` : ""} ·{" "}
+                                    {review.diversity === "cross-provider"
+                                      ? "Cross-provider"
+                                      : "Same provider"}
+                                  </li>
+                                ))}
+                              </ol>
+                            </details>
+                          ) : null}
+                        </div>
                         <div className="flex flex-wrap gap-1.5">
                           {selectedTask.status === "active" ? (
                             <>
@@ -1105,7 +1500,8 @@ export function CommandDeck({
                                 variant="outline"
                                 disabled={
                                   busyTaskId === selectedTask.id ||
-                                  selectedTask.ownership?.status === "pending"
+                                  selectedTask.ownership?.status === "pending" ||
+                                  selectedTask.reviewSnapshot?.status === "current"
                                 }
                                 onClick={() =>
                                   void runTaskCommand(
@@ -1126,7 +1522,8 @@ export function CommandDeck({
                                 variant="ghost"
                                 disabled={
                                   busyTaskId === selectedTask.id ||
-                                  selectedTask.ownership?.status === "pending"
+                                  selectedTask.ownership?.status === "pending" ||
+                                  selectedTask.reviewSnapshot?.status === "current"
                                 }
                                 onClick={() =>
                                   void runTaskCommand(
@@ -1159,7 +1556,7 @@ export function CommandDeck({
                           selectedTask.reviewSnapshot?.status === "current" ? (
                             <Button
                               size="xs"
-                              disabled={busyTaskId === selectedTask.id}
+                              disabled={!completionEligible || busyTaskId === selectedTask.id}
                               onClick={() =>
                                 void runTaskCommand(selectedTask, "Could not complete Task", () =>
                                   completeTask({
@@ -1307,6 +1704,23 @@ export function CommandDeck({
             ownershipRules={createOwnership}
             onOwnershipRulesChange={setCreateOwnership}
           />
+          <DialogPanel className="space-y-1.5">
+            <span className="text-sm font-medium">Acceptance criteria</span>
+            <Textarea
+              aria-label="New Task acceptance criteria"
+              rows={4}
+              placeholder="Optional · one criterion per line"
+              value={createCriteria.join("\n")}
+              onChange={(event) =>
+                setCreateCriteria(
+                  event.currentTarget.value.split("\n").map((criterion) => criterion.trimStart()),
+                )
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              Keep this compact: state only the observable outcomes the reviewer should verify.
+            </p>
+          </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               Cancel

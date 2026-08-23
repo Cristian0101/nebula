@@ -12,6 +12,7 @@ export type CommandDeckAttentionKind =
   | "ownership"
   | "workspace"
   | "provider"
+  | "quality"
   | "review"
   | "execution";
 
@@ -92,6 +93,22 @@ export function deriveTaskAttention(input: {
   if (task.reviewSnapshot?.status === "stale" || task.handoff?.status === "stale") {
     attention.push({ kind: "review", label: "Review is stale" });
   }
+  const currentRuns = (task.qualityGateRuns ?? []).filter(
+    (run) => run.snapshotId === task.reviewSnapshot?.id,
+  );
+  if (
+    currentRuns.some(
+      (run) => run.required && ["failed", "timed_out", "cancelled", "error"].includes(run.status),
+    )
+  ) {
+    attention.push({ kind: "quality", label: "Quality failed" });
+  }
+  const currentReview = (task.reviews ?? []).findLast(
+    (review) => review.snapshotId === task.reviewSnapshot?.id,
+  );
+  if (currentReview?.verdict === "request_changes" || currentReview?.verdict === "reject") {
+    attention.push({ kind: "review", label: "Changes requested" });
+  }
   if (thread?.session?.status === "error" || thread?.latestTurn?.state === "error") {
     attention.push({ kind: "execution", label: "Provider error" });
   }
@@ -116,7 +133,14 @@ export function deriveTaskPresentationStatus(input: {
     return { label: "Running", tone: "info" };
   }
   if (task.handoff?.status === "ready" && task.reviewSnapshot?.status === "current") {
-    return { label: "Ready for review", tone: "warning" };
+    const approved = (task.reviews ?? []).some(
+      (review) =>
+        review.snapshotId === task.reviewSnapshot?.id &&
+        (review.verdict === "approve" || review.verdict === "approve_with_notes"),
+    );
+    return approved
+      ? { label: "Review approved", tone: "success" }
+      : { label: "Ready for review", tone: "warning" };
   }
   if (task.status === "active") return { label: "Active", tone: "info" };
   if (task.status === "completed") return { label: "Completed", tone: "success" };
@@ -207,6 +231,34 @@ export function buildCommandDeckActivity(
         "success",
       );
     }
+    for (const run of task.qualityGateRuns ?? []) {
+      if (run.completedAt) {
+        pushActivity(
+          items,
+          task,
+          `quality-${run.id}-${run.status}`,
+          run.completedAt,
+          `${task.title} · ${run.label} ${run.status}`,
+          run.status === "passed" ? "success" : run.status === "stale" ? "warning" : "error",
+        );
+      }
+    }
+    for (const review of task.reviews ?? []) {
+      pushActivity(
+        items,
+        task,
+        `independent-review-${review.id}-${review.status}`,
+        review.completedAt ?? review.createdAt,
+        `${task.title} review ${review.verdict ?? review.status}`,
+        review.verdict === "approve" || review.verdict === "approve_with_notes"
+          ? "success"
+          : review.verdict === "request_changes" || review.verdict === "reject"
+            ? "warning"
+            : review.status === "failed"
+              ? "error"
+              : "info",
+      );
+    }
     if (task.restore) {
       pushActivity(
         items,
@@ -236,7 +288,16 @@ export function summarizeCommandDeck(
   for (const task of tasks) {
     if (task.status === "active") active += 1;
     if ((attentionByTaskId.get(task.id)?.length ?? 0) > 0) attention += 1;
-    if (task.handoff?.status === "ready" && task.reviewSnapshot?.status === "current") {
+    if (
+      task.handoff?.status === "ready" &&
+      task.reviewSnapshot?.status === "current" &&
+      (task.reviewRequired !== true ||
+        (task.reviews ?? []).some(
+          (review) =>
+            review.snapshotId === task.reviewSnapshot?.id &&
+            (review.verdict === "approve" || review.verdict === "approve_with_notes"),
+        ))
+    ) {
       reviewReady += 1;
     }
     changedFiles += taskChangedFileCount(task);

@@ -311,6 +311,7 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         title: "Isolated builder",
         objective: "Write only inside a dedicated worktree.",
         role: "builder",
+        reviewRequired: false,
         createdAt: now,
       });
 

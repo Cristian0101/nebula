@@ -14,10 +14,13 @@ import {
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
+  ProjectQualityPolicyUpdatedPayload,
+  ProjectReviewPolicyUpdatedPayload,
   TaskActivatedPayload,
   TaskCancelledPayload,
   TaskCompletedPayload,
   TaskCreatedPayload,
+  TaskAcceptanceCriteriaUpdatedPayload,
   TaskThreadBoundPayload,
   TaskWorkspaceCleanupFailedPayload,
   TaskWorkspaceFailedPayload,
@@ -36,6 +39,13 @@ import {
   TaskReviewPrepareFailedPayload,
   TaskReviewStalePayload,
   TaskHandoffUpdatedPayload,
+  TaskQualityRunRequestedPayload,
+  TaskQualityRunUpdatedPayload,
+  TaskIndependentReviewRequestedPayload,
+  TaskIndependentReviewStartedPayload,
+  TaskIndependentReviewCompletedPayload,
+  TaskIndependentReviewFailedPayload,
+  TaskReviewFindingsSentPayload,
   TaskCompletionFreshnessRequestedPayload,
   TaskRestoreRequestedPayload,
   TaskRestoreSnapshotCapturedPayload,
@@ -247,6 +257,8 @@ export function projectEvent(
             defaultThreadEnvMode: null,
             faviconPath: payload.faviconPath ?? null,
             scripts: payload.scripts,
+            qualityPolicy: null,
+            reviewPolicy: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -261,6 +273,40 @@ export function projectEvent(
               : [...nextBase.projects, nextProject],
           };
         }),
+      );
+
+    case "project.quality-policy-updated":
+      return decodeForEvent(
+        ProjectQualityPolicyUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? { ...project, qualityPolicy: payload.policy, updatedAt: payload.updatedAt }
+              : project,
+          ),
+        })),
+      );
+
+    case "project.review-policy-updated":
+      return decodeForEvent(
+        ProjectReviewPolicyUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? { ...project, reviewPolicy: payload.policy, updatedAt: payload.updatedAt }
+              : project,
+          ),
+        })),
       );
 
     case "project.meta-updated":
@@ -321,6 +367,9 @@ export function projectEvent(
               objective: payload.objective,
               role: payload.role,
               modelSelection: payload.modelSelection ?? null,
+              acceptanceCriteria: payload.acceptanceCriteria ?? [],
+              reviewRequired: payload.reviewRequired ?? false,
+              preferDifferentReviewerProvider: payload.preferDifferentReviewerProvider ?? true,
               status: "draft" as const,
               threadId: null,
               createdAt: payload.createdAt,
@@ -345,8 +394,27 @@ export function projectEvent(
               reviewSnapshot: null,
               handoff: null,
               restore: null,
+              qualityGateRuns: [],
+              reviews: [],
             },
           ],
+        })),
+      );
+
+    case "task.acceptance-criteria-updated":
+      return decodeForEvent(
+        TaskAcceptanceCriteriaUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? { ...task, acceptanceCriteria: payload.criteria, updatedAt: payload.updatedAt }
+              : task,
+          ),
         })),
       );
 
@@ -819,6 +887,187 @@ export function projectEvent(
                     ? { ...task.reviewSnapshot, status: "stale" as const }
                     : null,
                   handoff: task.handoff ? { ...task.handoff, status: "stale" as const } : null,
+                  qualityGateRuns: (task.qualityGateRuns ?? []).map((run) =>
+                    run.snapshotId === task.reviewSnapshot?.id
+                      ? { ...run, status: "stale" as const }
+                      : run,
+                  ),
+                  reviews: (task.reviews ?? []).map((review) =>
+                    review.snapshotId === task.reviewSnapshot?.id
+                      ? { ...review, status: "stale" as const }
+                      : review,
+                  ),
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.quality.run-requested":
+      return decodeForEvent(
+        TaskQualityRunRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  qualityGateRuns: [...(task.qualityGateRuns ?? []), ...payload.runs],
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.quality.run-started":
+    case "task.quality.run-finished":
+      return decodeForEvent(
+        TaskQualityRunUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  qualityGateRuns: (task.qualityGateRuns ?? []).map((run) =>
+                    run.id === payload.run.id ? payload.run : run,
+                  ),
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.quality.run-cancel-requested":
+      return Effect.succeed(nextBase);
+
+    case "task.independent-review.requested":
+      return decodeForEvent(
+        TaskIndependentReviewRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  reviews: [...(task.reviews ?? []), payload.review],
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.independent-review.started":
+      return decodeForEvent(
+        TaskIndependentReviewStartedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  reviews: (task.reviews ?? []).map((review) =>
+                    review.id === payload.reviewId
+                      ? { ...review, status: "running" as const }
+                      : review,
+                  ),
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.independent-review.completed":
+      return decodeForEvent(
+        TaskIndependentReviewCompletedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  reviews: (task.reviews ?? []).map((review) =>
+                    review.id === payload.review.id ? payload.review : review,
+                  ),
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.independent-review.failed":
+      return decodeForEvent(
+        TaskIndependentReviewFailedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  reviews: (task.reviews ?? []).map((review) =>
+                    review.id === payload.reviewId
+                      ? {
+                          ...review,
+                          status: "failed" as const,
+                          failureReason: payload.failureReason,
+                        }
+                      : review,
+                  ),
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.review.findings-sent":
+      return decodeForEvent(
+        TaskReviewFindingsSentPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  reviews: (task.reviews ?? []).map((review) =>
+                    review.id === payload.reviewId
+                      ? { ...review, findingsSentAt: payload.sentAt }
+                      : review,
+                  ),
                   updatedAt: payload.updatedAt,
                 }
               : task,

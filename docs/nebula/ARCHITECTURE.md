@@ -105,7 +105,7 @@ Task does not persist provider-session identity or trust a renderer-supplied wor
 
 A Task may persist an optional manual provider/model assignment before execution. This is assignment intent, not provider-session identity. It lets a draft hydrate truthfully without manufacturing a Thread. After Start creates and binds the canonical Thread, the Thread's model selection is authoritative for its provider execution.
 
-This slice does not create ownership requests, shared-resource locks, Missions, routing, an independent Reviewer role, quality gates, or integration behavior.
+This slice does not create ownership requests, shared-resource locks, Missions, routing, scheduling, automatic remediation, or integration behavior. Quality gates and the independent Reviewer are implemented as explicit user-driven Task review boundaries.
 
 ### Workspace isolation
 
@@ -151,6 +151,14 @@ Command Deck is an implemented Project route in the existing web client and desk
 The Task rail and summary remain lightweight. Only the selected Task mounts the existing lazy Task Diff surface, and provider output remains in the selected canonical Thread rather than being copied into a second chat. Derived labels such as **Running**, **Ready for review**, and **Needs attention** combine existing Task lifecycle, Thread runtime, ownership, workspace, provider readiness, and handoff state without extending the canonical lifecycle enum.
 
 Command Deck activity is a filtered presentation of durable projected milestones already attached to Tasks. It intentionally excludes token deltas and does not become a second orchestration history. Because Tasks, workspaces, ownership, review, restore, and Threads already hydrate from the orchestration projection, restarting the client or server reconstructs the Deck without Command Deck-specific recovery state.
+
+### Quality gates and independent review
+
+Project quality and review policies extend the existing Project projection. A gate definition persists its command and a separate exact approved command; editing the executable string revokes approval. The Task decider creates immutable `QualityGateRun` records tied to Task ID and review snapshot ID. `TaskQualityReactor` delegates process execution to the inherited `ProcessRunner`, fixes `cwd` to the Task worktree, bounds retained output, enforces timeouts and cancellation, and checks snapshot freshness both before and after each command. A mutation stales the run, snapshot, handoff, and applicable reviews and stops the remaining batch.
+
+Independent reviews are durable rounds, not mutable status on the handoff. `TaskReviewReactor` loads a bounded base-to-snapshot patch, excludes protected credential paths, and calls the selected provider instance through shared `TextGeneration` from an empty disposable context directory. The autonomous reviewer receives neither the source checkout nor the Builder worktree as its working directory. Its prompt separates Nebula-verified evidence from Builder-reported claims and treats repository text as untrusted data. Strict schema decoding and decider invariants fail closed; blocking or security findings cannot persist with an approving verdict. Provider-driver metadata determines whether the completed round is cross-provider or same-provider.
+
+Completion for an effective required-review Task adds current required gate success and a current `APPROVE` or `APPROVE_WITH_NOTES` round to the inherited ownership, snapshot, and handoff gates. Review findings are sent to the existing Builder Thread only after an explicit user command. There is no hidden agent conversation or automatic remediation loop.
 
 The route is desktop-first: the rail and selected workspace form two columns at ordinary desktop widths, the inspector moves below them when needed, and wide displays use three columns. Mobile receives no separate orchestration implementation in this milestone.
 

@@ -356,6 +356,25 @@ export interface OwnershipRuleDraft {
   readonly reason: string;
 }
 
+export function setEntireRepositoryWritable(
+  rules: ReadonlyArray<OwnershipRuleDraft>,
+  enabled: boolean,
+): ReadonlyArray<OwnershipRuleDraft> {
+  const withoutEntireRepository = rules.filter(
+    (rule) => !(rule.access === "write" && rule.pattern === "**"),
+  );
+  if (!enabled) return withoutEntireRepository;
+  return [
+    ...withoutEntireRepository.filter((rule) => rule.pattern.trim().length > 0),
+    {
+      draftId: randomUUID(),
+      access: "write",
+      pattern: "**",
+      reason: "Entire repository",
+    },
+  ];
+}
+
 export function TaskOwnershipEditor({
   rules,
   onChange,
@@ -373,19 +392,7 @@ export function TaskOwnershipEditor({
           type="checkbox"
           checked={entireRepository}
           onChange={(event) =>
-            onChange(
-              event.currentTarget.checked
-                ? [
-                    ...rules.filter((rule) => !(rule.access === "write" && rule.pattern === "**")),
-                    {
-                      draftId: randomUUID(),
-                      access: "write",
-                      pattern: "**",
-                      reason: "Entire repository",
-                    },
-                  ]
-                : rules.filter((rule) => !(rule.access === "write" && rule.pattern === "**")),
-            )
+            onChange(setEntireRepositoryWritable(rules, event.currentTarget.checked))
           }
         />
         Entire repository writable

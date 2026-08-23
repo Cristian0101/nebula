@@ -8,6 +8,8 @@ Choose **Prepare completion** when the work is ready. Nebula validates ownership
 
 If the workspace changes after preparation, the snapshot and handoff become stale. Prepare them again before completing the Task. Completion always performs ownership validation again and checks that the reviewed snapshot still matches the workspace.
 
+Optional acceptance criteria record what the implementation should prove. You can edit them freely on a draft Task. After execution starts, Command Deck asks for explicit confirmation because the edit invalidates any current review evidence. For quality gates, independent review, review rounds, and completion rules, see [Review Tasks with Quality Gates](reviewing-tasks.md).
+
 ## Restore the Task workspace
 
 **Restore Task to Baseline** affects only the managed Task workspace. Nebula first retains the complete pre-restore contents under a recovery reference, then restores the Task branch and files to the recorded base commit. Published Task branches are refused because rewriting them would be unsafe.

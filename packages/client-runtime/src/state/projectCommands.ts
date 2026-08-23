@@ -12,9 +12,13 @@ import {
   type CreateProjectInput,
   type DeleteProjectInput,
   type UpdateProjectInput,
+  type UpdateProjectQualityPolicyInput,
+  type UpdateProjectReviewPolicyInput,
   createProject,
   deleteProject,
   updateProject,
+  updateProjectQualityPolicy,
+  updateProjectReviewPolicy,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 
@@ -22,6 +26,8 @@ export type {
   CreateProjectInput,
   DeleteProjectInput,
   UpdateProjectInput,
+  UpdateProjectQualityPolicyInput,
+  UpdateProjectReviewPolicyInput,
 } from "../operations/commands.ts";
 
 export interface OptimisticProjectFile {
@@ -83,6 +89,18 @@ export function createProjectEnvironmentAtoms<R, E>(
     update: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:project:update",
       execute: (input: UpdateProjectInput) => updateProject(input),
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    updateQualityPolicy: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:quality-policy:update",
+      execute: (input: UpdateProjectQualityPolicyInput) => updateProjectQualityPolicy(input),
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    updateReviewPolicy: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:review-policy:update",
+      execute: (input: UpdateProjectReviewPolicyInput) => updateProjectReviewPolicy(input),
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
     }),

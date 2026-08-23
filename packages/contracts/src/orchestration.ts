@@ -15,9 +15,11 @@ import {
   NonNegativeInt,
   PositiveInt,
   ProjectId,
+  QualityGateRunId,
   TaskHandoffId,
   TaskId,
   TaskRestoreId,
+  TaskReviewId,
   TaskReviewSnapshotId,
   ProviderItemId,
   ThreadId,
@@ -237,6 +239,32 @@ export const ProjectFaviconPath = TrimmedNonEmptyString.check(
 );
 export type ProjectFaviconPath = typeof ProjectFaviconPath.Type;
 
+export const QualityGateDefinition = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  command: TrimmedNonEmptyString,
+  enabled: Schema.Boolean,
+  required: Schema.Boolean,
+  timeoutSeconds: PositiveInt.check(Schema.isLessThanOrEqualTo(3600)),
+  // Approval is bound to the exact command text. Editing the command makes
+  // this value differ (or null), so the prior approval cannot carry forward.
+  approvedCommand: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type QualityGateDefinition = typeof QualityGateDefinition.Type;
+
+export const ProjectQualityPolicy = Schema.Struct({
+  gates: Schema.Array(QualityGateDefinition),
+  updatedAt: IsoDateTime,
+});
+export type ProjectQualityPolicy = typeof ProjectQualityPolicy.Type;
+
+export const ProjectReviewPolicy = Schema.Struct({
+  requireIndependentReview: Schema.Boolean,
+  preferDifferentProvider: Schema.Boolean,
+  updatedAt: IsoDateTime,
+});
+export type ProjectReviewPolicy = typeof ProjectReviewPolicy.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -249,6 +277,8 @@ export const OrchestrationProject = Schema.Struct({
   // Optional on the wire so cached snapshots from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   scripts: Schema.Array(ProjectScript),
+  qualityPolicy: Schema.optional(Schema.NullOr(ProjectQualityPolicy)),
+  reviewPolicy: Schema.optional(Schema.NullOr(ProjectReviewPolicy)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -391,6 +421,94 @@ export const TaskHandoff = Schema.Struct({
 });
 export type TaskHandoff = typeof TaskHandoff.Type;
 
+export const QualityGateRunStatus = Schema.Literals([
+  "queued",
+  "running",
+  "passed",
+  "failed",
+  "timed_out",
+  "cancelled",
+  "stale",
+  "error",
+]);
+export type QualityGateRunStatus = typeof QualityGateRunStatus.Type;
+
+export const QualityGateRun = Schema.Struct({
+  id: QualityGateRunId,
+  taskId: TaskId,
+  snapshotId: TaskReviewSnapshotId,
+  gateId: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  command: TrimmedNonEmptyString,
+  required: Schema.Boolean,
+  timeoutSeconds: PositiveInt,
+  status: QualityGateRunStatus,
+  cwd: TrimmedNonEmptyString,
+  exitCode: Schema.NullOr(Schema.Int),
+  startedAt: Schema.NullOr(IsoDateTime),
+  completedAt: Schema.NullOr(IsoDateTime),
+  outputSummary: Schema.String,
+  outputTruncated: Schema.Boolean,
+});
+export type QualityGateRun = typeof QualityGateRun.Type;
+
+export const ReviewFindingSeverity = Schema.Literals(["info", "warning", "blocking", "security"]);
+export type ReviewFindingSeverity = typeof ReviewFindingSeverity.Type;
+
+export const ReviewFinding = Schema.Struct({
+  severity: ReviewFindingSeverity,
+  title: TrimmedNonEmptyString,
+  detail: TrimmedNonEmptyString,
+  file: Schema.optional(TrimmedNonEmptyString),
+  line: Schema.optional(PositiveInt),
+});
+export type ReviewFinding = typeof ReviewFinding.Type;
+
+export const ReviewCriterionResult = Schema.Struct({
+  criterion: TrimmedNonEmptyString,
+  status: Schema.Literals(["satisfied", "unsatisfied", "uncertain"]),
+  detail: TrimmedNonEmptyString,
+});
+export type ReviewCriterionResult = typeof ReviewCriterionResult.Type;
+
+export const TaskReviewVerdict = Schema.Literals([
+  "approve",
+  "approve_with_notes",
+  "request_changes",
+  "reject",
+]);
+export type TaskReviewVerdict = typeof TaskReviewVerdict.Type;
+
+export const TaskReviewStatus = Schema.Literals([
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "stale",
+]);
+export type TaskReviewStatus = typeof TaskReviewStatus.Type;
+
+export const TaskReview = Schema.Struct({
+  id: TaskReviewId,
+  taskId: TaskId,
+  snapshotId: TaskReviewSnapshotId,
+  reviewerModelSelection: ModelSelection,
+  diversity: Schema.Literals(["cross-provider", "same-provider"]),
+  status: TaskReviewStatus,
+  verdict: Schema.NullOr(TaskReviewVerdict),
+  findings: Schema.Array(ReviewFinding),
+  criteria: Schema.Array(ReviewCriterionResult),
+  securityConcerns: Schema.Array(TrimmedNonEmptyString),
+  requiredChanges: Schema.Array(TrimmedNonEmptyString),
+  summary: Schema.String,
+  coverage: Schema.Literals(["complete", "manual-required"]),
+  failureReason: Schema.NullOr(Schema.String),
+  findingsSentAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+});
+export type TaskReview = typeof TaskReview.Type;
+
 export const TaskResult = Schema.Struct({
   taskId: TaskId,
   status: Schema.Literal("completed"),
@@ -476,6 +594,9 @@ export const OrchestrationTask = Schema.Struct({
   // Manual execution assignment selected before a draft Task has a Thread.
   // Provider session identity remains derived from the bound Thread.
   modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  acceptanceCriteria: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  reviewRequired: Schema.optional(Schema.Boolean),
+  preferDifferentReviewerProvider: Schema.optional(Schema.Boolean),
   status: NebulaTaskStatus,
   threadId: Schema.NullOr(ThreadId),
   createdAt: IsoDateTime,
@@ -493,6 +614,8 @@ export const OrchestrationTask = Schema.Struct({
   restore: Schema.optional(Schema.NullOr(TaskRestoreState)),
   reviewError: Schema.optional(Schema.NullOr(Schema.String)),
   result: Schema.optional(Schema.NullOr(TaskResult)),
+  qualityGateRuns: Schema.optional(Schema.Array(QualityGateRun)),
+  reviews: Schema.optional(Schema.Array(TaskReview)),
 });
 export type OrchestrationTask = typeof OrchestrationTask.Type;
 
@@ -689,6 +812,8 @@ export const OrchestrationProjectShell = Schema.Struct({
   // Optional on the wire so cached snapshots from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   scripts: Schema.Array(ProjectScript),
+  qualityPolicy: Schema.optional(Schema.NullOr(ProjectQualityPolicy)),
+  reviewPolicy: Schema.optional(Schema.NullOr(ProjectReviewPolicy)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -900,6 +1025,23 @@ export const ProjectCreateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ProjectQualityPolicyUpdateCommand = Schema.Struct({
+  type: Schema.Literal("project.quality-policy.update"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  gates: Schema.Array(QualityGateDefinition),
+  createdAt: IsoDateTime,
+});
+
+const ProjectReviewPolicyUpdateCommand = Schema.Struct({
+  type: Schema.Literal("project.review-policy.update"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  requireIndependentReview: Schema.Boolean,
+  preferDifferentProvider: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
 const TaskCreateCommand = Schema.Struct({
   type: Schema.Literal("task.create"),
   commandId: CommandId,
@@ -909,6 +1051,18 @@ const TaskCreateCommand = Schema.Struct({
   objective: TrimmedNonEmptyString,
   role: NebulaTaskRole.pipe(Schema.withDecodingDefault(Effect.succeed("builder" as const))),
   modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  acceptanceCriteria: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  reviewRequired: Schema.optional(Schema.Boolean),
+  preferDifferentReviewerProvider: Schema.optional(Schema.Boolean),
+  createdAt: IsoDateTime,
+});
+
+const TaskAcceptanceCriteriaSetCommand = Schema.Struct({
+  type: Schema.Literal("task.acceptance-criteria.set"),
+  commandId: CommandId,
+  taskId: TaskId,
+  criteria: Schema.Array(TrimmedNonEmptyString),
+  confirmStartedTaskChange: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
 });
 
@@ -991,6 +1145,40 @@ const TaskHandoffUpdateCommand = Schema.Struct({
   migrations: Schema.Array(TrimmedNonEmptyString),
   knownRisks: Schema.Array(TrimmedNonEmptyString),
   followUps: Schema.Array(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
+const TaskQualityRunCommand = Schema.Struct({
+  type: Schema.Literal("task.quality.run"),
+  commandId: CommandId,
+  taskId: TaskId,
+  snapshotId: TaskReviewSnapshotId,
+  createdAt: IsoDateTime,
+});
+
+const TaskQualityCancelCommand = Schema.Struct({
+  type: Schema.Literal("task.quality.cancel"),
+  commandId: CommandId,
+  taskId: TaskId,
+  runId: QualityGateRunId,
+  createdAt: IsoDateTime,
+});
+
+const TaskIndependentReviewRequestCommand = Schema.Struct({
+  type: Schema.Literal("task.independent-review.request"),
+  commandId: CommandId,
+  taskId: TaskId,
+  snapshotId: TaskReviewSnapshotId,
+  reviewId: TaskReviewId,
+  reviewerModelSelection: ModelSelection,
+  createdAt: IsoDateTime,
+});
+
+const TaskReviewFindingsSendCommand = Schema.Struct({
+  type: Schema.Literal("task.review.findings.send"),
+  commandId: CommandId,
+  taskId: TaskId,
+  reviewId: TaskReviewId,
   createdAt: IsoDateTime,
 });
 
@@ -1277,8 +1465,11 @@ const ThreadSessionStopCommand = Schema.Struct({
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
+  ProjectQualityPolicyUpdateCommand,
+  ProjectReviewPolicyUpdateCommand,
   ProjectDeleteCommand,
   TaskCreateCommand,
+  TaskAcceptanceCriteriaSetCommand,
   TaskBindThreadCommand,
   TaskActivateCommand,
   TaskCompleteCommand,
@@ -1289,6 +1480,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   TaskOwnershipValidateCommand,
   TaskReviewPrepareCommand,
   TaskHandoffUpdateCommand,
+  TaskQualityRunCommand,
+  TaskQualityCancelCommand,
+  TaskIndependentReviewRequestCommand,
+  TaskReviewFindingsSendCommand,
   TaskRestoreRequestCommand,
   TaskRestoreUndoCommand,
   ThreadCreateCommand,
@@ -1318,8 +1513,11 @@ export type DispatchableClientOrchestrationCommand =
 export const ClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
+  ProjectQualityPolicyUpdateCommand,
+  ProjectReviewPolicyUpdateCommand,
   ProjectDeleteCommand,
   TaskCreateCommand,
+  TaskAcceptanceCriteriaSetCommand,
   TaskBindThreadCommand,
   TaskActivateCommand,
   TaskCompleteCommand,
@@ -1330,6 +1528,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   TaskOwnershipValidateCommand,
   TaskReviewPrepareCommand,
   TaskHandoffUpdateCommand,
+  TaskQualityRunCommand,
+  TaskQualityCancelCommand,
+  TaskIndependentReviewRequestCommand,
+  TaskReviewFindingsSendCommand,
   TaskRestoreRequestCommand,
   TaskRestoreUndoCommand,
   ThreadCreateCommand,
@@ -1528,6 +1730,47 @@ const TaskReviewStaleCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const TaskQualityRunStartedCommand = Schema.Struct({
+  type: Schema.Literal("task.quality.run-started"),
+  commandId: CommandId,
+  taskId: TaskId,
+  run: QualityGateRun,
+  createdAt: IsoDateTime,
+});
+
+const TaskQualityRunFinishedCommand = Schema.Struct({
+  type: Schema.Literal("task.quality.run-finished"),
+  commandId: CommandId,
+  taskId: TaskId,
+  run: QualityGateRun,
+  createdAt: IsoDateTime,
+});
+
+const TaskIndependentReviewStartedCommand = Schema.Struct({
+  type: Schema.Literal("task.independent-review.started"),
+  commandId: CommandId,
+  taskId: TaskId,
+  reviewId: TaskReviewId,
+  createdAt: IsoDateTime,
+});
+
+const TaskIndependentReviewCompletedCommand = Schema.Struct({
+  type: Schema.Literal("task.independent-review.completed"),
+  commandId: CommandId,
+  taskId: TaskId,
+  review: TaskReview,
+  createdAt: IsoDateTime,
+});
+
+const TaskIndependentReviewFailedCommand = Schema.Struct({
+  type: Schema.Literal("task.independent-review.failed"),
+  commandId: CommandId,
+  taskId: TaskId,
+  reviewId: TaskReviewId,
+  failureReason: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const TaskCompletionFreshnessValidatedCommand = Schema.Struct({
   type: Schema.Literal("task.completion.freshness-validated"),
   commandId: CommandId,
@@ -1583,6 +1826,11 @@ const InternalOrchestrationCommand = Schema.Union([
   TaskReviewPreparedCommand,
   TaskReviewPrepareFailedCommand,
   TaskReviewStaleCommand,
+  TaskQualityRunStartedCommand,
+  TaskQualityRunFinishedCommand,
+  TaskIndependentReviewStartedCommand,
+  TaskIndependentReviewCompletedCommand,
+  TaskIndependentReviewFailedCommand,
   TaskCompletionFreshnessValidatedCommand,
   TaskRestoreSnapshotCapturedCommand,
   TaskRestoredCommand,
@@ -1608,8 +1856,11 @@ export type OrchestrationCommand = typeof OrchestrationCommand.Type;
 export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
+  "project.quality-policy-updated",
+  "project.review-policy-updated",
   "project.deleted",
   "task.created",
+  "task.acceptance-criteria-updated",
   "task.thread-bound",
   "task.activated",
   "task.completed",
@@ -1631,6 +1882,15 @@ export const OrchestrationEventType = Schema.Literals([
   "task.review.prepare-failed",
   "task.review.stale",
   "task.handoff.updated",
+  "task.quality.run-requested",
+  "task.quality.run-started",
+  "task.quality.run-finished",
+  "task.quality.run-cancel-requested",
+  "task.independent-review.requested",
+  "task.independent-review.started",
+  "task.independent-review.completed",
+  "task.independent-review.failed",
+  "task.review.findings-sent",
   "task.completion.freshness-requested",
   "task.restore.requested",
   "task.restore.snapshot-captured",
@@ -1696,6 +1956,18 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+export const ProjectQualityPolicyUpdatedPayload = Schema.Struct({
+  projectId: ProjectId,
+  policy: ProjectQualityPolicy,
+  updatedAt: IsoDateTime,
+});
+
+export const ProjectReviewPolicyUpdatedPayload = Schema.Struct({
+  projectId: ProjectId,
+  policy: ProjectReviewPolicy,
+  updatedAt: IsoDateTime,
+});
+
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   deletedAt: IsoDateTime,
@@ -1708,8 +1980,17 @@ export const OrchestrationTaskCreatedPayload = Schema.Struct({
   objective: TrimmedNonEmptyString,
   role: NebulaTaskRole,
   modelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  acceptanceCriteria: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  reviewRequired: Schema.optional(Schema.Boolean),
+  preferDifferentReviewerProvider: Schema.optional(Schema.Boolean),
   ownershipRequired: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskAcceptanceCriteriaUpdatedPayload = Schema.Struct({
+  taskId: TaskId,
+  criteria: Schema.Array(TrimmedNonEmptyString),
   updatedAt: IsoDateTime,
 });
 
@@ -1770,6 +2051,57 @@ export const OrchestrationTaskReviewStalePayload = Schema.Struct({
 export const OrchestrationTaskHandoffUpdatedPayload = Schema.Struct({
   taskId: TaskId,
   handoff: TaskHandoff,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskQualityRunRequestedPayload = Schema.Struct({
+  taskId: TaskId,
+  snapshotId: TaskReviewSnapshotId,
+  runs: Schema.Array(QualityGateRun),
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskQualityRunUpdatedPayload = Schema.Struct({
+  taskId: TaskId,
+  run: QualityGateRun,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskQualityRunCancelRequestedPayload = Schema.Struct({
+  taskId: TaskId,
+  runId: QualityGateRunId,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskIndependentReviewRequestedPayload = Schema.Struct({
+  taskId: TaskId,
+  review: TaskReview,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskIndependentReviewStartedPayload = Schema.Struct({
+  taskId: TaskId,
+  reviewId: TaskReviewId,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskIndependentReviewCompletedPayload = Schema.Struct({
+  taskId: TaskId,
+  review: TaskReview,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskIndependentReviewFailedPayload = Schema.Struct({
+  taskId: TaskId,
+  reviewId: TaskReviewId,
+  failureReason: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskReviewFindingsSentPayload = Schema.Struct({
+  taskId: TaskId,
+  reviewId: TaskReviewId,
+  sentAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
 
@@ -2128,6 +2460,16 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("project.quality-policy-updated"),
+    payload: ProjectQualityPolicyUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.review-policy-updated"),
+    payload: ProjectReviewPolicyUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
   }),
@@ -2135,6 +2477,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("task.created"),
     payload: OrchestrationTaskCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.acceptance-criteria-updated"),
+    payload: OrchestrationTaskAcceptanceCriteriaUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -2240,6 +2587,51 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("task.handoff.updated"),
     payload: OrchestrationTaskHandoffUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.quality.run-requested"),
+    payload: OrchestrationTaskQualityRunRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.quality.run-started"),
+    payload: OrchestrationTaskQualityRunUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.quality.run-finished"),
+    payload: OrchestrationTaskQualityRunUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.quality.run-cancel-requested"),
+    payload: OrchestrationTaskQualityRunCancelRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.independent-review.requested"),
+    payload: OrchestrationTaskIndependentReviewRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.independent-review.started"),
+    payload: OrchestrationTaskIndependentReviewStartedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.independent-review.completed"),
+    payload: OrchestrationTaskIndependentReviewCompletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.independent-review.failed"),
+    payload: OrchestrationTaskIndependentReviewFailedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.review.findings-sent"),
+    payload: OrchestrationTaskReviewFindingsSentPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
