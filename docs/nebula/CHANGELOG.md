@@ -1,5 +1,16 @@
 # Nebula changelog
 
+## Unreleased — Shared-resource coordination
+
+- Added Project Shared Resource definitions and exclusive durable Task leases.
+- Added atomic acquisition, safe lifecycle release, and terminal-lease startup repair.
+- Added Mission resource blockers without changing the explicit DAG.
+- Added Git-evidence resource compliance as a separate review/completion gate.
+- Added durable human-created ownership requests with approve, deny, and cancel history.
+- Added Settings, Task, Mission, and Command Deck resource controls.
+- Automatic scheduling, provider-generated requests, Architect, distributed locks, and Swarm Mode
+  remain unimplemented.
+
 ## Unreleased — Missions and explicit Task DAGs
 
 - Added durable Project Missions over canonical Tasks with a zero-or-one Mission membership invariant, ordered presentation, explicit dependency edges, and auditable Mission activity.

@@ -5,8 +5,10 @@ import type {
   OrchestrationTask,
   OrchestrationThread,
   OrchestrationThreadShell,
+  OrchestrationProject,
   TaskId,
 } from "@t3tools/contracts";
+import { resourceBlockers } from "./resourceCoordination.ts";
 
 export interface MissionGraphValidation {
   readonly valid: boolean;
@@ -17,6 +19,7 @@ export interface MissionGraphValidation {
 export type MissionTaskPlanStatus =
   | "blocked"
   | "ready"
+  | "resource-blocked"
   | "running"
   | "active"
   | "needs-attention"
@@ -32,6 +35,7 @@ export interface MissionTaskPlan {
   readonly blockerReasons: ReadonlyArray<string>;
   readonly attention: ReadonlyArray<string>;
   readonly legacyCompletion: boolean;
+  readonly resourceBlockers: ReturnType<typeof resourceBlockers>;
 }
 
 export interface MissionExecutionWave {
@@ -199,6 +203,7 @@ export function computeMissionPlan(input: {
   readonly threads?: ReadonlyArray<OrchestrationThread | OrchestrationThreadShell>;
   readonly integrationBatches?: ReadonlyArray<IntegrationBatch>;
   readonly unavailableProviderTaskIds?: ReadonlySet<TaskId>;
+  readonly project?: Pick<OrchestrationProject, "sharedResources" | "resourceLeases">;
 }): MissionPlan {
   const graph = validateMissionGraph(input.mission.taskIds, input.mission.dependencies);
   const waves = graph.valid
@@ -232,6 +237,13 @@ export function computeMissionPlan(input: {
         : `Waiting for ${prerequisite?.title ?? id}`;
     });
     const attention = [...startConfigurationAttention(task)];
+    const sharedResourceBlockers = input.project
+      ? resourceBlockers({
+          task,
+          resources: input.project.sharedResources ?? [],
+          leases: input.project.resourceLeases ?? [],
+        })
+      : [];
     const thread = threadForTask(task, input.threads ?? []);
     if (input.unavailableProviderTaskIds?.has(task.id)) attention.push("Provider unavailable.");
     if (thread?.session?.status === "error" || thread?.latestTurn?.state === "error") {
@@ -250,6 +262,8 @@ export function computeMissionPlan(input: {
     if (task.status === "completed") status = "completed";
     else if (task.status === "cancelled") status = "cancelled";
     else if (task.status === "draft" && blockerIds.length > 0) status = "blocked";
+    else if (task.status === "draft" && sharedResourceBlockers.length > 0)
+      status = "resource-blocked";
     else if (task.status === "draft" && attention.length > 0) status = "needs-attention";
     else if (task.status === "draft") status = "ready";
     else if (attention.length > 0) status = "needs-attention";
@@ -270,6 +284,7 @@ export function computeMissionPlan(input: {
       blockerReasons,
       attention,
       legacyCompletion,
+      resourceBlockers: sharedResourceBlockers,
     });
   }
   const integration = input.mission.integrationBatchId

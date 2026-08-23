@@ -11,6 +11,8 @@ import {
   ProjectQualityPolicy,
   ProjectReviewPolicy,
   ProjectScript,
+  SharedResourceDefinition,
+  ResourceLease,
 } from "@t3tools/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
@@ -28,6 +30,8 @@ const ProjectionProjectDbRow = ProjectionProject.mapFields(
     qualityPolicy: Schema.NullOr(Schema.fromJsonString(ProjectQualityPolicy)),
     reviewPolicy: Schema.NullOr(Schema.fromJsonString(ProjectReviewPolicy)),
     integrationBatches: Schema.fromJsonString(Schema.Array(IntegrationBatch)),
+    sharedResources: Schema.fromJsonString(Schema.Array(SharedResourceDefinition)),
+    resourceLeases: Schema.fromJsonString(Schema.Array(ResourceLease)),
   }),
 );
 type ProjectionProjectDbRow = typeof ProjectionProjectDbRow.Type;
@@ -50,6 +54,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           quality_policy_json,
           review_policy_json,
           integration_batches_json,
+          shared_resources_json,
+          resource_leases_json,
           created_at,
           updated_at,
           deleted_at
@@ -65,6 +71,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           ${row.qualityPolicy !== null ? JSON.stringify(row.qualityPolicy) : null},
           ${row.reviewPolicy !== null ? JSON.stringify(row.reviewPolicy) : null},
           ${JSON.stringify(row.integrationBatches ?? [])},
+          ${JSON.stringify(row.sharedResources ?? [])},
+          ${JSON.stringify(row.resourceLeases ?? [])},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.deletedAt}
@@ -80,6 +88,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           quality_policy_json = excluded.quality_policy_json,
           review_policy_json = excluded.review_policy_json,
           integration_batches_json = excluded.integration_batches_json,
+          shared_resources_json = excluded.shared_resources_json,
+          resource_leases_json = excluded.resource_leases_json,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           deleted_at = excluded.deleted_at
@@ -102,6 +112,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           quality_policy_json AS "qualityPolicy",
           review_policy_json AS "reviewPolicy",
           integration_batches_json AS "integrationBatches",
+          shared_resources_json AS "sharedResources",
+          resource_leases_json AS "resourceLeases",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -126,6 +138,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           quality_policy_json AS "qualityPolicy",
           review_policy_json AS "reviewPolicy",
           integration_batches_json AS "integrationBatches",
+          shared_resources_json AS "sharedResources",
+          resource_leases_json AS "resourceLeases",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"

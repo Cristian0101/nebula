@@ -21,3 +21,13 @@ The Task remains active after restoration. Its previous review becomes stale, ow
 ## Integrate completed results
 
 Completed Builder Tasks that retain a ready handoff, valid ownership evidence, required quality passes, and any required approving review can be selected for an Integration Batch. Integration consumes the immutable completed result and approved snapshot, not later worktree edits. See [Integrate approved Tasks](integrating-tasks.md).
+
+## Shared Resources
+
+Select any Project Shared Resources a Task requires during creation or in its Resources inspector.
+Starting acquires every available requirement together. If another Task holds one, the Task remains
+unstarted and identifies the holder. Active requirement changes ask for confirmation and use the same
+all-or-nothing rule. Completion or cancellation releases held leases.
+
+Resource compliance is separate from ownership: a path can be writable but still fail review or
+completion when the Task changed a Shared Resource without its lease.

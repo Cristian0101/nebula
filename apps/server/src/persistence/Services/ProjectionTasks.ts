@@ -57,6 +57,9 @@ export const ProjectionTask = Schema.Struct({
   resultJson: Schema.NullOr(Schema.String),
   qualityGateRunsJson: Schema.String,
   reviewsJson: Schema.String,
+  requiredResourceIdsJson: Schema.String,
+  resourceComplianceJson: Schema.NullOr(Schema.String),
+  ownershipRequestsJson: Schema.String,
 });
 export type ProjectionTask = typeof ProjectionTask.Type;
 

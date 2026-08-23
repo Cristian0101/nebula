@@ -28,4 +28,9 @@ If the linked Batch fails or is cancelled, the Mission keeps that evidence visib
 
 ## Current limitations
 
-Automatic Task creation, automatic dependency planning, automatic wave progression, shared-resource locks, capacity scheduling, automatic provider routing, Architect, automatic conflict remediation, and Swarm Mode are not implemented.
+Shared Resource blocking is implemented separately from dependency readiness. A Task may be ready by
+dependencies but waiting for an exclusive resource held by another Task. Bulk starts serialize
+deterministically: one contender starts and the other remains waiting. Releasing the lease makes it
+resource-ready, but a human must start it. Automatic Task creation, dependency planning, wave
+progression, capacity scheduling, provider routing, Architect, conflict remediation, and Swarm Mode
+are not implemented.

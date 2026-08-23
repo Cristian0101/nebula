@@ -21,6 +21,7 @@ import type {
   T3ProjectFileScript,
   ThreadEnvMode,
 } from "@t3tools/contracts";
+import { SharedResourceId } from "@t3tools/contracts";
 import { resolveEnvModeLabel } from "../BranchToolbar.logic";
 import { createModelSelection } from "@t3tools/shared/model";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
@@ -495,6 +496,133 @@ function ProjectQualityAndReviewSettings({ project }: { project: SidebarProjectG
           </Button>
         </div>
       </div>
+    </SettingsSection>
+  );
+}
+
+function ProjectSharedResourcesSettings({ project }: { project: SidebarProjectGroupMember }) {
+  const createResource = useAtomCommand(projectEnvironment.createSharedResource, {
+    reportFailure: false,
+  });
+  const updateResource = useAtomCommand(projectEnvironment.updateSharedResource, {
+    reportFailure: false,
+  });
+  const deleteResource = useAtomCommand(projectEnvironment.deleteSharedResource, {
+    reportFailure: false,
+  });
+  const [name, setName] = useState("");
+  const [patterns, setPatterns] = useState("");
+  const resources = project.sharedResources ?? [];
+
+  const add = async () => {
+    const values = patterns
+      .split("\n")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!name.trim() || values.length === 0) {
+      toastManager.add({ type: "warning", title: "Enter a name and at least one repository path" });
+      return;
+    }
+    const result = await createResource({
+      environmentId: project.environmentId,
+      input: {
+        projectId: project.id,
+        resourceId: SharedResourceId.make(randomUUID()),
+        name: name.trim(),
+        description: null,
+        patterns: values,
+      },
+    });
+    if (result._tag === "Success") {
+      setName("");
+      setPatterns("");
+    }
+    toastManager.add({
+      type: result._tag === "Success" ? "success" : "error",
+      title: result._tag === "Success" ? "Shared resource added" : "Could not add shared resource",
+    });
+  };
+
+  return (
+    <SettingsSection title="Shared resources">
+      <SettingsRow
+        title="Exclusive coordination leases"
+        description="Define repository-relative paths that only one active Task may coordinate at a time. This is not an OS file lock."
+        control={
+          <div className="w-full space-y-2 sm:w-96">
+            {resources.map((resource) => {
+              const leased = (project.resourceLeases ?? []).some(
+                (lease) => lease.resourceId === resource.id && lease.status === "held",
+              );
+              return (
+                <div
+                  key={resource.id}
+                  className="rounded-md border border-black/[0.08] p-2 text-sm"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">{resource.name}</span>
+                    <span>{leased ? "Leased" : resource.enabled ? "Enabled" : "Disabled"}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {resource.patterns.join(" · ")}
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={leased}
+                      onClick={() =>
+                        void updateResource({
+                          environmentId: project.environmentId,
+                          input: {
+                            projectId: project.id,
+                            resourceId: resource.id,
+                            name: resource.name,
+                            description: resource.description,
+                            patterns: resource.patterns,
+                            enabled: !resource.enabled,
+                          },
+                        })
+                      }
+                    >
+                      {resource.enabled ? "Disable" : "Enable"}
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={leased}
+                      onClick={() =>
+                        void deleteResource({
+                          environmentId: project.environmentId,
+                          input: { projectId: project.id, resourceId: resource.id },
+                        })
+                      }
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+            <Input
+              aria-label="Shared resource name"
+              placeholder="Dependency manifest"
+              value={name}
+              onChange={(event) => setName(event.currentTarget.value)}
+            />
+            <textarea
+              aria-label="Exclusive paths"
+              className="min-h-20 w-full rounded-md border border-black/[0.08] bg-transparent p-2 text-sm"
+              placeholder={"package.json\npnpm-lock.yaml"}
+              value={patterns}
+              onChange={(event) => setPatterns(event.currentTarget.value)}
+            />
+            <Button size="sm" onClick={() => void add()}>
+              Add resource
+            </Button>
+          </div>
+        }
+      />
     </SettingsSection>
   );
 }
@@ -987,6 +1115,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
           />
         </SettingsSection>
         <ProjectQualityAndReviewSettings project={representative} />
+        <ProjectSharedResourcesSettings project={representative} />
         <ProjectTasksSection project={representative} />
         <SettingsSection title="Project">
           <SettingsRow

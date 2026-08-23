@@ -70,7 +70,8 @@ function commandError(result: AtomCommandResult<unknown, unknown>): string | nul
 
 function statusVariant(status: string) {
   if (status === "completed" || status === "ready") return "success" as const;
-  if (status === "blocked" || status === "needs-attention") return "warning" as const;
+  if (status === "blocked" || status === "resource-blocked" || status === "needs-attention")
+    return "warning" as const;
   if (status === "running" || status === "active" || status === "review") return "info" as const;
   return "outline" as const;
 }
@@ -233,6 +234,7 @@ export function MissionPanel(props: MissionPanelProps) {
             tasks,
             threads,
             integrationBatches: project.integrationBatches ?? [],
+            project,
             unavailableProviderTaskIds,
           })
         : null,
@@ -440,7 +442,12 @@ export function MissionPanel(props: MissionPanelProps) {
                       active
                     </span>
                     <span>
-                      {itemPlan.tasks.filter((item) => item.status === "blocked").length} blocked
+                      {
+                        itemPlan.tasks.filter(
+                          (item) => item.status === "blocked" || item.status === "resource-blocked",
+                        ).length
+                      }{" "}
+                      blocked
                     </span>
                     <span>
                       {itemPlan.tasks.filter((item) => item.status === "needs-attention").length}{" "}
@@ -788,6 +795,17 @@ export function MissionPanel(props: MissionPanelProps) {
                                 {item.blockerReasons.length > 0 ? (
                                   <p className="mt-1 text-[11px] text-warning">
                                     {item.blockerReasons.join(" · ")}
+                                  </p>
+                                ) : null}
+                                {item.resourceBlockers.length > 0 ? (
+                                  <p className="mt-1 text-[11px] text-warning">
+                                    Waiting for{" "}
+                                    {item.resourceBlockers
+                                      .map(
+                                        ({ resource, lease }) =>
+                                          `${resource.name} · held by ${tasks.find((task) => task.id === lease.taskId)?.title ?? lease.taskId}`,
+                                      )
+                                      .join(" · ")}
                                   </p>
                                 ) : null}
                               </li>

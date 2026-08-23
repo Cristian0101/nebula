@@ -69,6 +69,10 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.meta.update":
     case "project.quality-policy.update":
     case "project.review-policy.update":
+    case "project.shared-resource.create":
+    case "project.shared-resource.update":
+    case "project.shared-resource.delete":
+    case "project.resource-leases.reconcile":
     case "project.delete":
     case "integration.create":
     case "integration.continue":
@@ -112,6 +116,11 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "task.ownership.validate":
     case "task.ownership.validated":
     case "task.ownership.validation-failed":
+    case "task.resource-requirements.set":
+    case "task.ownership-request.create":
+    case "task.ownership-request.approve":
+    case "task.ownership-request.deny":
+    case "task.ownership-request.cancel":
     case "task.review.prepare":
     case "task.handoff.update":
     case "task.quality.run":

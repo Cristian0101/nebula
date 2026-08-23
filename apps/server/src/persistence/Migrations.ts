@@ -61,6 +61,7 @@ import Migration0045 from "./Migrations/045_TaskModelSelection.ts";
 import Migration0046 from "./Migrations/046_TaskQualityReview.ts";
 import Migration0047 from "./Migrations/047_IntegrationBatches.ts";
 import Migration0048 from "./Migrations/048_Missions.ts";
+import Migration0049 from "./Migrations/049_SharedResourceCoordination.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -121,6 +122,7 @@ export const migrationEntries = [
   [46, "TaskQualityReview", Migration0046],
   [47, "IntegrationBatches", Migration0047],
   [48, "Missions", Migration0048],
+  [49, "SharedResourceCoordination", Migration0049],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

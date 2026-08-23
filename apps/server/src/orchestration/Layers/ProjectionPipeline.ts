@@ -13,6 +13,9 @@ import {
   TaskResult,
   QualityGateRun,
   TaskReview,
+  SharedResourceId,
+  TaskResourceComplianceState,
+  OwnershipRequest,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -103,6 +106,16 @@ const decodeQualityGateRuns = Schema.decodeSync(
 );
 const encodeTaskReviews = Schema.encodeSync(Schema.fromJsonString(Schema.Array(TaskReview)));
 const decodeTaskReviews = Schema.decodeSync(Schema.fromJsonString(Schema.Array(TaskReview)));
+const encodeResourceIds = Schema.encodeSync(Schema.fromJsonString(Schema.Array(SharedResourceId)));
+const encodeResourceCompliance = Schema.encodeSync(
+  Schema.fromJsonString(TaskResourceComplianceState),
+);
+const encodeOwnershipRequests = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(OwnershipRequest)),
+);
+const decodeOwnershipRequests = Schema.decodeSync(
+  Schema.fromJsonString(Schema.Array(OwnershipRequest)),
+);
 const decodeTaskReviewSnapshot = Schema.decodeSync(Schema.fromJsonString(TaskReviewSnapshot));
 const decodeTaskHandoff = Schema.decodeSync(Schema.fromJsonString(TaskHandoff));
 const decodeTaskRestore = Schema.decodeUnknownEffect(Schema.fromJsonString(TaskRestoreState));
@@ -542,6 +555,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             qualityPolicy: null,
             reviewPolicy: null,
             integrationBatches: [],
+            sharedResources: [],
+            resourceLeases: [],
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -589,6 +604,53 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               : { reviewPolicy: event.payload.policy }),
             updatedAt: event.payload.updatedAt,
           });
+          return;
+        }
+
+        case "project.shared-resource-created":
+        case "project.shared-resource-updated":
+        case "project.shared-resource-deleted":
+        case "resource.leases-acquired":
+        case "resource.leases-released": {
+          const existingRow = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isNone(existingRow)) return;
+          const row = existingRow.value;
+          if (
+            event.type === "project.shared-resource-created" ||
+            event.type === "project.shared-resource-updated"
+          ) {
+            yield* projectionProjectRepository.upsert({
+              ...row,
+              sharedResources: [
+                ...(row.sharedResources ?? []).filter(
+                  (resource) => resource.id !== event.payload.resource.id,
+                ),
+                event.payload.resource,
+              ],
+              updatedAt: event.payload.resource.updatedAt,
+            });
+          } else if (event.type === "project.shared-resource-deleted") {
+            yield* projectionProjectRepository.upsert({
+              ...row,
+              sharedResources: (row.sharedResources ?? []).filter(
+                (resource) => resource.id !== event.payload.resourceId,
+              ),
+              updatedAt: event.payload.updatedAt,
+            });
+          } else {
+            yield* projectionProjectRepository.upsert({
+              ...row,
+              resourceLeases: [
+                ...(row.resourceLeases ?? []).filter(
+                  (lease) => !event.payload.leases.some((candidate) => candidate.id === lease.id),
+                ),
+                ...event.payload.leases,
+              ],
+              updatedAt: event.payload.updatedAt,
+            });
+          }
           return;
         }
 
@@ -684,6 +746,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               resultJson: null,
               qualityGateRunsJson: "[]",
               reviewsJson: "[]",
+              requiredResourceIdsJson: encodeResourceIds(event.payload.requiredResourceIds ?? []),
+              resourceComplianceJson: null,
+              ownershipRequestsJson: "[]",
             });
             return;
           case "task.acceptance-criteria-updated": {
@@ -878,6 +943,57 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 ownershipValidatedAt: event.payload.validatedAt,
                 ownershipErrorReason: event.payload.failureReason,
                 ownershipUpdatedAt: event.payload.updatedAt,
+                updatedAt: event.payload.updatedAt,
+              });
+            }
+            return;
+          }
+          case "task.resource-requirements-updated":
+          case "task.resource-validated":
+          case "task.ownership-request-created":
+          case "task.ownership-request-approved":
+          case "task.ownership-request-denied":
+          case "task.ownership-request-cancelled": {
+            const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
+            if (Option.isNone(existing)) return;
+            const row = existing.value;
+            if (event.type === "task.resource-requirements-updated") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                requiredResourceIdsJson: encodeResourceIds(event.payload.resourceIds),
+                updatedAt: event.payload.updatedAt,
+              });
+            } else if (event.type === "task.resource-validated") {
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                resourceComplianceJson: encodeResourceCompliance({
+                  status: event.payload.status,
+                  validatedAt: event.payload.validatedAt,
+                  violations: event.payload.violations,
+                  errorReason: null,
+                  updatedAt: event.payload.updatedAt,
+                }),
+                updatedAt: event.payload.updatedAt,
+              });
+            } else {
+              const current = decodeOwnershipRequests(row.ownershipRequestsJson);
+              const next = [
+                ...current.filter((request) => request.id !== event.payload.request.id),
+                event.payload.request,
+              ];
+              yield* projectionTaskRepository.upsert({
+                ...row,
+                ownershipRequestsJson: encodeOwnershipRequests(next),
+                ...(event.payload.rules === undefined
+                  ? {}
+                  : {
+                      ownershipRulesJson: encodeOwnershipRules(event.payload.rules),
+                      ownershipStatus: "pending" as const,
+                      ownershipUpdatedAt: event.payload.updatedAt,
+                    }),
+                ...(event.payload.resourceIds === undefined
+                  ? {}
+                  : { requiredResourceIdsJson: encodeResourceIds(event.payload.resourceIds) }),
                 updatedAt: event.payload.updatedAt,
               });
             }

@@ -35,4 +35,4 @@ Ready means the isolated Integration branch passed the configured policy and is 
 
 ## Cleanup and limitations
 
-A Ready, failed, or cancelled Batch workspace can be removed only when clean. Cleanup removes the worktree and preserves the branch and durable Batch evidence. A linked Mission becomes eligible for explicit completion only when the Batch is Ready. Automatic main merge, automatic pull requests, shared-resource locks, scheduling, automated conflict agents, and Swarm Mode are not part of this workflow.
+A Ready, failed, or cancelled Batch workspace can be removed only when clean. Cleanup removes the worktree and preserves the branch and durable Batch evidence. A linked Mission becomes eligible for explicit completion only when the Batch is Ready. Runtime Shared Resource leases coordinate concurrent intent; Integration still checks immutable artifacts for actual path overlap. Automatic main merge, automatic pull requests, scheduling, automated conflict agents, and Swarm Mode are not part of this workflow.

@@ -218,3 +218,14 @@ After the explicit Task, isolated workspace, and ownership lifecycle are proven,
 - multi-machine or team synchronization through a separately designed replication boundary.
 
 These remain policies over the same provider, workspace, event, persistence, RPC, and client runtime. They must not introduce a second swarm-only runtime.
+
+## Shared-resource boundary
+
+Shared Resource definitions and immutable lease history live in the existing Project event stream and
+SQLite projection. Task requirements, compliance evidence, and ownership-request history live in the
+existing Task projection. The serialized orchestration command queue decides all-or-nothing lease
+acquisition server-side; clients display blockers but are not lock authorities.
+
+Worktrees isolate files, ownership authorizes paths, and leases coordinate concurrent intent. Mission
+DAG readiness remains separate from resource readiness. The existing Git change-set collector feeds
+both ownership and resource compliance, and review/completion require both results to be valid.

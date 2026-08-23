@@ -65,3 +65,7 @@ A prepared Task review provides:
 The handoff is concise evidence for review and integration, not a duplicate project-management report. Git facts are captured automatically and cannot be edited. Provider-generated narrative is explicitly separate, remains a draft until human review, and has a manual fallback. Quality gates, user-requested independent review, human-created deterministic Integration Batches, and human-authored Mission DAGs are implemented on this boundary. Shared-resource locks, automatic Mission planning, scheduling, automatic routing/remediation, automatic integration queues, Architect, and Swarm automation are not implemented.
 
 Missions and the Integration Engine do not imply Swarm automation. Users author dependency edges, activate the Mission, choose which ready Tasks or wave to start, select eligible Task Results and their Integration order, acknowledge overlap, resolve conflicts, and decide what to do with a Ready branch. No agent invents Tasks or dependencies, starts the next wave, acquires locks, merges main, pushes, or opens a PR.
+
+Shared-resource coordination is implemented as a deterministic safety primitive before Swarm Mode.
+It does not schedule Tasks, retry blocked Tasks, advance waves, route providers, or authorize an
+Architect. Every resource-blocked Task still requires a human start after its blocker clears.
