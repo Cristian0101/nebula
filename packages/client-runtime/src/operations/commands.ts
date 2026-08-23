@@ -32,6 +32,9 @@ export type CreateProjectInput = CommandInput<"project.create">;
 export type UpdateProjectInput = CommandInput<"project.meta.update">;
 export type UpdateProjectQualityPolicyInput = CommandInput<"project.quality-policy.update">;
 export type UpdateProjectReviewPolicyInput = CommandInput<"project.review-policy.update">;
+export type CreateProjectSharedResourceInput = CommandInput<"project.shared-resource.create">;
+export type UpdateProjectSharedResourceInput = CommandInput<"project.shared-resource.update">;
+export type DeleteProjectSharedResourceInput = CommandInput<"project.shared-resource.delete">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
 export type CreateMissionInput = CommandInput<"mission.create">;
 export type UpdateMissionInput = CommandInput<"mission.update">;
@@ -58,6 +61,11 @@ export type PrepareTaskWorkspaceInput = CommandInput<"task.workspace.prepare">;
 export type RemoveTaskWorkspaceInput = CommandInput<"task.workspace.remove">;
 export type SetTaskOwnershipInput = CommandInput<"task.ownership.set">;
 export type ValidateTaskOwnershipInput = CommandInput<"task.ownership.validate">;
+export type SetTaskResourceRequirementsInput = CommandInput<"task.resource-requirements.set">;
+export type CreateTaskOwnershipRequestInput = CommandInput<"task.ownership-request.create">;
+export type ApproveTaskOwnershipRequestInput = CommandInput<"task.ownership-request.approve">;
+export type DenyTaskOwnershipRequestInput = CommandInput<"task.ownership-request.deny">;
+export type CancelTaskOwnershipRequestInput = CommandInput<"task.ownership-request.cancel">;
 export type PrepareTaskReviewInput = CommandInput<"task.review.prepare">;
 export type UpdateTaskHandoffInput = CommandInput<"task.handoff.update">;
 export type RunTaskQualityGatesInput = CommandInput<"task.quality.run">;
@@ -154,6 +162,29 @@ export const updateProjectReviewPolicy: (input: UpdateProjectReviewPolicyInput) 
     const metadata = yield* timestampedCommandMetadata(input);
     return yield* dispatch({ ...input, type: "project.review-policy.update", ...metadata });
   });
+
+const sharedResourceCommand = <
+  T extends
+    | "project.shared-resource.create"
+    | "project.shared-resource.update"
+    | "project.shared-resource.delete",
+>(
+  type: T,
+  input: CommandInput<T>,
+) =>
+  Effect.gen(function* () {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type, ...metadata } as ClientOrchestrationCommand);
+  });
+export const createProjectSharedResource: (
+  input: CreateProjectSharedResourceInput,
+) => CommandEffect = (input) => sharedResourceCommand("project.shared-resource.create", input);
+export const updateProjectSharedResource: (
+  input: UpdateProjectSharedResourceInput,
+) => CommandEffect = (input) => sharedResourceCommand("project.shared-resource.update", input);
+export const deleteProjectSharedResource: (
+  input: DeleteProjectSharedResourceInput,
+) => CommandEffect = (input) => sharedResourceCommand("project.shared-resource.delete", input);
 
 export const deleteProject: (input: DeleteProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.deleteProject",
@@ -318,6 +349,42 @@ export const validateTaskOwnership: (input: ValidateTaskOwnershipInput) => Comma
   Effect.fn("EnvironmentCommands.validateTaskOwnership")(function* (input) {
     const metadata = yield* timestampedCommandMetadata(input);
     return yield* dispatch({ ...input, type: "task.ownership.validate", ...metadata });
+  });
+
+export const setTaskResourceRequirements: (
+  input: SetTaskResourceRequirementsInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.setTaskResourceRequirements")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "task.resource-requirements.set", ...metadata });
+  },
+);
+
+export const createTaskOwnershipRequest: (input: CreateTaskOwnershipRequestInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.createTaskOwnershipRequest")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "task.ownership-request.create", ...metadata });
+  });
+
+export const approveTaskOwnershipRequest: (
+  input: ApproveTaskOwnershipRequestInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.approveTaskOwnershipRequest")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "task.ownership-request.approve", ...metadata });
+  },
+);
+
+export const denyTaskOwnershipRequest: (input: DenyTaskOwnershipRequestInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.denyTaskOwnershipRequest")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "task.ownership-request.deny", ...metadata });
+  });
+
+export const cancelTaskOwnershipRequest: (input: CancelTaskOwnershipRequestInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.cancelTaskOwnershipRequest")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({ ...input, type: "task.ownership-request.cancel", ...metadata });
   });
 
 export const prepareTaskReview: (input: PrepareTaskReviewInput) => CommandEffect = Effect.fn(

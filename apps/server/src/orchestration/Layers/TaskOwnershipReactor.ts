@@ -5,6 +5,7 @@ import {
   TaskId,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { evaluateResourceCompliance } from "@t3tools/shared/resourceCoordination";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -82,6 +83,13 @@ const make = Effect.gen(function* () {
       ...(file.previousPath === null ? {} : { previousPath: file.previousPath }),
     }));
     const result = evaluateTaskOwnership(task.ownership.rules, changes);
+    const project = readModel.projects.find((candidate) => candidate.id === task.projectId);
+    const resourceViolations = evaluateResourceCompliance({
+      taskId: task.id,
+      changedFiles: changeSet.files,
+      resources: project?.sharedResources ?? [],
+      leases: project?.resourceLeases ?? [],
+    });
     const createdAt = yield* now;
     yield* engine.dispatch({
       type: "task.ownership.validated",
@@ -89,6 +97,7 @@ const make = Effect.gen(function* () {
       taskId,
       changedPathCount: result.changedPathCount,
       violations: result.violations,
+      resourceViolations,
       requestCompletion,
       requestReview,
       generation,
@@ -173,6 +182,27 @@ const make = Effect.gen(function* () {
 
   const reconcile = Effect.gen(function* () {
     const readModel = yield* snapshots.getCommandReadModel();
+    const terminalTaskIds = new Set(
+      (readModel.tasks ?? [])
+        .filter((task) => task.status === "completed" || task.status === "cancelled")
+        .map((task) => task.id),
+    );
+    for (const project of readModel.projects) {
+      const hasStaleLease = (project.resourceLeases ?? []).some(
+        (lease) => lease.status === "held" && terminalTaskIds.has(lease.taskId),
+      );
+      if (hasStaleLease) {
+        const metadata = yield* Effect.all({
+          commandId: commandId("resource-leases-reconcile"),
+          createdAt: now,
+        });
+        yield* engine.dispatch({
+          type: "project.resource-leases.reconcile",
+          projectId: project.id,
+          ...metadata,
+        });
+      }
+    }
     for (const task of readModel.tasks ?? []) {
       if (taskNeedsOwnershipReconciliation(task)) {
         const receipt = yield* requestValidation(task.id);
@@ -199,6 +229,27 @@ const make = Effect.gen(function* () {
     function* () {
       yield* forkParked(
         Stream.runForEach(engine.streamDomainEvents, (event) => {
+          if (
+            event.type === "project.shared-resource-created" ||
+            event.type === "project.shared-resource-updated" ||
+            event.type === "project.shared-resource-deleted"
+          ) {
+            return snapshots.getCommandReadModel().pipe(
+              Effect.flatMap((readModel) =>
+                Effect.forEach(
+                  (readModel.tasks ?? []).filter(
+                    (task) =>
+                      task.projectId === event.payload.projectId &&
+                      task.status === "active" &&
+                      task.ownership?.required === true &&
+                      task.workspace?.status === "ready",
+                  ),
+                  (task) => requestValidation(task.id),
+                  { discard: true },
+                ),
+              ),
+            );
+          }
           if (
             event.type === "task.ownership-updated" ||
             event.type === "task.ownership-validation-requested" ||

@@ -15,6 +15,8 @@ import {
   ProjectReviewPolicy,
   ProjectScript,
   ThreadEnvMode,
+  SharedResourceDefinition,
+  ResourceLease,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -34,6 +36,8 @@ export const ProjectionProject = Schema.Struct({
   qualityPolicy: Schema.NullOr(ProjectQualityPolicy),
   reviewPolicy: Schema.NullOr(ProjectReviewPolicy),
   integrationBatches: Schema.optional(Schema.Array(IntegrationBatch)),
+  sharedResources: Schema.optional(Schema.Array(SharedResourceDefinition)),
+  resourceLeases: Schema.optional(Schema.Array(ResourceLease)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),

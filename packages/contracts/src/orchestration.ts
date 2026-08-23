@@ -13,6 +13,9 @@ import {
   IsoDateTime,
   IntegrationBatchId,
   MissionId,
+  OwnershipRequestId,
+  ResourceLeaseId,
+  SharedResourceId,
   MessageId,
   NonNegativeInt,
   PositiveInt,
@@ -434,6 +437,30 @@ export const Mission = Schema.Struct({
 });
 export type Mission = typeof Mission.Type;
 
+export const SharedResourceDefinition = Schema.Struct({
+  id: SharedResourceId,
+  projectId: ProjectId,
+  name: TrimmedNonEmptyString,
+  description: Schema.NullOr(TrimmedString),
+  patterns: Schema.Array(TrimmedNonEmptyString),
+  mode: Schema.Literal("exclusive"),
+  enabled: Schema.Boolean,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type SharedResourceDefinition = typeof SharedResourceDefinition.Type;
+
+export const ResourceLease = Schema.Struct({
+  id: ResourceLeaseId,
+  projectId: ProjectId,
+  resourceId: SharedResourceId,
+  taskId: TaskId,
+  status: Schema.Literals(["held", "released"]),
+  acquiredAt: IsoDateTime,
+  releasedAt: Schema.NullOr(IsoDateTime),
+});
+export type ResourceLease = typeof ResourceLease.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -450,6 +477,8 @@ export const OrchestrationProject = Schema.Struct({
   reviewPolicy: Schema.optional(Schema.NullOr(ProjectReviewPolicy)),
   // Optional for snapshots created before deterministic Integration Batches shipped.
   integrationBatches: Schema.optional(Schema.Array(IntegrationBatch)),
+  sharedResources: Schema.optional(Schema.Array(SharedResourceDefinition)),
+  resourceLeases: Schema.optional(Schema.Array(ResourceLease)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -756,6 +785,35 @@ export const TaskOwnershipState = Schema.Struct({
 });
 export type TaskOwnershipState = typeof TaskOwnershipState.Type;
 
+export const TaskResourceViolation = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  resourceId: SharedResourceId,
+  resourceName: TrimmedNonEmptyString,
+});
+export type TaskResourceViolation = typeof TaskResourceViolation.Type;
+
+export const TaskResourceComplianceState = Schema.Struct({
+  status: Schema.Literals(["pending", "valid", "violation", "error"]),
+  validatedAt: Schema.NullOr(IsoDateTime),
+  violations: Schema.Array(TaskResourceViolation),
+  errorReason: Schema.NullOr(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+export type TaskResourceComplianceState = typeof TaskResourceComplianceState.Type;
+
+export const OwnershipRequest = Schema.Struct({
+  id: OwnershipRequestId,
+  taskId: TaskId,
+  status: Schema.Literals(["pending", "approved", "denied", "cancelled"]),
+  requestedRules: Schema.Array(TaskOwnershipRule),
+  reason: TrimmedNonEmptyString,
+  source: Schema.Literals(["human", "violation"]),
+  createdAt: IsoDateTime,
+  resolvedAt: Schema.NullOr(IsoDateTime),
+  resolutionNote: Schema.NullOr(TrimmedString),
+});
+export type OwnershipRequest = typeof OwnershipRequest.Type;
+
 export const OrchestrationTask = Schema.Struct({
   id: TaskId,
   projectId: ProjectId,
@@ -787,6 +845,9 @@ export const OrchestrationTask = Schema.Struct({
   result: Schema.optional(Schema.NullOr(TaskResult)),
   qualityGateRuns: Schema.optional(Schema.Array(QualityGateRun)),
   reviews: Schema.optional(Schema.Array(TaskReview)),
+  requiredResourceIds: Schema.optional(Schema.Array(SharedResourceId)),
+  resourceCompliance: Schema.optional(Schema.NullOr(TaskResourceComplianceState)),
+  ownershipRequests: Schema.optional(Schema.Array(OwnershipRequest)),
 });
 export type OrchestrationTask = typeof OrchestrationTask.Type;
 
@@ -988,6 +1049,8 @@ export const OrchestrationProjectShell = Schema.Struct({
   qualityPolicy: Schema.optional(Schema.NullOr(ProjectQualityPolicy)),
   reviewPolicy: Schema.optional(Schema.NullOr(ProjectReviewPolicy)),
   integrationBatches: Schema.optional(Schema.Array(IntegrationBatch)),
+  sharedResources: Schema.optional(Schema.Array(SharedResourceDefinition)),
+  resourceLeases: Schema.optional(Schema.Array(ResourceLease)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1222,6 +1285,37 @@ const ProjectReviewPolicyUpdateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ProjectSharedResourceCreateCommand = Schema.Struct({
+  type: Schema.Literal("project.shared-resource.create"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  resourceId: SharedResourceId,
+  name: TrimmedNonEmptyString,
+  description: Schema.optional(Schema.NullOr(TrimmedString)),
+  patterns: Schema.Array(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
+const ProjectSharedResourceUpdateCommand = Schema.Struct({
+  type: Schema.Literal("project.shared-resource.update"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  resourceId: SharedResourceId,
+  name: TrimmedNonEmptyString,
+  description: Schema.optional(Schema.NullOr(TrimmedString)),
+  patterns: Schema.Array(TrimmedNonEmptyString),
+  enabled: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+const ProjectSharedResourceDeleteCommand = Schema.Struct({
+  type: Schema.Literal("project.shared-resource.delete"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  resourceId: SharedResourceId,
+  createdAt: IsoDateTime,
+});
+
 const MissionCreateCommand = Schema.Struct({
   type: Schema.Literal("mission.create"),
   commandId: CommandId,
@@ -1330,6 +1424,7 @@ const TaskCreateCommand = Schema.Struct({
   acceptanceCriteria: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   reviewRequired: Schema.optional(Schema.Boolean),
   preferDifferentReviewerProvider: Schema.optional(Schema.Boolean),
+  requiredResourceIds: Schema.optional(Schema.Array(SharedResourceId)),
   createdAt: IsoDateTime,
 });
 
@@ -1398,6 +1493,49 @@ const TaskOwnershipValidateCommand = Schema.Struct({
   commandId: CommandId,
   taskId: TaskId,
   createdAt: IsoDateTime,
+});
+
+const TaskResourceRequirementsSetCommand = Schema.Struct({
+  type: Schema.Literal("task.resource-requirements.set"),
+  commandId: CommandId,
+  taskId: TaskId,
+  resourceIds: Schema.Array(SharedResourceId),
+  confirmActiveChange: Schema.optional(Schema.Boolean),
+  createdAt: IsoDateTime,
+});
+
+const TaskOwnershipRequestCreateCommand = Schema.Struct({
+  type: Schema.Literal("task.ownership-request.create"),
+  commandId: CommandId,
+  taskId: TaskId,
+  requestId: OwnershipRequestId,
+  requestedRules: Schema.Array(TaskOwnershipRule),
+  reason: TrimmedNonEmptyString,
+  source: Schema.Literals(["human", "violation"]),
+  createdAt: IsoDateTime,
+});
+
+const TaskOwnershipRequestResolutionFields = {
+  commandId: CommandId,
+  taskId: TaskId,
+  requestId: OwnershipRequestId,
+  resolutionNote: Schema.optional(Schema.NullOr(TrimmedString)),
+  createdAt: IsoDateTime,
+} as const;
+
+const TaskOwnershipRequestApproveCommand = Schema.Struct({
+  type: Schema.Literal("task.ownership-request.approve"),
+  ...TaskOwnershipRequestResolutionFields,
+});
+
+const TaskOwnershipRequestDenyCommand = Schema.Struct({
+  type: Schema.Literal("task.ownership-request.deny"),
+  ...TaskOwnershipRequestResolutionFields,
+});
+
+const TaskOwnershipRequestCancelCommand = Schema.Struct({
+  type: Schema.Literal("task.ownership-request.cancel"),
+  ...TaskOwnershipRequestResolutionFields,
 });
 
 const TaskReviewPrepareCommand = Schema.Struct({
@@ -1787,6 +1925,9 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectQualityPolicyUpdateCommand,
   ProjectReviewPolicyUpdateCommand,
+  ProjectSharedResourceCreateCommand,
+  ProjectSharedResourceUpdateCommand,
+  ProjectSharedResourceDeleteCommand,
   ProjectDeleteCommand,
   MissionCreateCommand,
   MissionUpdateCommand,
@@ -1813,6 +1954,11 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   TaskWorkspaceRemoveCommand,
   TaskOwnershipSetCommand,
   TaskOwnershipValidateCommand,
+  TaskResourceRequirementsSetCommand,
+  TaskOwnershipRequestCreateCommand,
+  TaskOwnershipRequestApproveCommand,
+  TaskOwnershipRequestDenyCommand,
+  TaskOwnershipRequestCancelCommand,
   TaskReviewPrepareCommand,
   TaskHandoffUpdateCommand,
   TaskQualityRunCommand,
@@ -1850,6 +1996,9 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectQualityPolicyUpdateCommand,
   ProjectReviewPolicyUpdateCommand,
+  ProjectSharedResourceCreateCommand,
+  ProjectSharedResourceUpdateCommand,
+  ProjectSharedResourceDeleteCommand,
   ProjectDeleteCommand,
   MissionCreateCommand,
   MissionUpdateCommand,
@@ -1876,6 +2025,11 @@ export const ClientOrchestrationCommand = Schema.Union([
   TaskWorkspaceRemoveCommand,
   TaskOwnershipSetCommand,
   TaskOwnershipValidateCommand,
+  TaskResourceRequirementsSetCommand,
+  TaskOwnershipRequestCreateCommand,
+  TaskOwnershipRequestApproveCommand,
+  TaskOwnershipRequestDenyCommand,
+  TaskOwnershipRequestCancelCommand,
   TaskReviewPrepareCommand,
   TaskHandoffUpdateCommand,
   TaskQualityRunCommand,
@@ -2040,6 +2194,7 @@ const TaskOwnershipValidatedCommand = Schema.Struct({
   taskId: TaskId,
   changedPathCount: NonNegativeInt,
   violations: Schema.Array(TaskOwnershipViolation),
+  resourceViolations: Schema.optional(Schema.Array(TaskResourceViolation)),
   requestCompletion: Schema.Boolean,
   requestReview: Schema.optional(Schema.Boolean),
   generation: Schema.optional(Schema.Literals(["provider", "manual"])),
@@ -2185,6 +2340,13 @@ const IntegrationUpdateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ProjectResourceLeasesReconcileCommand = Schema.Struct({
+  type: Schema.Literal("project.resource-leases.reconcile"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   TaskWorkspacePreparationStartedCommand,
   TaskWorkspaceReadyCommand,
@@ -2208,6 +2370,7 @@ const InternalOrchestrationCommand = Schema.Union([
   TaskRestoreFailedCommand,
   TaskRestoreUndoneCommand,
   IntegrationUpdateCommand,
+  ProjectResourceLeasesReconcileCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
@@ -2230,6 +2393,11 @@ export const OrchestrationEventType = Schema.Literals([
   "project.meta-updated",
   "project.quality-policy-updated",
   "project.review-policy-updated",
+  "project.shared-resource-created",
+  "project.shared-resource-updated",
+  "project.shared-resource-deleted",
+  "resource.leases-acquired",
+  "resource.leases-released",
   "project.deleted",
   "mission.created",
   "mission.updated",
@@ -2266,6 +2434,12 @@ export const OrchestrationEventType = Schema.Literals([
   "task.ownership-validation-requested",
   "task.ownership-validated",
   "task.ownership-validation-failed",
+  "task.resource-requirements-updated",
+  "task.resource-validated",
+  "task.ownership-request-created",
+  "task.ownership-request-approved",
+  "task.ownership-request-denied",
+  "task.ownership-request-cancelled",
   "task.review.prepare-requested",
   "task.review.prepared",
   "task.review.prepare-failed",
@@ -2354,6 +2528,24 @@ export const ProjectQualityPolicyUpdatedPayload = Schema.Struct({
 export const ProjectReviewPolicyUpdatedPayload = Schema.Struct({
   projectId: ProjectId,
   policy: ProjectReviewPolicy,
+  updatedAt: IsoDateTime,
+});
+
+export const ProjectSharedResourcePayload = Schema.Struct({
+  projectId: ProjectId,
+  resource: SharedResourceDefinition,
+});
+
+export const ProjectSharedResourceDeletedPayload = Schema.Struct({
+  projectId: ProjectId,
+  resourceId: SharedResourceId,
+  updatedAt: IsoDateTime,
+});
+
+export const ResourceLeasesPayload = Schema.Struct({
+  projectId: ProjectId,
+  taskId: TaskId,
+  leases: Schema.Array(ResourceLease),
   updatedAt: IsoDateTime,
 });
 
@@ -2454,6 +2646,7 @@ export const OrchestrationTaskCreatedPayload = Schema.Struct({
   reviewRequired: Schema.optional(Schema.Boolean),
   preferDifferentReviewerProvider: Schema.optional(Schema.Boolean),
   ownershipRequired: Schema.optional(Schema.Boolean),
+  requiredResourceIds: Schema.optional(Schema.Array(SharedResourceId)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -2484,6 +2677,28 @@ export const OrchestrationTaskOwnershipValidatedPayload = Schema.Struct({
   changedPathCount: NonNegativeInt,
   violations: Schema.Array(TaskOwnershipViolation),
   validatedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskResourceRequirementsUpdatedPayload = Schema.Struct({
+  taskId: TaskId,
+  resourceIds: Schema.Array(SharedResourceId),
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskResourceValidatedPayload = Schema.Struct({
+  taskId: TaskId,
+  status: Schema.Literals(["valid", "violation"]),
+  violations: Schema.Array(TaskResourceViolation),
+  validatedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const OrchestrationTaskOwnershipRequestPayload = Schema.Struct({
+  taskId: TaskId,
+  request: OwnershipRequest,
+  rules: Schema.optional(Schema.Array(TaskOwnershipRule)),
+  resourceIds: Schema.optional(Schema.Array(SharedResourceId)),
   updatedAt: IsoDateTime,
 });
 
@@ -2940,6 +3155,31 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("project.shared-resource-created"),
+    payload: ProjectSharedResourcePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.shared-resource-updated"),
+    payload: ProjectSharedResourcePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.shared-resource-deleted"),
+    payload: ProjectSharedResourceDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("resource.leases-acquired"),
+    payload: ResourceLeasesPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("resource.leases-released"),
+    payload: ResourceLeasesPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
   }),
@@ -3112,6 +3352,36 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("task.ownership-validated"),
     payload: OrchestrationTaskOwnershipValidatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.resource-requirements-updated"),
+    payload: OrchestrationTaskResourceRequirementsUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.resource-validated"),
+    payload: OrchestrationTaskResourceValidatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.ownership-request-created"),
+    payload: OrchestrationTaskOwnershipRequestPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.ownership-request-approved"),
+    payload: OrchestrationTaskOwnershipRequestPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.ownership-request-denied"),
+    payload: OrchestrationTaskOwnershipRequestPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("task.ownership-request-cancelled"),
+    payload: OrchestrationTaskOwnershipRequestPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

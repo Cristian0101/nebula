@@ -153,3 +153,16 @@ Nebula succeeds when independent work can proceed in parallel while the user can
 - What actually changed and what was tested?
 - What is waiting for review or integration?
 - How can this action be stopped or undone?
+
+## Shared-resource coordination
+
+- A Project defines enabled exclusive Shared Resources with repository-relative ownership-compatible
+  globs. A Task explicitly names the resources it requires.
+- Task start atomically acquires every required lease or starts nothing and reports the holder.
+- Held leases survive restart and release on completion or cancellation; startup repairs stale leases
+  whose owning Task is terminal.
+- Git-derived changes are checked against held leases separately from ownership, and violations block
+  review and completion.
+- Ownership expansion is a durable human-reviewed request. Approval changes canonical ownership;
+  requiring an intersecting resource is a separate explicit action.
+- Automatic scheduling, provider-generated requests, Architect, and Swarm Mode remain out of scope.

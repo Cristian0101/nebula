@@ -115,6 +115,10 @@
       "types": "./src/missionGraph.ts",
       "import": "./src/missionGraph.ts"
     },
+    "./resourceCoordination": {
+      "types": "./src/resourceCoordination.ts",
+      "import": "./src/resourceCoordination.ts"
+    },
     "./remote": {
       "types": "./src/remote.ts",
       "import": "./src/remote.ts"
@@ -242,6 +246,7 @@
     "@t3tools/contracts": "workspace:*",
     "effect": "catalog:",
     "jose": "catalog:",
+    "minimatch": "^10.2.5",
     "yaml": "catalog:"
   },
   "devDependencies": {

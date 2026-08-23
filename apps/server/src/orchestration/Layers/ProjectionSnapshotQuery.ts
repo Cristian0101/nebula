@@ -43,6 +43,11 @@ import {
   MissionStatus,
   TaskId,
   type Mission,
+  SharedResourceDefinition,
+  ResourceLease,
+  SharedResourceId,
+  TaskResourceComplianceState,
+  OwnershipRequest,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -99,6 +104,8 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     qualityPolicy: Schema.NullOr(Schema.fromJsonString(ProjectQualityPolicy)),
     reviewPolicy: Schema.NullOr(Schema.fromJsonString(ProjectReviewPolicy)),
     integrationBatches: Schema.fromJsonString(Schema.Array(IntegrationBatch)),
+    sharedResources: Schema.fromJsonString(Schema.Array(SharedResourceDefinition)),
+    resourceLeases: Schema.fromJsonString(Schema.Array(ResourceLease)),
   }),
 );
 const ProjectionTaskDbRowSchema = ProjectionTask.mapFields(
@@ -113,6 +120,9 @@ const ProjectionTaskDbRowSchema = ProjectionTask.mapFields(
     acceptanceCriteriaJson: Schema.fromJsonString(Schema.Array(Schema.String)),
     qualityGateRunsJson: Schema.fromJsonString(Schema.Array(QualityGateRun)),
     reviewsJson: Schema.fromJsonString(Schema.Array(TaskReview)),
+    requiredResourceIdsJson: Schema.fromJsonString(Schema.Array(SharedResourceId)),
+    resourceComplianceJson: Schema.NullOr(Schema.fromJsonString(TaskResourceComplianceState)),
+    ownershipRequestsJson: Schema.fromJsonString(Schema.Array(OwnershipRequest)),
   }),
 );
 type ProjectionTaskRow = typeof ProjectionTaskDbRowSchema.Type;
@@ -168,6 +178,9 @@ const mapTaskRow = (row: ProjectionTaskRow): OrchestrationTask => ({
   result: row.resultJson,
   qualityGateRuns: row.qualityGateRunsJson,
   reviews: row.reviewsJson,
+  requiredResourceIds: row.requiredResourceIdsJson,
+  resourceCompliance: row.resourceComplianceJson,
+  ownershipRequests: row.ownershipRequestsJson,
 });
 const ProjectionMissionRow = Schema.Struct({
   missionId: MissionId,
@@ -501,6 +514,8 @@ function mapProjectShellRow(
     qualityPolicy: row.qualityPolicy,
     reviewPolicy: row.reviewPolicy,
     integrationBatches: row.integrationBatches ?? [],
+    sharedResources: row.sharedResources ?? [],
+    resourceLeases: row.resourceLeases ?? [],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -581,6 +596,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           quality_policy_json AS "qualityPolicy",
           review_policy_json AS "reviewPolicy",
           integration_batches_json AS "integrationBatches",
+          shared_resources_json AS "sharedResources",
+          resource_leases_json AS "resourceLeases",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -636,6 +653,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           , result_json AS "resultJson"
           , quality_gate_runs_json AS "qualityGateRunsJson"
           , reviews_json AS "reviewsJson"
+          , required_resource_ids_json AS "requiredResourceIdsJson"
+          , resource_compliance_json AS "resourceComplianceJson"
+          , ownership_requests_json AS "ownershipRequestsJson"
         FROM projection_tasks
         ORDER BY created_at ASC, task_id ASC
       `,
@@ -1148,6 +1168,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           quality_policy_json AS "qualityPolicy",
           review_policy_json AS "reviewPolicy",
           integration_batches_json AS "integrationBatches",
+          shared_resources_json AS "sharedResources",
+          resource_leases_json AS "resourceLeases",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1175,6 +1197,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           quality_policy_json AS "qualityPolicy",
           review_policy_json AS "reviewPolicy",
           integration_batches_json AS "integrationBatches",
+          shared_resources_json AS "sharedResources",
+          resource_leases_json AS "resourceLeases",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1993,6 +2017,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 qualityPolicy: row.qualityPolicy,
                 reviewPolicy: row.reviewPolicy,
                 integrationBatches: row.integrationBatches ?? [],
+                sharedResources: row.sharedResources ?? [],
+                resourceLeases: row.resourceLeases ?? [],
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 deletedAt: row.deletedAt,
@@ -2152,6 +2178,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   qualityPolicy: row.qualityPolicy,
                   reviewPolicy: row.reviewPolicy,
                   integrationBatches: row.integrationBatches ?? [],
+                  sharedResources: row.sharedResources ?? [],
+                  resourceLeases: row.resourceLeases ?? [],
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   deletedAt: row.deletedAt,

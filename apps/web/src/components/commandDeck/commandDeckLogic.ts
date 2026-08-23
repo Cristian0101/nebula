@@ -10,6 +10,7 @@ import type { ProviderInstanceEntry } from "../../providerInstances";
 
 export type CommandDeckAttentionKind =
   | "ownership"
+  | "resource"
   | "workspace"
   | "provider"
   | "quality"
@@ -67,9 +68,18 @@ export function deriveTaskAttention(input: {
   readonly thread: OrchestrationThreadShell | null;
   readonly providerEntry: ProviderInstanceEntry | null;
   readonly modelSelection: ModelSelection | null;
+  readonly resourceBlockerTaskId?: OrchestrationTask["id"] | null;
 }): ReadonlyArray<CommandDeckAttention> {
   const attention: CommandDeckAttention[] = [];
   const { task, thread, providerEntry, modelSelection } = input;
+  if (input.resourceBlockerTaskId) {
+    attention.push({ kind: "resource", label: `Resource held by ${input.resourceBlockerTaskId}` });
+  }
+  if (task.resourceCompliance?.status === "violation") {
+    attention.push({ kind: "resource", label: "Unleased shared resource change" });
+  } else if (task.resourceCompliance?.status === "error") {
+    attention.push({ kind: "resource", label: "Resource check failed" });
+  }
   if (task.ownership?.status === "violation") {
     attention.push({ kind: "ownership", label: "Ownership violation" });
   } else if (task.ownership?.status === "error") {

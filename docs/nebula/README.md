@@ -46,26 +46,35 @@ The code is authoritative for current behavior. These documents are authoritativ
 
 ## Capability status
 
-| Capability                  | Status          |
-| --------------------------- | --------------- |
-| Task                        | Implemented     |
-| Worktree isolation          | Implemented     |
-| Ownership                   | Implemented     |
-| Structured handoff          | Implemented     |
-| Quality gates               | Implemented     |
-| Reviewer                    | Implemented     |
-| Command Deck                | Implemented     |
-| Integration Engine          | Implemented     |
-| Mission                     | Implemented     |
-| Explicit Task DAG           | Implemented     |
-| Execution Waves             | Implemented     |
-| Human-controlled wave start | Implemented     |
-| Automatic Task planning     | Not implemented |
-| Automatic scheduler         | Not implemented |
-| Automatic provider routing  | Not implemented |
-| Shared-resource locks       | Not implemented |
-| Architect                   | Not implemented |
-| Swarm Mode                  | Not implemented |
+| Capability                            | Status          |
+| ------------------------------------- | --------------- |
+| Task                                  | Implemented     |
+| Worktree isolation                    | Implemented     |
+| Ownership                             | Implemented     |
+| Structured handoff                    | Implemented     |
+| Quality gates                         | Implemented     |
+| Reviewer                              | Implemented     |
+| Command Deck                          | Implemented     |
+| Integration Engine                    | Implemented     |
+| Mission                               | Implemented     |
+| Explicit Task DAG                     | Implemented     |
+| Execution Waves                       | Implemented     |
+| Human-controlled wave start           | Implemented     |
+| Automatic Task planning               | Not implemented |
+| Automatic scheduler                   | Not implemented |
+| Automatic provider routing            | Not implemented |
+| Shared Resource definitions           | Implemented     |
+| Exclusive Task resource leases        | Implemented     |
+| Mission resource blocking             | Implemented     |
+| Resource compliance validation        | Implemented     |
+| Human-approved ownership requests     | Implemented     |
+| Provider-generated ownership requests | Not implemented |
+| Architect                             | Not implemented |
+| Swarm Mode                            | Not implemented |
+
+Shared Resources are Project-defined logical resources whose repository-relative patterns may be
+edited by only one active Task at a time. They complement worktree isolation and path ownership; they
+do not replace either system. See [Shared Resources](../user/shared-resources.md).
 
 ## Change discipline
 

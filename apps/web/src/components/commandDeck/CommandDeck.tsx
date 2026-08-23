@@ -4,7 +4,8 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import { createModelSelection } from "@t3tools/shared/model";
-import { MissionId, TaskRestoreId, TaskReviewId } from "@t3tools/contracts";
+import { resourceMatchesPath } from "@t3tools/shared/resourceCoordination";
+import { MissionId, OwnershipRequestId, TaskRestoreId, TaskReviewId } from "@t3tools/contracts";
 import type {
   EnvironmentId,
   ModelSelection,
@@ -13,6 +14,9 @@ import type {
   TaskId,
   ProjectQualityPolicy,
   ProjectReviewPolicy,
+  SharedResourceId,
+  SharedResourceDefinition,
+  ResourceLease,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -109,9 +113,11 @@ interface CommandDeckProject {
   readonly defaultModelSelection: ModelSelection | null;
   readonly qualityPolicy?: ProjectQualityPolicy | null | undefined;
   readonly reviewPolicy?: ProjectReviewPolicy | null | undefined;
+  readonly sharedResources?: ReadonlyArray<SharedResourceDefinition> | undefined;
+  readonly resourceLeases?: ReadonlyArray<ResourceLease> | undefined;
 }
 
-type InspectorSection = "overview" | "ownership" | "changes" | "review" | "workspace";
+type InspectorSection = "overview" | "ownership" | "resources" | "changes" | "review" | "workspace";
 type CommandDeckSection = "tasks" | "missions" | "integration";
 
 const toneVariant = {
@@ -129,6 +135,30 @@ function commandError(result: AtomCommandResult<unknown, unknown>): string | nul
 
 function taskChangedFiles(task: OrchestrationTask): number {
   return taskChangedFileCount(task);
+}
+
+function taskResourceContext(project: CommandDeckProject, task: OrchestrationTask): string {
+  const required = new Set(task.requiredResourceIds ?? []);
+  const held = new Map(
+    (project.resourceLeases ?? [])
+      .filter((lease) => lease.status === "held")
+      .map((lease) => [lease.resourceId, lease]),
+  );
+  const resources = project.sharedResources ?? [];
+  return [
+    "SHARED RESOURCES",
+    resources.length === 0
+      ? "- None configured"
+      : resources
+          .map((resource) => {
+            const lease = held.get(resource.id);
+            const requirement = required.has(resource.id) ? "required" : "not required";
+            const leaseState = lease ? `leased to Task ${lease.taskId}` : "available";
+            return `- ${resource.name}: ${requirement}; ${leaseState}; paths ${resource.patterns.join(", ")}`;
+          })
+          .join("\n"),
+    "Do not edit a shared-resource path unless this Task explicitly requires it and holds its lease. Request human approval for any ownership expansion.",
+  ].join("\n\n");
 }
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -320,11 +350,18 @@ export function CommandDeck({
               thread,
               providerEntry: providerEntryByTaskId.get(task.id) ?? null,
               modelSelection: modelSelectionByTaskId.get(task.id) ?? null,
+              resourceBlockerTaskId:
+                (project.resourceLeases ?? []).find(
+                  (lease) =>
+                    lease.status === "held" &&
+                    lease.taskId !== task.id &&
+                    (task.requiredResourceIds ?? []).includes(lease.resourceId),
+                )?.taskId ?? null,
             }),
           ] as const;
         }),
       ),
-    [modelSelectionByTaskId, providerEntryByTaskId, tasks, threadById],
+    [modelSelectionByTaskId, project.resourceLeases, providerEntryByTaskId, tasks, threadById],
   );
   const summary = useMemo(
     () => summarizeCommandDeck(tasks, attentionByTaskId),
@@ -360,6 +397,18 @@ export function CommandDeck({
   const validateOwnership = useAtomCommand(taskEnvironment.validateOwnership, {
     reportFailure: false,
   });
+  const setResourceRequirements = useAtomCommand(taskEnvironment.setResourceRequirements, {
+    reportFailure: false,
+  });
+  const createOwnershipRequest = useAtomCommand(taskEnvironment.createOwnershipRequest, {
+    reportFailure: false,
+  });
+  const approveOwnershipRequest = useAtomCommand(taskEnvironment.approveOwnershipRequest, {
+    reportFailure: false,
+  });
+  const denyOwnershipRequest = useAtomCommand(taskEnvironment.denyOwnershipRequest, {
+    reportFailure: false,
+  });
   const prepareReview = useAtomCommand(taskEnvironment.prepareReview, { reportFailure: false });
   const updateHandoff = useAtomCommand(taskEnvironment.updateHandoff, { reportFailure: false });
   const setAcceptanceCriteria = useAtomCommand(taskEnvironment.setAcceptanceCriteria, {
@@ -392,6 +441,9 @@ export function CommandDeck({
   const [createTitle, setCreateTitle] = useState("");
   const [createObjective, setCreateObjective] = useState("");
   const [createCriteria, setCreateCriteria] = useState<string[]>([]);
+  const [createResourceIds, setCreateResourceIds] = useState<ReadonlySet<SharedResourceId>>(
+    () => new Set(),
+  );
   const [createSelection, setCreateSelection] = useState<ModelSelection | null>(fallbackSelection);
   const [createOwnership, setCreateOwnership] = useState<ReadonlyArray<OwnershipRuleDraft>>([
     { draftId: randomUUID(), access: "write", pattern: "", reason: "" },
@@ -406,6 +458,8 @@ export function CommandDeck({
   const [handoffSummary, setHandoffSummary] = useState("");
   const [criteriaText, setCriteriaText] = useState("");
   const [reviewerSelection, setReviewerSelection] = useState<ModelSelection | null>(null);
+  const [requestPattern, setRequestPattern] = useState("");
+  const [requestReason, setRequestReason] = useState("");
 
   useEffect(() => setCreateSelection(fallbackSelection), [fallbackSelection]);
   useEffect(() => setHandoffSummary(selectedTask?.handoff?.summary ?? ""), [selectedTask?.handoff]);
@@ -457,6 +511,7 @@ export function CommandDeck({
           role: "builder",
           modelSelection: createSelection,
           acceptanceCriteria: createCriteria.map((criterion) => criterion.trim()).filter(Boolean),
+          requiredResourceIds: [...createResourceIds],
         },
       }),
     );
@@ -485,6 +540,7 @@ export function CommandDeck({
     setCreateTitle("");
     setCreateObjective("");
     setCreateCriteria([]);
+    setCreateResourceIds(new Set());
     setCreateOwnership([{ draftId: randomUUID(), access: "write", pattern: "", reason: "" }]);
     setCreateMissionId(null);
     setCreateOpen(false);
@@ -557,7 +613,7 @@ export function CommandDeck({
             message: {
               messageId: newMessageId(),
               role: "user",
-              text: `Task: ${task.title}\n\nObjective:\n${task.objective}\n\n${taskOwnershipContext(task)}`,
+              text: `Task: ${task.title}\n\nObjective:\n${task.objective}\n\n${taskOwnershipContext(task)}\n\n${taskResourceContext(project, task)}`,
               attachments: [],
             },
             modelSelection,
@@ -582,6 +638,8 @@ export function CommandDeck({
       modelSelectionByTaskId,
       project.environmentId,
       project.id,
+      project.resourceLeases,
+      project.sharedResources,
       providerEntryByTaskId,
       reportError,
       startThreadTurn,
@@ -682,6 +740,89 @@ export function CommandDeck({
       }),
     );
     setEditingTask(null);
+  };
+
+  const submitOwnershipRequest = async (task: OrchestrationTask) => {
+    if (!requestPattern.trim() || !requestReason.trim()) return;
+    await runTaskCommand(task, "Could not create ownership request", () =>
+      createOwnershipRequest({
+        environmentId: project.environmentId,
+        input: {
+          taskId: task.id,
+          requestId: OwnershipRequestId.make(randomUUID()),
+          requestedRules: [
+            {
+              id: randomUUID(),
+              access: "write",
+              pattern: requestPattern.trim(),
+              reason: requestReason.trim(),
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          reason: requestReason.trim(),
+          source: task.ownership?.violations.some(
+            (violation) => violation.path === requestPattern.trim(),
+          )
+            ? "violation"
+            : "human",
+        },
+      }),
+    );
+    setRequestPattern("");
+    setRequestReason("");
+  };
+
+  const approveScopeRequest = async (
+    task: OrchestrationTask,
+    request: NonNullable<OrchestrationTask["ownershipRequests"]>[number],
+  ) => {
+    const matchingResources = (project.sharedResources ?? []).filter(
+      (resource) =>
+        resource.enabled &&
+        request.requestedRules.some((rule) => resourceMatchesPath(resource, rule.pattern)),
+    );
+    const addMatchingResources =
+      matchingResources.length > 0 &&
+      window.confirm(
+        `This scope intersects ${matchingResources.map((resource) => resource.name).join(", ")}. Also require the matching resource lease?`,
+      );
+    setBusyTaskId(task.id);
+    const approvalError = commandError(
+      await approveOwnershipRequest({
+        environmentId: project.environmentId,
+        input: { taskId: task.id, requestId: request.id },
+      }),
+    );
+    if (approvalError) {
+      setBusyTaskId(null);
+      reportError("Could not approve ownership request", approvalError);
+      return;
+    }
+    if (addMatchingResources) {
+      const resourceIds = [
+        ...new Set([
+          ...(task.requiredResourceIds ?? []),
+          ...matchingResources.map((resource) => resource.id),
+        ]),
+      ];
+      const requirementError = commandError(
+        await setResourceRequirements({
+          environmentId: project.environmentId,
+          input: {
+            taskId: task.id,
+            resourceIds,
+            ...(task.status === "active" ? { confirmActiveChange: true } : {}),
+          },
+        }),
+      );
+      if (requirementError) {
+        reportError(
+          "Write ownership granted, but the resource is not available",
+          `${requirementError} The Task must acquire the resource before modifying that path.`,
+        );
+      }
+    }
+    setBusyTaskId(null);
   };
 
   const saveHandoffReady = async (task: OrchestrationTask) => {
@@ -1119,20 +1260,27 @@ export function CommandDeck({
                       role="tablist"
                       aria-label="Task inspector sections"
                     >
-                      {(["overview", "ownership", "changes", "review", "workspace"] as const).map(
-                        (section) => (
-                          <button
-                            type="button"
-                            role="tab"
-                            aria-selected={inspectorSection === section}
-                            key={section}
-                            onClick={() => setInspectorSection(section)}
-                            className={`rounded-md px-2 py-1.5 text-xs capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${inspectorSection === section ? "bg-primary/12 text-foreground" : "text-muted-foreground hover:bg-muted/45"}`}
-                          >
-                            {section}
-                          </button>
-                        ),
-                      )}
+                      {(
+                        [
+                          "overview",
+                          "ownership",
+                          "resources",
+                          "changes",
+                          "review",
+                          "workspace",
+                        ] as const
+                      ).map((section) => (
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={inspectorSection === section}
+                          key={section}
+                          onClick={() => setInspectorSection(section)}
+                          className={`rounded-md px-2 py-1.5 text-xs capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${inspectorSection === section ? "bg-primary/12 text-foreground" : "text-muted-foreground hover:bg-muted/45"}`}
+                        >
+                          {section}
+                        </button>
+                      ))}
                     </div>
                     <div className="min-h-0 flex-1 overflow-auto p-3">
                       {inspectorSection === "overview" ? (
@@ -1248,12 +1396,14 @@ export function CommandDeck({
                             </div>
                           ))}
                           {selectedTask.ownership?.violations.map((violation) => (
-                            <p
+                            <button
+                              type="button"
                               key={`${violation.path}:${violation.changeType}`}
-                              className="rounded-md bg-destructive/8 px-2 py-1.5 text-xs text-destructive"
+                              className="block w-full rounded-md bg-destructive/8 px-2 py-1.5 text-left text-xs text-destructive"
+                              onClick={() => setRequestPattern(violation.path)}
                             >
-                              {violation.path} · {violation.reason}
-                            </p>
+                              {violation.path} · {violation.reason} · Create scope request
+                            </button>
                           ))}
                           <div className="flex flex-wrap gap-1.5">
                             <Button
@@ -1284,6 +1434,180 @@ export function CommandDeck({
                               </Button>
                             ) : null}
                           </div>
+                          <div className="space-y-2 border-t border-black/[0.08] pt-3">
+                            <p className="text-sm font-medium">Request scope expansion</p>
+                            <input
+                              aria-label="Requested write path"
+                              className="w-full rounded-md border border-black/[0.08] bg-transparent px-2 py-1.5 text-sm"
+                              placeholder="packages/contracts/src/auth.ts"
+                              value={requestPattern}
+                              onChange={(event) => setRequestPattern(event.currentTarget.value)}
+                            />
+                            <Textarea
+                              aria-label="Ownership request reason"
+                              rows={3}
+                              placeholder="Why this Task needs the additional write path"
+                              value={requestReason}
+                              onChange={(event) => setRequestReason(event.currentTarget.value)}
+                            />
+                            <Button
+                              size="xs"
+                              disabled={!requestPattern.trim() || !requestReason.trim()}
+                              onClick={() => void submitOwnershipRequest(selectedTask)}
+                            >
+                              Create request
+                            </Button>
+                          </div>
+                          <div className="space-y-2 border-t border-black/[0.08] pt-3">
+                            <p className="text-sm font-medium">Requests</p>
+                            {(selectedTask.ownershipRequests ?? []).map((request) => (
+                              <div
+                                key={request.id}
+                                className="rounded-md border border-black/[0.08] p-2 text-xs"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span>
+                                    {request.requestedRules
+                                      .map((rule) => `${rule.access} ${rule.pattern}`)
+                                      .join(" · ")}
+                                  </span>
+                                  <Badge
+                                    size="sm"
+                                    variant={
+                                      request.status === "approved"
+                                        ? "success"
+                                        : request.status === "denied"
+                                          ? "destructive"
+                                          : "outline"
+                                    }
+                                  >
+                                    {request.status}
+                                  </Badge>
+                                </div>
+                                <p className="mt-1 text-muted-foreground">{request.reason}</p>
+                                {request.status === "pending" ? (
+                                  <div className="mt-2 flex gap-2">
+                                    <Button
+                                      size="xs"
+                                      onClick={() =>
+                                        void approveScopeRequest(selectedTask, request)
+                                      }
+                                    >
+                                      Approve
+                                    </Button>
+                                    <Button
+                                      size="xs"
+                                      variant="outline"
+                                      onClick={() =>
+                                        void runTaskCommand(
+                                          selectedTask,
+                                          "Could not deny ownership request",
+                                          () =>
+                                            denyOwnershipRequest({
+                                              environmentId: project.environmentId,
+                                              input: {
+                                                taskId: selectedTask.id,
+                                                requestId: request.id,
+                                                resolutionNote: null,
+                                              },
+                                            }),
+                                        )
+                                      }
+                                    >
+                                      Deny
+                                    </Button>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {inspectorSection === "resources" ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium">Resources</span>
+                            <Badge
+                              size="sm"
+                              variant={
+                                selectedTask.resourceCompliance?.status === "valid"
+                                  ? "success"
+                                  : selectedTask.resourceCompliance?.status === "violation"
+                                    ? "destructive"
+                                    : "outline"
+                              }
+                            >
+                              {selectedTask.resourceCompliance?.status ?? "Not validated"}
+                            </Badge>
+                          </div>
+                          {(project.sharedResources ?? [])
+                            .filter((resource) => resource.enabled)
+                            .map((resource) => {
+                              const required = (selectedTask.requiredResourceIds ?? []).includes(
+                                resource.id,
+                              );
+                              const lease = (project.resourceLeases ?? []).find(
+                                (candidate) =>
+                                  candidate.resourceId === resource.id &&
+                                  candidate.status === "held",
+                              );
+                              return (
+                                <label
+                                  key={resource.id}
+                                  className="flex items-start gap-2 rounded-md border border-black/[0.08] p-2 text-sm"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Require ${resource.name}`}
+                                    checked={required}
+                                    onChange={(event) => {
+                                      if (
+                                        selectedTask.status === "active" &&
+                                        !window.confirm("Change resources for this active Task?")
+                                      )
+                                        return;
+                                      const ids = new Set(selectedTask.requiredResourceIds ?? []);
+                                      if (event.currentTarget.checked) ids.add(resource.id);
+                                      else ids.delete(resource.id);
+                                      void runTaskCommand(
+                                        selectedTask,
+                                        "Could not update Task resources",
+                                        () =>
+                                          setResourceRequirements({
+                                            environmentId: project.environmentId,
+                                            input: {
+                                              taskId: selectedTask.id,
+                                              resourceIds: [...ids],
+                                              confirmActiveChange: selectedTask.status === "active",
+                                            },
+                                          }),
+                                      );
+                                    }}
+                                  />
+                                  <span>
+                                    <span className="font-medium">{resource.name}</span>
+                                    <span className="block text-xs text-muted-foreground">
+                                      {lease
+                                        ? lease.taskId === selectedTask.id
+                                          ? "Exclusive lease held by this Task"
+                                          : `Waiting for resource · held by ${tasks.find((task) => task.id === lease.taskId)?.title ?? lease.taskId}`
+                                        : required
+                                          ? "Resource ready"
+                                          : "Not required"}
+                                    </span>
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          {selectedTask.resourceCompliance?.violations.map((violation) => (
+                            <p
+                              key={`${violation.resourceId}:${violation.path}`}
+                              className="rounded-md bg-destructive/8 p-2 text-xs text-destructive"
+                            >
+                              {violation.path} · Exclusive resource {violation.resourceName} is not
+                              leased by this Task.
+                            </p>
+                          ))}
                         </div>
                       ) : null}
                       {inspectorSection === "changes" ? (
@@ -1849,6 +2173,37 @@ export function CommandDeck({
               Keep this compact: state only the observable outcomes the reviewer should verify.
             </p>
           </DialogPanel>
+          {(project.sharedResources ?? []).filter((resource) => resource.enabled).length > 0 ? (
+            <DialogPanel className="space-y-2">
+              <span className="text-sm font-medium">Shared resources</span>
+              {(project.sharedResources ?? [])
+                .filter((resource) => resource.enabled)
+                .map((resource) => (
+                  <label key={resource.id} className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      aria-label={`Require ${resource.name}`}
+                      checked={createResourceIds.has(resource.id)}
+                      onChange={(event) => {
+                        const checked = event.currentTarget.checked;
+                        setCreateResourceIds((current) => {
+                          const next = new Set(current);
+                          if (checked) next.add(resource.id);
+                          else next.delete(resource.id);
+                          return next;
+                        });
+                      }}
+                    />
+                    <span>
+                      <span className="font-medium">{resource.name}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {resource.patterns.join(" · ")}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+            </DialogPanel>
+          ) : null}
           <DialogFooter>
             <Button
               variant="outline"

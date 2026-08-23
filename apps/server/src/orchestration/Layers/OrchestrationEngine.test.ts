@@ -4,6 +4,8 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
   ProjectId,
+  SharedResourceId,
+  TaskId,
   ThreadId,
   TurnId,
   type OrchestrationEvent,
@@ -1377,6 +1379,100 @@ describe("OrchestrationEngine", () => {
     );
     expect(targetThread?.messages.filter((message) => message.role === "user")).toHaveLength(0);
 
+    await system.dispose();
+  });
+
+  it("serializes concurrent exclusive resource acquisition so exactly one Task starts", async () => {
+    const system = await createOrchestrationSystem();
+    const { engine } = system;
+    const createdAt = now();
+    const projectId = asProjectId("project-resource-race");
+    const resourceId = SharedResourceId.make("dependency-manifest");
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("resource-race-project"),
+        projectId,
+        title: "Resource race",
+        workspaceRoot: "/tmp/project-resource-race",
+        defaultModelSelection: null,
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "project.shared-resource.create",
+        commandId: CommandId.make("resource-race-definition"),
+        projectId,
+        resourceId,
+        name: "Dependency manifest",
+        patterns: ["package.json", "pnpm-lock.yaml"],
+        createdAt,
+      }),
+    );
+    for (const suffix of ["a", "b"] as const) {
+      const taskId = TaskId.make(`resource-race-task-${suffix}`);
+      const threadId = ThreadId.make(`resource-race-thread-${suffix}`);
+      await system.run(
+        engine.dispatch({
+          type: "task.create",
+          commandId: CommandId.make(`resource-race-create-task-${suffix}`),
+          taskId,
+          projectId,
+          title: `Resource Task ${suffix}`,
+          objective: "Prove exclusive command serialization",
+          role: "reviewer",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+          requiredResourceIds: [resourceId],
+          createdAt,
+        }),
+      );
+      await system.run(
+        engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`resource-race-create-thread-${suffix}`),
+          threadId,
+          projectId,
+          title: `Resource Thread ${suffix}`,
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        }),
+      );
+      await system.run(
+        engine.dispatch({
+          type: "task.bind-thread",
+          commandId: CommandId.make(`resource-race-bind-${suffix}`),
+          taskId,
+          threadId,
+          createdAt,
+        }),
+      );
+    }
+
+    const results = await Promise.allSettled(
+      (["a", "b"] as const).map((suffix) =>
+        system.run(
+          engine.dispatch({
+            type: "task.activate",
+            commandId: CommandId.make(`resource-race-activate-${suffix}`),
+            taskId: TaskId.make(`resource-race-task-${suffix}`),
+            createdAt,
+          }),
+        ),
+      ),
+    );
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+
+    const readModel = await system.readModel();
+    expect((readModel.tasks ?? []).filter((task) => task.status === "active")).toHaveLength(1);
+    expect(
+      readModel.projects[0]?.resourceLeases?.filter((lease) => lease.status === "held"),
+    ).toHaveLength(1);
     await system.dispose();
   });
 });

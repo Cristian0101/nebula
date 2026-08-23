@@ -156,3 +156,10 @@ Changing the custom `t3code:` desktop protocol, storage keys, package scopes, or
 | ADR-008 Structured handoff contract         | Yes          | Clarify it follows explicit Task identity and composes existing diff/activity evidence.                                     | T3 has useful evidence primitives but no provider-neutral task handoff.                                                                    |
 
 No accepted ADR is superseded or materially incorrect. ADR-003 and ADR-004 are already phrased as reuse decisions, so a follow-up amendment would add paperwork without changing architecture. Revisit them only if implementation discovers an invariant the existing database transaction or event/projection model cannot express.
+
+## Resource coordination extension point
+
+Extensions may read canonical Shared Resources, Task requirements, lease history, compliance evidence,
+and ownership-request history. Mutations must use typed orchestration commands. Extensions must not
+create sidecar lock files, bypass server acquisition, auto-approve requests, or infer that ownership
+approval grants a resource lease.

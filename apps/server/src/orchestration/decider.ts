@@ -1,6 +1,7 @@
 import {
   EventId,
   QualityGateRunId,
+  ResourceLeaseId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -10,6 +11,10 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 import { computeMissionPlan, validateMissionGraph } from "@t3tools/shared/missionGraph";
+import {
+  resourceBlockers,
+  validateSharedResourceDefinition,
+} from "@t3tools/shared/resourceCoordination";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
@@ -52,6 +57,7 @@ function requireMissionTaskReady(input: {
       }),
     );
   }
+  const project = input.readModel.projects.find((candidate) => candidate.id === mission.projectId);
   const plan = computeMissionPlan({
     mission,
     tasks: input.readModel.tasks ?? [],
@@ -59,6 +65,7 @@ function requireMissionTaskReady(input: {
     integrationBatches:
       input.readModel.projects.find((project) => project.id === mission.projectId)
         ?.integrationBatches ?? [],
+    ...(project ? { project } : {}),
   });
   const taskPlan = plan.tasks.find((candidate) => candidate.task.id === input.taskId);
   return taskPlan?.status === "ready"
@@ -67,6 +74,12 @@ function requireMissionTaskReady(input: {
         new OrchestrationCommandInvariantError({
           commandType: input.command.type,
           detail:
+            taskPlan?.resourceBlockers
+              .map(
+                (blocker) =>
+                  `Waiting for resource '${blocker.resource.name}', held by Task '${blocker.lease.taskId}'.`,
+              )
+              .join(" ") ||
             taskPlan?.blockerReasons.join(" ") ||
             taskPlan?.attention.join(" ") ||
             `Task '${input.taskId}' is not ready in Mission '${mission.id}'.`,
@@ -434,6 +447,175 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
+    }
+
+    case "project.shared-resource.create": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if ((project.sharedResources ?? []).some((resource) => resource.id === command.resourceId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Shared resource '${command.resourceId}' already exists.`,
+        });
+      }
+      const resource = {
+        id: command.resourceId,
+        projectId: command.projectId,
+        name: command.name,
+        description: command.description ?? null,
+        patterns: command.patterns,
+        mode: "exclusive" as const,
+        enabled: true,
+        createdAt: command.createdAt,
+        updatedAt: command.createdAt,
+      };
+      yield* Effect.try({
+        try: () => validateSharedResourceDefinition(resource),
+        catch: (error) =>
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: error instanceof Error ? error.message : "Shared resource is invalid.",
+          }),
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "project.shared-resource-created",
+        payload: { projectId: command.projectId, resource },
+      };
+    }
+
+    case "project.shared-resource.update": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const previous = (project.sharedResources ?? []).find(
+        (resource) => resource.id === command.resourceId,
+      );
+      if (!previous)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Shared resource '${command.resourceId}' does not exist.`,
+        });
+      const held = (project.resourceLeases ?? []).some(
+        (lease) => lease.resourceId === command.resourceId && lease.status === "held",
+      );
+      if (held && command.enabled === false)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Shared resource '${command.resourceId}' cannot be disabled while leased.`,
+        });
+      const resource = {
+        ...previous,
+        name: command.name,
+        description: command.description ?? null,
+        patterns: command.patterns,
+        enabled: command.enabled,
+        updatedAt: command.createdAt,
+      };
+      yield* Effect.try({
+        try: () => validateSharedResourceDefinition(resource),
+        catch: (error) =>
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: error instanceof Error ? error.message : "Shared resource is invalid.",
+          }),
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "project.shared-resource-updated",
+        payload: { projectId: command.projectId, resource },
+      };
+    }
+
+    case "project.shared-resource.delete": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (!(project.sharedResources ?? []).some((resource) => resource.id === command.resourceId))
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Shared resource '${command.resourceId}' does not exist.`,
+        });
+      if (
+        (project.resourceLeases ?? []).some(
+          (lease) => lease.resourceId === command.resourceId && lease.status === "held",
+        )
+      )
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Shared resource '${command.resourceId}' cannot be deleted while leased.`,
+        });
+      if (
+        (readModel.tasks ?? []).some(
+          (task) =>
+            task.projectId === command.projectId &&
+            (task.requiredResourceIds ?? []).includes(command.resourceId),
+        )
+      )
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Shared resource '${command.resourceId}' is still required by a Task.`,
+        });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "project.shared-resource-deleted",
+        payload: {
+          projectId: command.projectId,
+          resourceId: command.resourceId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "project.resource-leases.reconcile": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const terminalTaskIds = new Set(
+        (readModel.tasks ?? [])
+          .filter(
+            (task) =>
+              task.projectId === project.id &&
+              (task.status === "completed" || task.status === "cancelled"),
+          )
+          .map((task) => task.id),
+      );
+      const staleLeases = (project.resourceLeases ?? [])
+        .filter((lease) => lease.status === "held" && terminalTaskIds.has(lease.taskId))
+        .map((lease) => ({ ...lease, status: "released" as const, releasedAt: command.createdAt }));
+      if (staleLeases.length === 0)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${project.id}' has no terminal Task leases to reconcile.`,
+        });
+      const events = [];
+      for (const taskId of new Set(staleLeases.map((lease) => lease.taskId))) {
+        const leases = staleLeases.filter((lease) => lease.taskId === taskId);
+        events.push({
+          ...(yield* withEventBase({
+            aggregateKind: "project",
+            aggregateId: project.id,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "resource.leases-released" as const,
+          payload: {
+            projectId: project.id,
+            taskId,
+            leases,
+            updatedAt: command.createdAt,
+          },
+        });
+      }
+      return events;
     }
 
     case "project.delete": {
@@ -1043,6 +1225,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       yield* requireTaskAbsent({ readModel, command, taskId: command.taskId });
       const projectReviewPolicy = project.reviewPolicy;
+      const requiredResourceIds = command.requiredResourceIds ?? [];
+      const enabledResourceIds = new Set(
+        (project.sharedResources ?? [])
+          .filter((resource) => resource.enabled)
+          .map((resource) => resource.id),
+      );
+      const missingResourceId = requiredResourceIds.find(
+        (resourceId) => !enabledResourceIds.has(resourceId),
+      );
+      if (missingResourceId)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Required shared resource '${missingResourceId}' is missing or disabled.`,
+        });
       return {
         ...(yield* withEventBase({
           aggregateKind: "task",
@@ -1069,6 +1265,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             projectReviewPolicy?.preferDifferentProvider ??
             true,
           ownershipRequired: command.role === "builder",
+          requiredResourceIds,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -1246,20 +1443,76 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           });
         }
       }
-      return {
+      const requiredIds = task.requiredResourceIds ?? [];
+      const resourceById = new Map(
+        (project.sharedResources ?? []).map((resource) => [resource.id, resource]),
+      );
+      const missing = requiredIds.find(
+        (resourceId) => resourceById.get(resourceId)?.enabled !== true,
+      );
+      if (missing)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Required shared resource '${missing}' is missing or disabled.`,
+        });
+      const blockers = resourceBlockers({
+        task,
+        resources: project.sharedResources ?? [],
+        leases: project.resourceLeases ?? [],
+      });
+      if (blockers.length > 0) {
+        const blocker = blockers[0]!;
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Waiting for resource '${blocker.resource.name}', held by Task '${blocker.lease.taskId}'.`,
+        });
+      }
+      const leases = [];
+      for (const resourceId of requiredIds) {
+        const id = yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4));
+        leases.push({
+          id: ResourceLeaseId.make(id),
+          projectId: task.projectId,
+          resourceId,
+          taskId: task.id,
+          status: "held" as const,
+          acquiredAt: command.createdAt,
+          releasedAt: null,
+        });
+      }
+      const activated = {
         ...(yield* withEventBase({
           aggregateKind: "task",
           aggregateId: command.taskId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
         })),
-        type: "task.activated",
+        type: "task.activated" as const,
         payload: {
           taskId: command.taskId,
           activatedAt: command.createdAt,
           updatedAt: command.createdAt,
         },
       };
+      if (leases.length === 0) return activated;
+      return [
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "project",
+            aggregateId: task.projectId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "resource.leases-acquired" as const,
+          payload: {
+            projectId: task.projectId,
+            taskId: task.id,
+            leases,
+            updatedAt: command.createdAt,
+          },
+        },
+        activated,
+      ];
     }
 
     case "task.complete": {
@@ -1326,20 +1579,43 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         };
       }
-      return {
+      const completed = {
         ...(yield* withEventBase({
           aggregateKind: "task",
           aggregateId: command.taskId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
         })),
-        type: "task.completed",
+        type: "task.completed" as const,
         payload: {
           taskId: command.taskId,
           completedAt: command.createdAt,
           updatedAt: command.createdAt,
         },
       };
+      const project = yield* requireProject({ readModel, command, projectId: task.projectId });
+      const leases = (project.resourceLeases ?? [])
+        .filter((lease) => lease.taskId === task.id && lease.status === "held")
+        .map((lease) => ({ ...lease, status: "released" as const, releasedAt: command.createdAt }));
+      if (leases.length === 0) return completed;
+      return [
+        completed,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "project",
+            aggregateId: task.projectId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "resource.leases-released" as const,
+          payload: {
+            projectId: task.projectId,
+            taskId: task.id,
+            leases,
+            updatedAt: command.createdAt,
+          },
+        },
+      ];
     }
 
     case "task.cancel": {
@@ -1350,20 +1626,43 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Terminal Task '${command.taskId}' cannot be cancelled.`,
         });
       }
-      return {
+      const cancelled = {
         ...(yield* withEventBase({
           aggregateKind: "task",
           aggregateId: command.taskId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
         })),
-        type: "task.cancelled",
+        type: "task.cancelled" as const,
         payload: {
           taskId: command.taskId,
           cancelledAt: command.createdAt,
           updatedAt: command.createdAt,
         },
       };
+      const project = yield* requireProject({ readModel, command, projectId: task.projectId });
+      const leases = (project.resourceLeases ?? [])
+        .filter((lease) => lease.taskId === task.id && lease.status === "held")
+        .map((lease) => ({ ...lease, status: "released" as const, releasedAt: command.createdAt }));
+      if (leases.length === 0) return cancelled;
+      return [
+        cancelled,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "project",
+            aggregateId: task.projectId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "resource.leases-released" as const,
+          payload: {
+            projectId: task.projectId,
+            taskId: task.id,
+            leases,
+            updatedAt: command.createdAt,
+          },
+        },
+      ];
     }
 
     case "task.ownership.set": {
@@ -1415,6 +1714,212 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           payload: { taskId: command.taskId, updatedAt: command.createdAt },
         },
       ];
+    }
+
+    case "task.resource-requirements.set": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.status === "completed" || task.status === "cancelled")
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Terminal Task '${task.id}' resource requirements cannot be changed.`,
+        });
+      if (task.status === "active" && command.confirmActiveChange !== true)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Changing active Task resource requirements requires explicit confirmation.",
+        });
+      if (new Set(command.resourceIds).size !== command.resourceIds.length)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Task resource requirements must be unique.",
+        });
+      const project = yield* requireProject({ readModel, command, projectId: task.projectId });
+      const enabledIds = new Set(
+        (project.sharedResources ?? [])
+          .filter((resource) => resource.enabled)
+          .map((resource) => resource.id),
+      );
+      const missing = command.resourceIds.find((resourceId) => !enabledIds.has(resourceId));
+      if (missing)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Required shared resource '${missing}' is missing or disabled.`,
+        });
+      const heldByTask = (project.resourceLeases ?? []).filter(
+        (lease) => lease.taskId === task.id && lease.status === "held",
+      );
+      const removedHeld = heldByTask.find(
+        (lease) => !command.resourceIds.includes(lease.resourceId),
+      );
+      if (removedHeld)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Required lease '${removedHeld.resourceId}' cannot be removed while Task '${task.id}' is active.`,
+        });
+      const events: Array<Omit<OrchestrationEvent, "sequence">> = [
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "task",
+            aggregateId: task.id,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "task.resource-requirements-updated",
+          payload: {
+            taskId: task.id,
+            resourceIds: command.resourceIds,
+            updatedAt: command.createdAt,
+          },
+        },
+      ];
+      if (task.status === "active") {
+        const heldIds = new Set(heldByTask.map((lease) => lease.resourceId));
+        const added = command.resourceIds.filter((resourceId) => !heldIds.has(resourceId));
+        const probe = { ...task, requiredResourceIds: added };
+        const blockers = resourceBlockers({
+          task: probe,
+          resources: project.sharedResources ?? [],
+          leases: project.resourceLeases ?? [],
+        });
+        if (blockers.length > 0)
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Waiting for resource '${blockers[0]!.resource.name}', held by Task '${blockers[0]!.lease.taskId}'.`,
+          });
+        const leases = [];
+        for (const resourceId of added) {
+          const id = yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4));
+          leases.push({
+            id: ResourceLeaseId.make(id),
+            projectId: task.projectId,
+            resourceId,
+            taskId: task.id,
+            status: "held" as const,
+            acquiredAt: command.createdAt,
+            releasedAt: null,
+          });
+        }
+        if (leases.length > 0)
+          events.push({
+            ...(yield* withEventBase({
+              aggregateKind: "project",
+              aggregateId: task.projectId,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            })),
+            type: "resource.leases-acquired",
+            payload: {
+              projectId: task.projectId,
+              taskId: task.id,
+              leases,
+              updatedAt: command.createdAt,
+            },
+          });
+      }
+      return events.length === 1 ? events[0]! : events;
+    }
+
+    case "task.ownership-request.create": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      if (task.status === "completed" || task.status === "cancelled")
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Terminal Task '${task.id}' cannot request ownership expansion.`,
+        });
+      if ((task.ownershipRequests ?? []).some((request) => request.id === command.requestId))
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Ownership request '${command.requestId}' already exists.`,
+        });
+      yield* Effect.try({
+        try: () => validateOwnershipRules(command.requestedRules),
+        catch: (error) =>
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: error instanceof Error ? error.message : "Ownership request rules are invalid.",
+          }),
+      });
+      const request = {
+        id: command.requestId,
+        taskId: task.id,
+        status: "pending" as const,
+        requestedRules: command.requestedRules,
+        reason: command.reason,
+        source: command.source,
+        createdAt: command.createdAt,
+        resolvedAt: null,
+        resolutionNote: null,
+      };
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: task.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.ownership-request-created",
+        payload: { taskId: task.id, request, updatedAt: command.createdAt },
+      };
+    }
+
+    case "task.ownership-request.approve":
+    case "task.ownership-request.deny":
+    case "task.ownership-request.cancel": {
+      const task = yield* requireTask({ readModel, command, taskId: command.taskId });
+      const pending = (task.ownershipRequests ?? []).find(
+        (request) => request.id === command.requestId,
+      );
+      if (!pending || pending.status !== "pending")
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Pending ownership request '${command.requestId}' was not found.`,
+        });
+      const status =
+        command.type === "task.ownership-request.approve"
+          ? ("approved" as const)
+          : command.type === "task.ownership-request.deny"
+            ? ("denied" as const)
+            : ("cancelled" as const);
+      const request = {
+        ...pending,
+        status,
+        resolvedAt: command.createdAt,
+        resolutionNote: command.resolutionNote ?? null,
+      };
+      if (status !== "approved")
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: "task",
+            aggregateId: task.id,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type:
+            status === "denied"
+              ? "task.ownership-request-denied"
+              : "task.ownership-request-cancelled",
+          payload: { taskId: task.id, request, updatedAt: command.createdAt },
+        };
+      const rules = [...(task.ownership?.rules ?? []), ...pending.requestedRules];
+      yield* Effect.try({
+        try: () => validateOwnershipRules(rules),
+        catch: (error) =>
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail:
+              error instanceof Error ? error.message : "Approved ownership rules are invalid.",
+          }),
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "task",
+          aggregateId: task.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.ownership-request-approved" as const,
+        payload: { taskId: task.id, request, rules, updatedAt: command.createdAt },
+      };
     }
 
     case "task.ownership.validate": {
@@ -1472,12 +1977,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
-      if (command.violations.length > 0 || task.status !== "active") {
-        return validatedEvent;
+      const resourceViolations = command.resourceViolations ?? [];
+      const resourceEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "task" as const,
+          aggregateId: command.taskId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "task.resource-validated" as const,
+        payload: {
+          taskId: command.taskId,
+          status: resourceViolations.length === 0 ? ("valid" as const) : ("violation" as const),
+          violations: resourceViolations,
+          validatedAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+      if (
+        command.violations.length > 0 ||
+        resourceViolations.length > 0 ||
+        task.status !== "active"
+      ) {
+        return [validatedEvent, resourceEvent];
       }
       if (command.requestReview === true) {
         return [
           validatedEvent,
+          resourceEvent,
           {
             ...(yield* withEventBase({
               aggregateKind: "task",
@@ -1494,9 +2021,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         ];
       }
-      if (!command.requestCompletion) return validatedEvent;
+      if (!command.requestCompletion) return [validatedEvent, resourceEvent];
       return [
         validatedEvent,
+        resourceEvent,
         {
           ...(yield* withEventBase({
             aggregateKind: "task",
@@ -1571,7 +2099,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "task.review.prepared": {
       const task = yield* requireTask({ readModel, command, taskId: command.taskId });
-      if (task.status !== "active" || task.ownership?.status !== "valid") {
+      if (
+        task.status !== "active" ||
+        task.ownership?.status !== "valid" ||
+        task.resourceCompliance?.status !== "valid"
+      ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Task '${command.taskId}' is not eligible for a review snapshot.`,
@@ -1965,7 +2497,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (
         task.status !== "active" ||
         task.reviewSnapshot?.status !== "current" ||
-        task.handoff?.status !== "ready"
+        task.handoff?.status !== "ready" ||
+        task.resourceCompliance?.status !== "valid"
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -1989,14 +2522,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Task '${command.taskId}' cannot produce a durable result from incomplete review evidence.`,
         });
       }
-      return {
+      const completed = {
         ...(yield* withEventBase({
           aggregateKind: "task",
           aggregateId: command.taskId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
         })),
-        type: "task.completed",
+        type: "task.completed" as const,
         payload: {
           taskId: command.taskId,
           completedAt: command.createdAt,
@@ -2021,6 +2554,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         },
       };
+      const project = yield* requireProject({ readModel, command, projectId: task.projectId });
+      const leases = (project.resourceLeases ?? [])
+        .filter((lease) => lease.taskId === task.id && lease.status === "held")
+        .map((lease) => ({ ...lease, status: "released" as const, releasedAt: command.createdAt }));
+      if (leases.length === 0) return completed;
+      return [
+        completed,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "project",
+            aggregateId: task.projectId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "resource.leases-released" as const,
+          payload: {
+            projectId: task.projectId,
+            taskId: task.id,
+            leases,
+            updatedAt: command.createdAt,
+          },
+        },
+      ];
     }
 
     case "task.restore.request": {

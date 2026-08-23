@@ -18,6 +18,9 @@ import {
   ProjectMetaUpdatedPayload,
   ProjectQualityPolicyUpdatedPayload,
   ProjectReviewPolicyUpdatedPayload,
+  ProjectSharedResourcePayload,
+  ProjectSharedResourceDeletedPayload,
+  ResourceLeasesPayload,
   MissionCreatedPayload,
   MissionUpdatedPayload,
   MissionTaskMembershipPayload,
@@ -43,6 +46,9 @@ import {
   TaskOwnershipValidationRequestedPayload,
   TaskOwnershipValidatedPayload,
   TaskOwnershipValidationFailedPayload,
+  TaskResourceRequirementsUpdatedPayload,
+  TaskResourceValidatedPayload,
+  TaskOwnershipRequestPayload,
   TaskReviewPrepareRequestedPayload,
   TaskReviewPreparedPayload,
   TaskReviewPrepareFailedPayload,
@@ -270,6 +276,8 @@ export function projectEvent(
             qualityPolicy: null,
             reviewPolicy: null,
             integrationBatches: [],
+            sharedResources: [],
+            resourceLeases: [],
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -315,6 +323,78 @@ export function projectEvent(
           projects: nextBase.projects.map((project) =>
             project.id === payload.projectId
               ? { ...project, reviewPolicy: payload.policy, updatedAt: payload.updatedAt }
+              : project,
+          ),
+        })),
+      );
+
+    case "project.shared-resource-created":
+    case "project.shared-resource-updated":
+      return decodeForEvent(
+        ProjectSharedResourcePayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  sharedResources: [
+                    ...(project.sharedResources ?? []).filter(
+                      (resource) => resource.id !== payload.resource.id,
+                    ),
+                    payload.resource,
+                  ],
+                  updatedAt: payload.resource.updatedAt,
+                }
+              : project,
+          ),
+        })),
+      );
+
+    case "project.shared-resource-deleted":
+      return decodeForEvent(
+        ProjectSharedResourceDeletedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  sharedResources: (project.sharedResources ?? []).filter(
+                    (resource) => resource.id !== payload.resourceId,
+                  ),
+                  updatedAt: payload.updatedAt,
+                }
+              : project,
+          ),
+        })),
+      );
+
+    case "resource.leases-acquired":
+    case "resource.leases-released":
+      return decodeForEvent(ResourceLeasesPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  resourceLeases: [
+                    ...(project.resourceLeases ?? []).filter(
+                      (lease) => !payload.leases.some((candidate) => candidate.id === lease.id),
+                    ),
+                    ...payload.leases,
+                  ],
+                  updatedAt: payload.updatedAt,
+                }
               : project,
           ),
         })),
@@ -724,6 +804,9 @@ export function projectEvent(
               restore: null,
               qualityGateRuns: [],
               reviews: [],
+              requiredResourceIds: payload.requiredResourceIds ?? [],
+              resourceCompliance: null,
+              ownershipRequests: [],
             },
           ],
         })),
@@ -1129,6 +1212,91 @@ export function projectEvent(
                     errorReason: payload.failureReason,
                     updatedAt: payload.updatedAt,
                   },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.resource-requirements-updated":
+      return decodeForEvent(
+        TaskResourceRequirementsUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? { ...task, requiredResourceIds: payload.resourceIds, updatedAt: payload.updatedAt }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.resource-validated":
+      return decodeForEvent(
+        TaskResourceValidatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  resourceCompliance: {
+                    status: payload.status,
+                    validatedAt: payload.validatedAt,
+                    violations: payload.violations,
+                    errorReason: null,
+                    updatedAt: payload.updatedAt,
+                  },
+                  updatedAt: payload.updatedAt,
+                }
+              : task,
+          ),
+        })),
+      );
+
+    case "task.ownership-request-created":
+    case "task.ownership-request-approved":
+    case "task.ownership-request-denied":
+    case "task.ownership-request-cancelled":
+      return decodeForEvent(TaskOwnershipRequestPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          tasks: (nextBase.tasks ?? []).map((task) =>
+            task.id === payload.taskId
+              ? {
+                  ...task,
+                  ownershipRequests: [
+                    ...(task.ownershipRequests ?? []).filter(
+                      (request) => request.id !== payload.request.id,
+                    ),
+                    payload.request,
+                  ],
+                  ...(payload.rules === undefined
+                    ? {}
+                    : {
+                        ownership: {
+                          required: task.ownership?.required ?? false,
+                          rules: payload.rules,
+                          status: "pending" as const,
+                          validatedAt: task.ownership?.validatedAt ?? null,
+                          changedPathCount: task.ownership?.changedPathCount ?? 0,
+                          violations: task.ownership?.violations ?? [],
+                          errorReason: null,
+                          updatedAt: payload.updatedAt,
+                        },
+                      }),
+                  ...(payload.resourceIds === undefined
+                    ? {}
+                    : { requiredResourceIds: payload.resourceIds }),
                   updatedAt: payload.updatedAt,
                 }
               : task,

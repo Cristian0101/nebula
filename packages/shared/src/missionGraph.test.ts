@@ -3,6 +3,8 @@ import {
   IntegrationBatchId,
   ProjectId,
   ProviderInstanceId,
+  ResourceLeaseId,
+  SharedResourceId,
   TaskId,
   type Mission,
   type MissionTaskDependency,
@@ -153,6 +155,63 @@ describe("Mission graph", () => {
       status: "needs-attention",
       attention: ["Provider not assigned."],
     });
+  });
+
+  it("keeps DAG readiness separate from durable resource blockers", () => {
+    const resourceId = SharedResourceId.make("manifest");
+    const frontend = {
+      ...task("A", "active"),
+      requiredResourceIds: [resourceId],
+    };
+    const backend = { ...task("B"), requiredResourceIds: [resourceId] };
+    const project = {
+      sharedResources: [
+        {
+          id: resourceId,
+          projectId,
+          name: "Dependency manifest",
+          description: null,
+          patterns: ["package.json"],
+          mode: "exclusive" as const,
+          enabled: true,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      resourceLeases: [
+        {
+          id: ResourceLeaseId.make("manifest-a"),
+          projectId,
+          resourceId,
+          taskId: frontend.id,
+          status: "held" as const,
+          acquiredAt: now,
+          releasedAt: null,
+        },
+      ],
+    };
+    const plan = computeMissionPlan({
+      mission: mission(["A", "B"]),
+      tasks: [frontend, backend],
+      project,
+    });
+    expect(plan.tasks.find((item) => item.task.id === "B")).toMatchObject({
+      status: "resource-blocked",
+      blockerTaskIds: [],
+      resourceBlockers: [
+        { resource: { name: "Dependency manifest" }, lease: { taskId: frontend.id } },
+      ],
+    });
+    expect(plan.readyTaskIds).not.toContain(backend.id);
+
+    const hydratedPlan = computeMissionPlan({
+      mission: mission(["A", "B"]),
+      tasks: [frontend, backend],
+      project,
+    });
+    expect(hydratedPlan.tasks.find((item) => item.task.id === "B")?.status).toBe(
+      "resource-blocked",
+    );
   });
 
   it("fails Mission completion closed when a linked Integration Batch is missing", () => {
