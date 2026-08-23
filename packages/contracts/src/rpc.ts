@@ -917,6 +917,24 @@ export const WsOrchestrationGetTaskFileDiffRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationGetIntegrationChangesRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getIntegrationChanges,
+  {
+    payload: OrchestrationRpcSchemas.getIntegrationChanges.input,
+    success: OrchestrationRpcSchemas.getIntegrationChanges.output,
+    error: Schema.Union([OrchestrationGetTaskChangesError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsOrchestrationGetIntegrationFileDiffRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getIntegrationFileDiff,
+  {
+    payload: OrchestrationRpcSchemas.getIntegrationFileDiff.input,
+    success: OrchestrationRpcSchemas.getIntegrationFileDiff.output,
+    error: Schema.Union([OrchestrationGetTaskChangesError, EnvironmentAuthorizationError]),
+  },
+);
+
 export const WsOrchestrationSearchThreadsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.searchThreads, {
   payload: OrchestrationSearchThreadsInput,
   success: OrchestrationRpcSchemas.searchThreads.output,
@@ -1096,6 +1114,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationGetTaskChangesRpc,
   WsOrchestrationGetTaskFileDiffRpc,
+  WsOrchestrationGetIntegrationChangesRpc,
+  WsOrchestrationGetIntegrationFileDiffRpc,
   WsOrchestrationSearchThreadsRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationSubscribeShellRpc,

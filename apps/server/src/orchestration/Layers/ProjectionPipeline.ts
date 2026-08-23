@@ -540,6 +540,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             scripts: event.payload.scripts,
             qualityPolicy: null,
             reviewPolicy: null,
+            integrationBatches: [],
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -601,6 +602,26 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             deletedAt: event.payload.deletedAt,
             updatedAt: event.payload.deletedAt,
+          });
+          return;
+        }
+
+        case "integration.created":
+        case "integration.updated": {
+          const existingRow = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isNone(existingRow)) return;
+          const batches =
+            event.type === "integration.created"
+              ? [...(existingRow.value.integrationBatches ?? []), event.payload.batch]
+              : (existingRow.value.integrationBatches ?? []).map((batch) =>
+                  batch.id === event.payload.batch.id ? event.payload.batch : batch,
+                );
+          yield* projectionProjectRepository.upsert({
+            ...existingRow.value,
+            integrationBatches: batches,
+            updatedAt: event.payload.batch.updatedAt,
           });
           return;
         }

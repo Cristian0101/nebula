@@ -4,6 +4,9 @@ import {
   ProjectQualityPolicyUpdatedPayload as ContractsProjectQualityPolicyUpdatedPayloadSchema,
   ProjectReviewPolicyUpdatedPayload as ContractsProjectReviewPolicyUpdatedPayloadSchema,
   ProjectDeletedPayload as ContractsProjectDeletedPayloadSchema,
+  IntegrationCreatedPayload as ContractsIntegrationCreatedPayloadSchema,
+  IntegrationActionRequestedPayload as ContractsIntegrationActionRequestedPayloadSchema,
+  IntegrationUpdatedPayload as ContractsIntegrationUpdatedPayloadSchema,
   OrchestrationTaskCreatedPayload as ContractsTaskCreatedPayloadSchema,
   OrchestrationTaskAcceptanceCriteriaUpdatedPayload as ContractsTaskAcceptanceCriteriaUpdatedPayloadSchema,
   OrchestrationTaskThreadBoundPayload as ContractsTaskThreadBoundPayloadSchema,
@@ -75,6 +78,9 @@ export const ProjectMetaUpdatedPayload = ContractsProjectMetaUpdatedPayloadSchem
 export const ProjectQualityPolicyUpdatedPayload = ContractsProjectQualityPolicyUpdatedPayloadSchema;
 export const ProjectReviewPolicyUpdatedPayload = ContractsProjectReviewPolicyUpdatedPayloadSchema;
 export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema;
+export const IntegrationCreatedPayload = ContractsIntegrationCreatedPayloadSchema;
+export const IntegrationActionRequestedPayload = ContractsIntegrationActionRequestedPayloadSchema;
+export const IntegrationUpdatedPayload = ContractsIntegrationUpdatedPayloadSchema;
 
 export const TaskCreatedPayload = ContractsTaskCreatedPayloadSchema;
 export const TaskAcceptanceCriteriaUpdatedPayload =

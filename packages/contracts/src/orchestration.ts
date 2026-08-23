@@ -11,13 +11,16 @@ import {
   CommandId,
   EventId,
   IsoDateTime,
+  IntegrationBatchId,
   MessageId,
   NonNegativeInt,
   PositiveInt,
   ProjectId,
   QualityGateRunId,
   TaskHandoffId,
+  TaskIntegrationArtifactId,
   TaskId,
+  TaskResultId,
   TaskRestoreId,
   TaskReviewId,
   TaskReviewSnapshotId,
@@ -36,6 +39,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   getTaskChanges: "orchestration.getTaskChanges",
   getTaskFileDiff: "orchestration.getTaskFileDiff",
+  getIntegrationChanges: "orchestration.getIntegrationChanges",
+  getIntegrationFileDiff: "orchestration.getIntegrationFileDiff",
   searchThreads: "orchestration.searchThreads",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
@@ -265,6 +270,128 @@ export const ProjectReviewPolicy = Schema.Struct({
 });
 export type ProjectReviewPolicy = typeof ProjectReviewPolicy.Type;
 
+export const TaskIntegrationArtifact = Schema.Struct({
+  id: TaskIntegrationArtifactId,
+  taskId: TaskId,
+  taskResultId: TaskResultId,
+  snapshotId: TaskReviewSnapshotId,
+  checkpointRef: CheckpointRef,
+  baseCommit: TrimmedNonEmptyString,
+  treeId: TrimmedNonEmptyString,
+  commit: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+export type TaskIntegrationArtifact = typeof TaskIntegrationArtifact.Type;
+
+export const IntegrationBatchTaskStatus = Schema.Literals([
+  "pending",
+  "applying",
+  "applied",
+  "conflict",
+]);
+export type IntegrationBatchTaskStatus = typeof IntegrationBatchTaskStatus.Type;
+
+export const IntegrationBatchTask = Schema.Struct({
+  taskId: TaskId,
+  taskResultId: TaskResultId,
+  snapshotId: TaskReviewSnapshotId,
+  order: NonNegativeInt,
+  status: IntegrationBatchTaskStatus,
+  artifact: Schema.NullOr(TaskIntegrationArtifact),
+  appliedCommit: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type IntegrationBatchTask = typeof IntegrationBatchTask.Type;
+
+export const IntegrationConflict = Schema.Struct({
+  taskId: TaskId,
+  artifactCommit: TrimmedNonEmptyString,
+  files: Schema.Array(TrimmedNonEmptyString),
+  appliedTaskIds: Schema.Array(TaskId),
+  remainingTaskIds: Schema.Array(TaskId),
+  detectedAt: IsoDateTime,
+});
+export type IntegrationConflict = typeof IntegrationConflict.Type;
+
+export const IntegrationValidationSnapshot = Schema.Struct({
+  headCommit: TrimmedNonEmptyString,
+  treeId: TrimmedNonEmptyString,
+  status: Schema.Literals(["current", "stale"]),
+  capturedAt: IsoDateTime,
+});
+export type IntegrationValidationSnapshot = typeof IntegrationValidationSnapshot.Type;
+
+export const IntegrationQualityGateRun = Schema.Struct({
+  id: QualityGateRunId,
+  batchId: IntegrationBatchId,
+  snapshotTreeId: TrimmedNonEmptyString,
+  gateId: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  command: TrimmedNonEmptyString,
+  required: Schema.Boolean,
+  timeoutSeconds: PositiveInt,
+  status: Schema.Literals([
+    "queued",
+    "running",
+    "passed",
+    "failed",
+    "timed_out",
+    "cancelled",
+    "stale",
+    "error",
+  ]),
+  cwd: TrimmedNonEmptyString,
+  exitCode: Schema.NullOr(Schema.Int),
+  startedAt: Schema.NullOr(IsoDateTime),
+  completedAt: Schema.NullOr(IsoDateTime),
+  outputSummary: Schema.String,
+  outputTruncated: Schema.Boolean,
+});
+export type IntegrationQualityGateRun = typeof IntegrationQualityGateRun.Type;
+
+export const IntegrationHumanChange = Schema.Struct({
+  commit: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  files: Schema.Array(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+export type IntegrationHumanChange = typeof IntegrationHumanChange.Type;
+
+export const IntegrationBatchStatus = Schema.Literals([
+  "preparing",
+  "applying",
+  "conflict",
+  "validating",
+  "ready",
+  "failed",
+  "cancelled",
+]);
+export type IntegrationBatchStatus = typeof IntegrationBatchStatus.Type;
+
+export const IntegrationBatch = Schema.Struct({
+  id: IntegrationBatchId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  baseCommit: TrimmedNonEmptyString,
+  sourceRepository: TrimmedNonEmptyString,
+  branch: TrimmedNonEmptyString,
+  workspacePath: Schema.NullOr(TrimmedNonEmptyString),
+  status: IntegrationBatchStatus,
+  tasks: Schema.Array(IntegrationBatchTask),
+  overlapPaths: Schema.Array(TrimmedNonEmptyString),
+  overlapsAcknowledged: Schema.Boolean,
+  conflict: Schema.NullOr(IntegrationConflict),
+  validationSnapshot: Schema.NullOr(IntegrationValidationSnapshot),
+  qualityGateRuns: Schema.Array(IntegrationQualityGateRun),
+  humanChanges: Schema.Array(IntegrationHumanChange),
+  failureCode: Schema.NullOr(TrimmedNonEmptyString),
+  failureReason: Schema.NullOr(Schema.String),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  readyAt: Schema.NullOr(IsoDateTime),
+  removedAt: Schema.NullOr(IsoDateTime),
+});
+export type IntegrationBatch = typeof IntegrationBatch.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -279,6 +406,8 @@ export const OrchestrationProject = Schema.Struct({
   scripts: Schema.Array(ProjectScript),
   qualityPolicy: Schema.optional(Schema.NullOr(ProjectQualityPolicy)),
   reviewPolicy: Schema.optional(Schema.NullOr(ProjectReviewPolicy)),
+  // Optional for snapshots created before deterministic Integration Batches shipped.
+  integrationBatches: Schema.optional(Schema.Array(IntegrationBatch)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -814,6 +943,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   scripts: Schema.Array(ProjectScript),
   qualityPolicy: Schema.optional(Schema.NullOr(ProjectQualityPolicy)),
   reviewPolicy: Schema.optional(Schema.NullOr(ProjectReviewPolicy)),
+  integrationBatches: Schema.optional(Schema.Array(IntegrationBatch)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1462,12 +1592,60 @@ const ThreadSessionStopCommand = Schema.Struct({
   onlyIfSettled: Schema.optional(Schema.Boolean),
 });
 
+const IntegrationCreateCommand = Schema.Struct({
+  type: Schema.Literal("integration.create"),
+  commandId: CommandId,
+  batchId: IntegrationBatchId,
+  projectId: ProjectId,
+  taskIds: Schema.Array(TaskId),
+  acknowledgeOverlaps: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+const IntegrationContinueCommand = Schema.Struct({
+  type: Schema.Literal("integration.continue"),
+  commandId: CommandId,
+  batchId: IntegrationBatchId,
+  projectId: ProjectId,
+  createdAt: IsoDateTime,
+});
+
+const IntegrationAbortCommand = Schema.Struct({
+  type: Schema.Literal("integration.abort"),
+  commandId: CommandId,
+  batchId: IntegrationBatchId,
+  projectId: ProjectId,
+  createdAt: IsoDateTime,
+});
+
+const IntegrationValidateCommand = Schema.Struct({
+  type: Schema.Literal("integration.validate"),
+  commandId: CommandId,
+  batchId: IntegrationBatchId,
+  projectId: ProjectId,
+  acknowledgeExternalChanges: Schema.optional(Schema.Boolean),
+  createdAt: IsoDateTime,
+});
+
+const IntegrationWorkspaceRemoveCommand = Schema.Struct({
+  type: Schema.Literal("integration.workspace.remove"),
+  commandId: CommandId,
+  batchId: IntegrationBatchId,
+  projectId: ProjectId,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectQualityPolicyUpdateCommand,
   ProjectReviewPolicyUpdateCommand,
   ProjectDeleteCommand,
+  IntegrationCreateCommand,
+  IntegrationContinueCommand,
+  IntegrationAbortCommand,
+  IntegrationValidateCommand,
+  IntegrationWorkspaceRemoveCommand,
   TaskCreateCommand,
   TaskAcceptanceCriteriaSetCommand,
   TaskBindThreadCommand,
@@ -1516,6 +1694,11 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectQualityPolicyUpdateCommand,
   ProjectReviewPolicyUpdateCommand,
   ProjectDeleteCommand,
+  IntegrationCreateCommand,
+  IntegrationContinueCommand,
+  IntegrationAbortCommand,
+  IntegrationValidateCommand,
+  IntegrationWorkspaceRemoveCommand,
   TaskCreateCommand,
   TaskAcceptanceCriteriaSetCommand,
   TaskBindThreadCommand,
@@ -1814,6 +1997,27 @@ const TaskRestoreUndoneCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const IntegrationUpdateCommand = Schema.Struct({
+  type: Schema.Literal("integration.update"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  batch: IntegrationBatch,
+  reason: Schema.Literals([
+    "workspace-prepared",
+    "artifact-created",
+    "artifact-applied",
+    "conflict-detected",
+    "conflict-resolved",
+    "validation-started",
+    "validation-finished",
+    "failed",
+    "cancelled",
+    "workspace-removed",
+    "reconciled",
+  ]),
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   TaskWorkspacePreparationStartedCommand,
   TaskWorkspaceReadyCommand,
@@ -1836,6 +2040,7 @@ const InternalOrchestrationCommand = Schema.Union([
   TaskRestoredCommand,
   TaskRestoreFailedCommand,
   TaskRestoreUndoneCommand,
+  IntegrationUpdateCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
@@ -1859,6 +2064,12 @@ export const OrchestrationEventType = Schema.Literals([
   "project.quality-policy-updated",
   "project.review-policy-updated",
   "project.deleted",
+  "integration.created",
+  "integration.continue-requested",
+  "integration.abort-requested",
+  "integration.validation-requested",
+  "integration.workspace-remove-requested",
+  "integration.updated",
   "task.created",
   "task.acceptance-criteria-updated",
   "task.thread-bound",
@@ -1971,6 +2182,36 @@ export const ProjectReviewPolicyUpdatedPayload = Schema.Struct({
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   deletedAt: IsoDateTime,
+});
+
+export const IntegrationCreatedPayload = Schema.Struct({
+  projectId: ProjectId,
+  batch: IntegrationBatch,
+});
+
+export const IntegrationActionRequestedPayload = Schema.Struct({
+  projectId: ProjectId,
+  batchId: IntegrationBatchId,
+  acknowledgeExternalChanges: Schema.optional(Schema.Boolean),
+  requestedAt: IsoDateTime,
+});
+
+export const IntegrationUpdatedPayload = Schema.Struct({
+  projectId: ProjectId,
+  batch: IntegrationBatch,
+  reason: Schema.Literals([
+    "workspace-prepared",
+    "artifact-created",
+    "artifact-applied",
+    "conflict-detected",
+    "conflict-resolved",
+    "validation-started",
+    "validation-finished",
+    "failed",
+    "cancelled",
+    "workspace-removed",
+    "reconciled",
+  ]),
 });
 
 export const OrchestrationTaskCreatedPayload = Schema.Struct({
@@ -2475,6 +2716,36 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("integration.created"),
+    payload: IntegrationCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("integration.continue-requested"),
+    payload: IntegrationActionRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("integration.abort-requested"),
+    payload: IntegrationActionRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("integration.validation-requested"),
+    payload: IntegrationActionRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("integration.workspace-remove-requested"),
+    payload: IntegrationActionRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("integration.updated"),
+    payload: IntegrationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("task.created"),
     payload: OrchestrationTaskCreatedPayload,
   }),
@@ -2927,6 +3198,41 @@ export const OrchestrationGetTaskFileDiffResult = Schema.Struct({
 });
 export type OrchestrationGetTaskFileDiffResult = typeof OrchestrationGetTaskFileDiffResult.Type;
 
+export const IntegrationAttributedFile = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  taskIds: Schema.Array(TaskId),
+  humanChange: Schema.Boolean,
+});
+export type IntegrationAttributedFile = typeof IntegrationAttributedFile.Type;
+
+export const OrchestrationGetIntegrationChangesInput = Schema.Struct({
+  projectId: ProjectId,
+  batchId: IntegrationBatchId,
+});
+export type OrchestrationGetIntegrationChangesInput =
+  typeof OrchestrationGetIntegrationChangesInput.Type;
+
+export const OrchestrationGetIntegrationChangesResult = Schema.Struct({
+  batchId: IntegrationBatchId,
+  baseCommit: TrimmedNonEmptyString,
+  headCommit: TrimmedNonEmptyString,
+  files: Schema.Array(IntegrationAttributedFile),
+});
+export type OrchestrationGetIntegrationChangesResult =
+  typeof OrchestrationGetIntegrationChangesResult.Type;
+
+export const OrchestrationGetIntegrationFileDiffInput = Schema.Struct({
+  projectId: ProjectId,
+  batchId: IntegrationBatchId,
+  path: TrimmedNonEmptyString,
+});
+export type OrchestrationGetIntegrationFileDiffInput =
+  typeof OrchestrationGetIntegrationFileDiffInput.Type;
+
+export const OrchestrationGetIntegrationFileDiffResult = OrchestrationGetTaskFileDiffResult;
+export type OrchestrationGetIntegrationFileDiffResult =
+  typeof OrchestrationGetIntegrationFileDiffResult.Type;
+
 export const OrchestrationThreadSearchSource = Schema.Literals(["user", "assistant"]);
 export type OrchestrationThreadSearchSource = typeof OrchestrationThreadSearchSource.Type;
 
@@ -3024,6 +3330,14 @@ export const OrchestrationRpcSchemas = {
   getTaskFileDiff: {
     input: OrchestrationGetTaskFileDiffInput,
     output: OrchestrationGetTaskFileDiffResult,
+  },
+  getIntegrationChanges: {
+    input: OrchestrationGetIntegrationChangesInput,
+    output: OrchestrationGetIntegrationChangesResult,
+  },
+  getIntegrationFileDiff: {
+    input: OrchestrationGetIntegrationFileDiffInput,
+    output: OrchestrationGetIntegrationFileDiffResult,
   },
   searchThreads: {
     input: OrchestrationSearchThreadsInput,

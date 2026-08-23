@@ -1,5 +1,14 @@
 # Nebula changelog
 
+## Unreleased — Deterministic Integration Engine
+
+- Added manual Integration Batches over eligible immutable completed Task Results with an exact common-base rule and explicit user ordering.
+- Added deterministic retained artifact commits from approved checkpoint trees, dedicated Integration branches/worktrees, sequential application, overlap acknowledgement, and durable per-step evidence.
+- Added fail-closed conflict pause, manual staged resolution and transparent human-resolution commits, abort, restart reconciliation, safe terminal cleanup, and source/Task isolation.
+- Added final Integration validation through exact approved Project gates, HEAD/tree/worktree mutation detection, required-gate enforcement, Ready state, combined attributed diff RPCs, and Command Deck controls.
+- Reused the inherited Git driver/workflow service, checkpoint refs, process runner, orchestration events, SQLite project projection, shell stream, authorization map, and client command runtime.
+- Kept main merge, push, automatic PR creation, shared-resource locks, Mission/DAG, scheduler, automated conflict agents, and Swarm Mode out of scope.
+
 ## Unreleased — Quality Gates and independent Reviewer
 
 - Added optional durable Task acceptance criteria and explicit confirmation for edits after execution starts.

@@ -69,6 +69,12 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.quality-policy.update":
     case "project.review-policy.update":
     case "project.delete":
+    case "integration.create":
+    case "integration.continue":
+    case "integration.abort":
+    case "integration.validate":
+    case "integration.workspace.remove":
+    case "integration.update":
       return {
         aggregateKind: "project",
         aggregateId: command.projectId,

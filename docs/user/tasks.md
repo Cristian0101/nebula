@@ -15,3 +15,7 @@ Optional acceptance criteria record what the implementation should prove. You ca
 **Restore Task to Baseline** affects only the managed Task workspace. Nebula first retains the complete pre-restore contents under a recovery reference, then restores the Task branch and files to the recorded base commit. Published Task branches are refused because rewriting them would be unsafe.
 
 The Task remains active after restoration. Its previous review becomes stale, ownership is revalidated, and the provider conversation remains available as history. Use **Undo restore** to recover the retained pre-restore contents. Recovery references are retained locally and are not deleted automatically.
+
+## Integrate completed results
+
+Completed Builder Tasks that retain a ready handoff, valid ownership evidence, required quality passes, and any required approving review can be selected for an Integration Batch. Integration consumes the immutable completed result and approved snapshot, not later worktree edits. See [Integrate approved Tasks](integrating-tasks.md).

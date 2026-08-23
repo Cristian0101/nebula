@@ -105,7 +105,7 @@ Task does not persist provider-session identity or trust a renderer-supplied wor
 
 A Task may persist an optional manual provider/model assignment before execution. This is assignment intent, not provider-session identity. It lets a draft hydrate truthfully without manufacturing a Thread. After Start creates and binds the canonical Thread, the Thread's model selection is authoritative for its provider execution.
 
-This slice does not create ownership requests, shared-resource locks, Missions, routing, scheduling, automatic remediation, or integration behavior. Quality gates and the independent Reviewer are implemented as explicit user-driven Task review boundaries.
+This slice does not create ownership requests, shared-resource locks, Missions, routing, scheduling, or automatic remediation. Quality gates, independent Reviewer, and deterministic manual Integration Batches are implemented as explicit user-driven boundaries.
 
 ### Workspace isolation
 
@@ -185,6 +185,14 @@ validation
 ```
 
 Never integrate directly into target `main` by default. Integration must verify ownership and locks, preserve the task commit identity or an explicit mapping, record conflicts and validation, and produce a reversible outcome.
+
+The implemented Integration Engine consumes immutable completed `TaskResult` records, never live Task worktrees. Every selected result must still reference its retained approved snapshot and ready handoff, satisfy required quality and review policy, and share one exact base commit. Overlapping result paths require human acknowledgement but do not predict a Git conflict.
+
+For each selected Task, Nebula resolves the approved hidden checkpoint tree and creates a deterministic, retained artifact commit with the common base as its parent. Commit metadata records Task, Task Result, and snapshot identity. Creation uses the inherited Git executor and does not check the artifact into any source or Task worktree.
+
+An Integration Batch owns a dedicated `nebula/integration/*` branch and worktree. Artifacts apply sequentially in the user's stored order. Each applied step is projected durably. A real cherry-pick conflict pauses the Batch, records unresolved files and applied/remaining Tasks, and preserves the worktree for manual resolution. Continue accepts only a resolved and staged Git index, creates a transparent human-resolution commit, and resumes the remaining artifacts. Abort stops only the active Batch operation.
+
+After application, Nebula captures the Integration HEAD/tree and runs only enabled exact approved Project gates in that worktree through the inherited bounded process runner. Any gate mutation of HEAD, tree, or worktree makes validation stale and fails closed. Required failures prevent Ready. No configured gates is recorded as no gates, never an invented pass. Ready is a reviewable branch state; main merge, push, and PR creation remain separate human actions.
 
 ## Future
 
