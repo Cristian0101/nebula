@@ -4,6 +4,8 @@ import type {
   OrchestrationReadModel,
   OrchestrationTask,
   OrchestrationThread,
+  Mission,
+  MissionId,
   ProjectId,
   TaskId,
   ThreadId,
@@ -46,6 +48,41 @@ export function findTaskById(
   taskId: TaskId,
 ): OrchestrationTask | undefined {
   return (readModel.tasks ?? []).find((task) => task.id === taskId);
+}
+
+export function findMissionById(
+  readModel: OrchestrationReadModel,
+  missionId: MissionId,
+): Mission | undefined {
+  return (readModel.missions ?? []).find((mission) => mission.id === missionId);
+}
+
+export function requireMission(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly missionId: MissionId;
+}): Effect.Effect<Mission, OrchestrationCommandInvariantError> {
+  const mission = findMissionById(input.readModel, input.missionId);
+  return mission
+    ? Effect.succeed(mission)
+    : Effect.fail(
+        invariantError(
+          input.command.type,
+          `Mission '${input.missionId}' does not exist for command '${input.command.type}'.`,
+        ),
+      );
+}
+
+export function requireMissionAbsent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly missionId: MissionId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  return findMissionById(input.readModel, input.missionId)
+    ? Effect.fail(
+        invariantError(input.command.type, `Mission '${input.missionId}' already exists.`),
+      )
+    : Effect.void;
 }
 
 export function listTasksByProjectId(

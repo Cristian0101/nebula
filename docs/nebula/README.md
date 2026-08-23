@@ -26,7 +26,7 @@ Task Diff, immutable review snapshots, structured handoffs, and safe Task restor
 
 Command Deck is the implemented desktop-first manual orchestration surface over those canonical primitives. From one Project, a user can create provider-assigned draft Tasks with optional acceptance criteria, declare ownership, start several isolated Tasks, monitor provider and review state, open each existing Thread, inspect changes and handoffs, and restore one Task without creating a second Task, provider, Git, event, or persistence system.
 
-Quality Gates, independent Reviewer, and the deterministic Integration Engine are implemented. A local Project quality policy stores user-approved exact commands; Nebula runs them in managed Task or Integration worktrees and binds each bounded result to immutable evidence. Approved completed Task Results sharing one exact base can be ordered into an isolated Integration Batch. Nebula creates deduplicated artifact commits from approved snapshot trees, applies them sequentially, pauses with durable Git conflict evidence, and reaches Ready only after final validation. It never merges main or opens a PR from this workflow. Shared-resource locks, Mission/DAG planning, scheduling, automatic routing/remediation, and Swarm Mode are not implemented.
+Quality Gates, independent Reviewer, the deterministic Integration Engine, and Missions are implemented. A Mission groups canonical Project Tasks, stores explicit dependency edges as a DAG, and derives blockers, readiness, and deterministic execution waves without creating a second Task lifecycle. The user authors the graph, activates it, and manually starts ready Tasks or a ready wave. Completed Mission results can seed an existing Integration Batch in suggested topological order, which the user can review and change. Nebula never starts Tasks automatically, merges main, or opens a PR. Shared-resource locks, automatic Task planning, automatic scheduling or provider routing, Architect, and Swarm Mode are not implemented.
 
 Antigravity CLI is the implemented Google first-party provider for individual Google accounts. Nebula invokes its official headless CLI, keeps authentication provider-owned, and binds each run to the canonical Task worktree. The preserved Gemini CLI prototype remains experimental and blocked for the individual-account authentication path; it is not a mainline provider.
 
@@ -46,22 +46,26 @@ The code is authoritative for current behavior. These documents are authoritativ
 
 ## Capability status
 
-| Capability            | Status          |
-| --------------------- | --------------- |
-| Task                  | Implemented     |
-| Worktree isolation    | Implemented     |
-| Ownership             | Implemented     |
-| Structured handoff    | Implemented     |
-| Quality gates         | Implemented     |
-| Reviewer              | Implemented     |
-| Command Deck          | Implemented     |
-| Integration Engine    | Implemented     |
-| Automatic main merge  | Not implemented |
-| Shared-resource locks | Not implemented |
-| Mission               | Not implemented |
-| DAG                   | Not implemented |
-| Scheduler             | Not implemented |
-| Swarm                 | Not implemented |
+| Capability                  | Status          |
+| --------------------------- | --------------- |
+| Task                        | Implemented     |
+| Worktree isolation          | Implemented     |
+| Ownership                   | Implemented     |
+| Structured handoff          | Implemented     |
+| Quality gates               | Implemented     |
+| Reviewer                    | Implemented     |
+| Command Deck                | Implemented     |
+| Integration Engine          | Implemented     |
+| Mission                     | Implemented     |
+| Explicit Task DAG           | Implemented     |
+| Execution Waves             | Implemented     |
+| Human-controlled wave start | Implemented     |
+| Automatic Task planning     | Not implemented |
+| Automatic scheduler         | Not implemented |
+| Automatic provider routing  | Not implemented |
+| Shared-resource locks       | Not implemented |
+| Architect                   | Not implemented |
+| Swarm Mode                  | Not implemented |
 
 ## Change discipline
 

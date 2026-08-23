@@ -15,6 +15,10 @@ Every selected Task must share the same exact base commit. If two results mentio
 3. Review and acknowledge any overlapping paths.
 4. Choose **Create Integration**.
 
+From a Mission, **Create Integration Batch** offers completed Mission Tasks with retained results in topological order. This is a suggestion, not an automatic cherry-pick policy: review the selection, move Tasks into the intended order, and confirm explicitly. The Batch stores its Mission association; standalone Batches remain supported.
+
+A Mission may explicitly replace a failed or cancelled linked Batch. The previous Batch remains durable Project evidence, while the Mission points to the replacement. Active and Ready Batches cannot be replaced.
+
 Nebula creates a deterministic artifact commit for each approved snapshot tree. The commit records its Task, Task Result, and snapshot identity and is retained without changing the source or Task worktree. Nebula then creates a dedicated `nebula/integration/*` branch and worktree from the shared base and applies artifacts in the stored order.
 
 ## Conflicts and manual resolution
@@ -31,4 +35,4 @@ Ready means the isolated Integration branch passed the configured policy and is 
 
 ## Cleanup and limitations
 
-A Ready, failed, or cancelled Batch workspace can be removed only when clean. Cleanup removes the worktree and preserves the branch and durable Batch evidence. Automatic main merge, automatic pull requests, shared-resource locks, Mission/DAG planning, scheduling, automated conflict agents, and Swarm Mode are not part of this workflow.
+A Ready, failed, or cancelled Batch workspace can be removed only when clean. Cleanup removes the worktree and preserves the branch and durable Batch evidence. A linked Mission becomes eligible for explicit completion only when the Batch is Ready. Automatic main merge, automatic pull requests, shared-resource locks, scheduling, automated conflict agents, and Swarm Mode are not part of this workflow.

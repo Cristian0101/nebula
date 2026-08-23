@@ -27,6 +27,12 @@ const layer = GitVcsDriver.layer.pipe(
   Layer.provideMerge(serverConfigLayer),
 );
 
+it("encodes Task artifact IDs into valid Git refs", () => {
+  expect(taskIntegrationArtifactRef("task-artifact:task-result:task/snapshot")).toBe(
+    "refs/t3/integration-artifacts/task-artifact%3Atask-result%3Atask%2Fsnapshot",
+  );
+});
+
 it.layer(layer)("deterministic Task Integration artifacts", (it) => {
   it.effect("materializes the approved tree once without checking it out", () =>
     Effect.gen(function* () {

@@ -1,5 +1,15 @@
 # Nebula changelog
 
+## Unreleased — Missions and explicit Task DAGs
+
+- Added durable Project Missions over canonical Tasks with a zero-or-one Mission membership invariant, ordered presentation, explicit dependency edges, and auditable Mission activity.
+- Added a pure deterministic DAG engine with actionable self-edge, duplicate-edge, unknown-member, and cycle rejection; deterministic topological execution waves; explicit blockers; and start-configuration attention.
+- Enforced Mission activation and readiness in server Task workspace preparation and activation commands, while keeping every Task and wave start human-controlled.
+- Added Tasks, Missions, and Integration sections to Command Deck, including graph and wave views, accessible edge authoring, guarded active-graph edits, Mission cancellation/completion, and creating Tasks inside a Mission through the canonical Task flow.
+- Added optional Mission association to the existing Integration Batch. The DAG suggests an order, but the human confirms or edits it before creating the Batch.
+- Added explicit replacement of failed or cancelled Mission-linked Batches and encoded deterministic artifact IDs before retaining them as valid Git refs.
+- Reused Tasks, Threads, providers, worktrees, reviews, Integration, orchestration events, SQLite projections, shell streaming, and client commands. No scheduler, automatic planner, resource locks, Architect, automatic provider routing, or Swarm Mode was added.
+
 ## Unreleased — Deterministic Integration Engine
 
 - Added manual Integration Batches over eligible immutable completed Task Results with an exact common-base rule and explicit user ordering.

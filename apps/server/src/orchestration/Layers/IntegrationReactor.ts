@@ -46,7 +46,7 @@ type IntegrationEvent = Extract<
 >;
 
 export const taskIntegrationArtifactRef = (artifactId: string) =>
-  `refs/t3/integration-artifacts/${artifactId}`;
+  `refs/t3/integration-artifacts/${encodeURIComponent(artifactId)}`;
 
 export const createDeterministicTaskArtifact = Effect.fn(
   "IntegrationReactor.createDeterministicTaskArtifact",

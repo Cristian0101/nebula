@@ -1,6 +1,6 @@
 # Coordinate Tasks in Command Deck
 
-Command Deck is Nebula's desktop-first manual orchestration surface. It lets you run several coding providers against one repository without putting them in one writable checkout. You choose the work, provider, model, and ownership for every Task; Nebula does not plan or route work automatically.
+Command Deck is Nebula's desktop-first manual orchestration surface. Its **Tasks**, **Missions**, and **Integration** sections let you run several coding providers against one repository without putting them in one writable checkout. You choose the work, dependencies, provider, model, ownership, and every Start action; Nebula does not plan, schedule, or route work automatically.
 
 Open an active Project's menu and choose **Command Deck**, or open it from Project settings.
 
@@ -40,6 +40,6 @@ Use **Prepare completion** to validate ownership and capture the current review 
 
 ## Current scope
 
-Command Deck, manual parallel provider Tasks, Quality Gates, Reviewer, and cross-provider review are **implemented**.
+Command Deck, manual parallel provider Tasks, Quality Gates, Reviewer, cross-provider review, Missions, explicit Task DAGs, execution waves, and human-controlled wave starts are **implemented**. See [Plan and run a Mission](missions.md).
 
-Manual deterministic Integration Batches are **implemented** in Command Deck. Select eligible completed Tasks, arrange their order, acknowledge overlapping paths, then create an isolated Integration branch. Command Deck shows apply progress, conflicts, final gates, and Ready state. It does not merge main or open a PR. Shared-resource locks, Mission, Task DAG, scheduler, automated planning/provider routing, automatic remediation, automatic integration queues, and Swarm Mode are **not implemented**. Providers do not share hidden context; findings enter the existing Builder Thread only when the user chooses **Send Review Findings to Builder**.
+Manual deterministic Integration Batches are **implemented** in Command Deck. Select eligible completed Tasks, arrange their order, acknowledge overlapping paths, then create an isolated Integration branch. A Mission may suggest completed results in topological order, but you confirm or change it. Command Deck shows apply progress, conflicts, final gates, and Ready state. It does not merge main or open a PR. Shared-resource locks, automatic Task planning, scheduler, automated provider routing, automatic remediation, automatic integration queues, Architect, and Swarm Mode are **not implemented**. Providers do not share hidden context; findings enter the existing Builder Thread only when the user chooses **Send Review Findings to Builder**.
