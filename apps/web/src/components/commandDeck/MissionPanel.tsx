@@ -13,6 +13,7 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationTask,
   type OrchestrationThreadShell,
+  type RoutingProfile,
 } from "@t3tools/contracts";
 import { computeMissionPlan, missionTopologicalTaskIds } from "@t3tools/shared/missionGraph";
 import {
@@ -209,6 +210,7 @@ export function MissionPanel(props: MissionPanelProps) {
   const [busy, setBusy] = useState(false);
   const [integrationOrder, setIntegrationOrder] = useState<ReadonlyArray<TaskId>>([]);
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(2);
+  const [routingProfile, setRoutingProfile] = useState<RoutingProfile>("manual_only");
 
   const createMission = useAtomCommand(projectEnvironment.createMission, { reportFailure: false });
   const updateMission = useAtomCommand(projectEnvironment.updateMission, { reportFailure: false });
@@ -244,6 +246,13 @@ export function MissionPanel(props: MissionPanelProps) {
     reportFailure: false,
   });
   const stopMissionRun = useAtomCommand(projectEnvironment.stopMissionRun, {
+    reportFailure: false,
+  });
+  const resolveCoordinationRequest = useAtomCommand(
+    projectEnvironment.resolveMissionRunCoordinationRequest,
+    { reportFailure: false },
+  );
+  const resolveReplan = useAtomCommand(projectEnvironment.resolveMissionRunReplan, {
     reportFailure: false,
   });
   const createIntegration = useAtomCommand(projectEnvironment.createIntegration, {
@@ -408,6 +417,9 @@ export function MissionPanel(props: MissionPanelProps) {
           missionId: selectedMission.id,
           projectId: project.id,
           maxConcurrentTasks,
+          routingProfile,
+          transportRetryLimit: 2,
+          remediationLimit: 2,
         },
       }),
     );
@@ -607,6 +619,21 @@ export function MissionPanel(props: MissionPanelProps) {
                     </label>
                   ) : null}
                   {selectedMission.status === "active" && !supervisedRunActive ? (
+                    <select
+                      className="h-7 rounded-md border border-border bg-background px-2 text-xs"
+                      value={routingProfile}
+                      onChange={(event) => setRoutingProfile(event.target.value as RoutingProfile)}
+                      aria-label="Supervised Run routing profile"
+                    >
+                      <option value="manual_only">Manual Only</option>
+                      <option value="balanced">Balanced</option>
+                      <option value="maximum_quality">Maximum Quality</option>
+                      <option value="maximum_speed">Maximum Speed</option>
+                      <option value="preserve_capacity">Preserve Capacity</option>
+                      <option value="provider_diversity">Provider Diversity</option>
+                    </select>
+                  ) : null}
+                  {selectedMission.status === "active" && !supervisedRunActive ? (
                     <Button
                       size="xs"
                       disabled={busy || !plan.graph.valid || !architectProposalApproved}
@@ -782,6 +809,169 @@ export function MissionPanel(props: MissionPanelProps) {
                         </li>
                       ))}
                     </ul>
+                  ) : null}
+                  {(selectedMissionRun.taskRecovery ?? []).length > 0 ? (
+                    <details className="mt-3 text-xs" open>
+                      <summary className="cursor-pointer text-muted-foreground">
+                        Execution attempts
+                      </summary>
+                      <div className="mt-2 space-y-2">
+                        {(selectedMissionRun.taskRecovery ?? []).map((state) => (
+                          <div key={state.taskId} className="rounded-md bg-background/65 p-2">
+                            <p className="text-foreground">
+                              {taskById.get(state.taskId)?.title ?? state.taskId} · retries{" "}
+                              {state.transientRetries}/
+                              {selectedMissionRun.recoveryPolicy?.transportRetryLimit ?? 2} ·
+                              remediation {state.remediationRounds}/
+                              {selectedMissionRun.recoveryPolicy?.remediationLimit ?? 2}
+                            </p>
+                            {state.attempts.map((attempt) => (
+                              <p
+                                key={`${attempt.threadId}:${attempt.number}`}
+                                className="mt-1 text-muted-foreground"
+                              >
+                                Attempt {attempt.number} — {attempt.providerInstanceId} ·{" "}
+                                {attempt.kind} · {attempt.status}
+                              </p>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                  {(selectedMissionRun.coordinationRequests ?? []).some(
+                    (request) => request.status === "pending",
+                  ) ? (
+                    <div className="mt-3 space-y-2">
+                      {(selectedMissionRun.coordinationRequests ?? [])
+                        .filter((request) => request.status === "pending")
+                        .map((request) => (
+                          <div
+                            key={request.id}
+                            className="rounded-md border border-warning/30 bg-warning/10 p-2 text-xs"
+                          >
+                            <p className="text-foreground">{request.kind.replaceAll("_", " ")}</p>
+                            <p className="mt-1 text-muted-foreground">{request.reason}</p>
+                            {request.kind === "ownership_request" ? (
+                              <p className="mt-2 text-warning">
+                                Approve or deny this in the Task ownership request workflow.
+                              </p>
+                            ) : (
+                              <div className="mt-2 flex gap-2">
+                                <Button
+                                  size="xs"
+                                  onClick={() => {
+                                    const answer =
+                                      request.kind === "contract_question" ||
+                                      request.kind === "dependency_question"
+                                        ? window.prompt(
+                                            "Answer from an approved contract or human decision",
+                                          )
+                                        : null;
+                                    if (
+                                      (request.kind === "contract_question" ||
+                                        request.kind === "dependency_question") &&
+                                      !answer
+                                    )
+                                      return;
+                                    void run("Could not resolve request", () =>
+                                      resolveCoordinationRequest({
+                                        environmentId,
+                                        input: {
+                                          runId: selectedMissionRun.id,
+                                          requestId: request.id,
+                                          resolution: answer ? "answered" : "approved",
+                                          answer,
+                                        },
+                                      }),
+                                    );
+                                  }}
+                                >
+                                  {request.kind.includes("question") ? "Answer" : "Approve"}
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  onClick={() =>
+                                    void run("Could not deny request", () =>
+                                      resolveCoordinationRequest({
+                                        environmentId,
+                                        input: {
+                                          runId: selectedMissionRun.id,
+                                          requestId: request.id,
+                                          resolution: "denied",
+                                        },
+                                      }),
+                                    )
+                                  }
+                                >
+                                  Deny
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  ) : null}
+                  {(selectedMissionRun.replanProposals ?? []).some(
+                    (proposal) => proposal.status === "pending",
+                  ) ? (
+                    <div className="mt-3 space-y-2">
+                      {(selectedMissionRun.replanProposals ?? [])
+                        .filter((proposal) => proposal.status === "pending")
+                        .map((proposal) => (
+                          <div
+                            key={proposal.id}
+                            className="rounded-md border border-warning/30 p-2 text-xs"
+                          >
+                            <p className="text-foreground">
+                              Replan proposal · {proposal.scope.replaceAll("_", " ")}
+                            </p>
+                            <p className="mt-1 text-muted-foreground">{proposal.summary}</p>
+                            <p className="mt-1 text-muted-foreground">
+                              Completed Task history preserved:{" "}
+                              {proposal.preservedCompletedTaskIds.length}
+                            </p>
+                            <div className="mt-2 flex gap-2">
+                              <Button
+                                size="xs"
+                                onClick={() =>
+                                  void run("Could not approve replan proposal", () =>
+                                    resolveReplan({
+                                      environmentId,
+                                      input: {
+                                        runId: selectedMissionRun.id,
+                                        proposalId: proposal.id,
+                                        resolution: "approved",
+                                      },
+                                    }),
+                                  )
+                                }
+                              >
+                                Approve proposal
+                              </Button>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() =>
+                                  void run("Could not reject replan proposal", () =>
+                                    resolveReplan({
+                                      environmentId,
+                                      input: {
+                                        runId: selectedMissionRun.id,
+                                        proposalId: proposal.id,
+                                        resolution: "rejected",
+                                      },
+                                    }),
+                                  )
+                                }
+                              >
+                                Reject
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
                   ) : null}
                   {selectedMissionRun.decisions.length > 0 ? (
                     <details className="mt-3 text-xs">

@@ -876,7 +876,12 @@ export function projectEvent(
           ...nextBase,
           tasks: (nextBase.tasks ?? []).map((task) =>
             task.id === payload.taskId
-              ? { ...task, threadId: payload.threadId, updatedAt: payload.updatedAt }
+              ? {
+                  ...task,
+                  threadId: payload.threadId,
+                  ...(payload.modelSelection ? { modelSelection: payload.modelSelection } : {}),
+                  updatedAt: payload.updatedAt,
+                }
               : task,
           ),
         })),
