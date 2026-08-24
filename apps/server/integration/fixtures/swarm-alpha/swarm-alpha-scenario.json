@@ -1,0 +1,52 @@
+{
+  "objective": "Add user notification preferences. Preserve current authentication behavior. Do not modify billing. Add frontend, backend, and regression coverage.",
+  "providers": ["codex", "antigravity"],
+  "sharedResources": [
+    {
+      "name": "User settings contract",
+      "patterns": ["src/shared/**"],
+      "mode": "exclusive"
+    }
+  ],
+  "qualityGates": ["npm test", "npm run test:integration"],
+  "tasks": [
+    {
+      "key": "preferences-contract",
+      "wave": 1,
+      "provider": "codex",
+      "dependsOn": [],
+      "writes": ["src/shared/**", "tests/**"],
+      "resources": ["User settings contract"]
+    },
+    {
+      "key": "storage-defaults",
+      "wave": 1,
+      "provider": "antigravity",
+      "dependsOn": [],
+      "writes": ["src/shared/**", "tests/**"],
+      "resources": ["User settings contract"],
+      "expectedInitialState": "waiting_resource"
+    },
+    {
+      "key": "preferences-api",
+      "wave": 2,
+      "provider": "codex",
+      "dependsOn": ["preferences-contract"],
+      "writes": ["src/api/**", "tests/**"],
+      "concurrentWith": ["storage-defaults"]
+    },
+    {
+      "key": "preferences-ui-and-integration",
+      "wave": 3,
+      "provider": "antigravity",
+      "dependsOn": ["storage-defaults", "preferences-api"],
+      "writes": ["src/ui/**", "tests/**"]
+    }
+  ],
+  "controlledCases": {
+    "review": "One Task must receive REQUEST_CHANGES before approval.",
+    "providerRecovery": "One transient provider failure must exhaust retry policy and preserve the Task while replacing its execution Thread.",
+    "integration": "The integration gate fails before implementation and passes only after the complete feature lands."
+  },
+  "expectedFinalState": "integration_ready"
+}

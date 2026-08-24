@@ -1,0 +1,10 @@
+{
+  "name": "nebula-swarm-alpha-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/baseline.fixture.js",
+    "test:integration": "node --test tests/notification-preferences.integration.fixture.js"
+  }
+}
