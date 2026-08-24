@@ -34,5 +34,6 @@ Shared Resource blocking is implemented separately from dependency readiness. A 
 dependencies but waiting for an exclusive resource held by another Task. Bulk starts serialize
 deterministically: one contender starts and the other remains waiting. Releasing the lease makes it
 resource-ready. A Supervised Run may continue it automatically under the user's prior authorization.
-Automatic Task creation, dependency planning, provider rerouting, remediation, conflict resolution,
-automatic Integration, and Swarm Mode are not implemented.
+Automatic Task creation outside an approved Architect plan, automatic plan approval, automatic
+`main` merge, unlimited autonomy, and AI conflict resolution are not implemented. Supervised Swarm,
+provider rerouting, bounded remediation, and policy-gated automatic Integration are implemented.

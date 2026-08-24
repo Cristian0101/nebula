@@ -499,11 +499,49 @@ export const MissionRunDecision = Schema.Struct({
 });
 export type MissionRunDecision = typeof MissionRunDecision.Type;
 
+export const SwarmPolicy = Schema.Struct({
+  revision: PositiveInt,
+  maxConcurrentTasks: PositiveInt.check(Schema.isLessThanOrEqualTo(32)),
+  routingProfile: RoutingProfile,
+  transportRetryLimit: NonNegativeInt,
+  remediationLimit: NonNegativeInt,
+  autoIntegration: Schema.Boolean,
+  stopOnConflict: Schema.Boolean,
+  independentReviewRequired: Schema.Boolean,
+  preapprovedOverlapPaths: Schema.Array(TrimmedNonEmptyString),
+  autoCompleteMission: Schema.Boolean,
+  qualityPolicy: Schema.NullOr(ProjectQualityPolicy),
+  reviewPolicy: Schema.NullOr(ProjectReviewPolicy),
+  frozenAt: IsoDateTime,
+});
+export type SwarmPolicy = typeof SwarmPolicy.Type;
+
+export const MissionFinalReport = Schema.Struct({
+  missionObjective: TrimmedNonEmptyString,
+  taskIds: Schema.Array(TaskId),
+  completedTaskIds: Schema.Array(TaskId),
+  providersUsed: Schema.Array(ProviderInstanceId),
+  providerReplacementCount: NonNegativeInt,
+  retryCount: NonNegativeInt,
+  remediationRoundCount: NonNegativeInt,
+  qualityGateCount: NonNegativeInt,
+  reviewCount: NonNegativeInt,
+  filesChanged: Schema.Array(TrimmedNonEmptyString),
+  integrationBranch: Schema.NullOr(TrimmedNonEmptyString),
+  finalValidation: Schema.Literals(["not_requested", "ready", "failed"]),
+  humanInterventionCount: NonNegativeInt,
+  knownRisks: Schema.Array(TrimmedNonEmptyString),
+  followUps: Schema.Array(TrimmedNonEmptyString),
+  elapsedMilliseconds: NonNegativeInt,
+  generatedAt: IsoDateTime,
+});
+export type MissionFinalReport = typeof MissionFinalReport.Type;
+
 export const MissionRun = Schema.Struct({
   id: MissionRunId,
   missionId: MissionId,
   projectId: ProjectId,
-  mode: Schema.Literal("supervised"),
+  mode: Schema.Literals(["supervised", "supervised_swarm"]),
   status: MissionRunStatus,
   maxConcurrentTasks: PositiveInt.check(Schema.isLessThanOrEqualTo(32)),
   currentReadyTaskIds: Schema.Array(TaskId),
@@ -522,6 +560,9 @@ export const MissionRun = Schema.Struct({
   routingDecisions: Schema.optional(Schema.Array(RoutingDecision)),
   coordinationRequests: Schema.optional(Schema.Array(CoordinationRequest)),
   replanProposals: Schema.optional(Schema.Array(ReplanProposal)),
+  swarmPolicy: Schema.optional(SwarmPolicy),
+  integrationBatchId: Schema.optional(Schema.NullOr(IntegrationBatchId)),
+  finalReport: Schema.optional(Schema.NullOr(MissionFinalReport)),
   updatedAt: IsoDateTime,
 });
 export type MissionRun = typeof MissionRun.Type;
@@ -1564,6 +1605,11 @@ const MissionRunStartCommand = Schema.Struct({
   routingProfile: Schema.optional(RoutingProfile),
   transportRetryLimit: Schema.optional(NonNegativeInt),
   remediationLimit: Schema.optional(NonNegativeInt),
+  autoIntegration: Schema.optional(Schema.Boolean),
+  stopOnConflict: Schema.optional(Schema.Boolean),
+  independentReviewRequired: Schema.optional(Schema.Boolean),
+  preapprovedOverlapPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  autoCompleteMission: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
 });
 
@@ -1812,6 +1858,8 @@ const MissionRunReconcileCommand = Schema.Struct({
   routingDecisions: Schema.optional(Schema.Array(RoutingDecision)),
   coordinationRequests: Schema.optional(Schema.Array(CoordinationRequest)),
   replanProposals: Schema.optional(Schema.Array(ReplanProposal)),
+  integrationBatchId: Schema.optional(Schema.NullOr(IntegrationBatchId)),
+  finalReport: Schema.optional(Schema.NullOr(MissionFinalReport)),
   createdAt: IsoDateTime,
 });
 

@@ -7,6 +7,7 @@ import {
   SharedResourceId,
   TaskId,
   TaskReviewSnapshotId,
+  ThreadId,
   type Mission,
   type MissionRun,
   type OrchestrationTask,
@@ -14,8 +15,10 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  buildMissionFinalReport,
   buildTaskContextPackage,
   deterministicMissionTaskIds,
+  missionIntegrationOverlapPaths,
   planMissionRunScheduling,
 } from "./missionRunner.js";
 
@@ -267,5 +270,115 @@ describe("supervised Mission scheduler", () => {
     expect(context.text).toContain("packages/contracts/src/api.ts");
     expect(context.text.length).toBeLessThanOrEqual(16_000);
     expect(context.text).toContain("excludes provider transcripts, hidden reasoning, credentials");
+  });
+});
+
+describe("Swarm Alpha evidence", () => {
+  const completed = (id: string, path: string, provider = "codex") => ({
+    ...task(id, "completed"),
+    result: {
+      taskId: taskId(id),
+      status: "completed" as const,
+      summary: `${id} completed`,
+      files: [
+        {
+          path,
+          previousPath: null,
+          changeType: "modified" as const,
+          additions: 4,
+          deletions: 1,
+          binary: false,
+          untracked: false,
+        },
+      ],
+      baseCommit: "abc123",
+      snapshotId: TaskReviewSnapshotId.make(`snapshot-${id}`),
+      testsRun: [],
+      assumptions: [],
+      interfaceChanges: [],
+      migrations: [],
+      knownRisks: id === "D" ? ["Final follow-up risk"] : [],
+      followUps: id === "D" ? ["Watch Alpha benchmark"] : [],
+      providerInstanceId: ProviderInstanceId.make(provider),
+      threadId: null,
+      branch: `nebula/${id}`,
+      completedAt: now,
+    },
+  });
+
+  it("detects shared changed paths before automatic Integration", () => {
+    expect(
+      missionIntegrationOverlapPaths([
+        completed("A", "packages/contracts/src/swarm.ts"),
+        completed("B", "packages/contracts/src/swarm.ts", "antigravity"),
+        completed("C", "apps/server/src/swarm.ts"),
+        completed("D", "apps/web/src/swarm.ts"),
+      ]),
+    ).toEqual(["packages/contracts/src/swarm.ts"]);
+  });
+
+  it("builds a durable evidence-only final report for the four-Task benchmark", () => {
+    const tasks = [
+      completed("A", "packages/contracts/src/swarm.ts"),
+      completed("B", "apps/server/src/swarm.ts", "antigravity"),
+      completed("C", "apps/web/src/swarm.ts"),
+      completed("D", "packages/shared/src/swarm.test.ts"),
+    ];
+    const report = buildMissionFinalReport({
+      mission,
+      run: {
+        ...run,
+        taskRecovery: [
+          {
+            taskId: taskId("B"),
+            transientRetries: 1,
+            remediationRounds: 1,
+            latestFailureClass: null,
+            latestFailureSignature: null,
+            attentionRequired: false,
+            updatedAt: now,
+            attempts: [
+              {
+                number: 1,
+                kind: "initial",
+                providerInstanceId: ProviderInstanceId.make("antigravity"),
+                threadId: ThreadId.make("thread-b-1"),
+                status: "replaced",
+                failureClass: "transport_transient",
+                summary: "Provider transport failed.",
+                startedAt: now,
+                completedAt: now,
+              },
+              {
+                number: 2,
+                kind: "replacement",
+                providerInstanceId: ProviderInstanceId.make("codex"),
+                threadId: ThreadId.make("thread-b-2"),
+                status: "completed",
+                failureClass: null,
+                summary: "Replacement completed.",
+                startedAt: now,
+                completedAt: now,
+              },
+            ],
+          },
+        ],
+      },
+      tasks,
+      integrationBranch: "nebula/integration/swarm-alpha",
+      finalValidation: "ready",
+      generatedAt: "2026-08-23T12:10:00.000Z",
+    });
+    expect(report).toMatchObject({
+      completedTaskIds: ["A", "B", "C", "D"],
+      providersUsed: ["antigravity", "codex"],
+      providerReplacementCount: 1,
+      retryCount: 1,
+      remediationRoundCount: 1,
+      finalValidation: "ready",
+      elapsedMilliseconds: 600_000,
+    });
+    expect(report.filesChanged).toHaveLength(4);
+    expect(report.knownRisks).toEqual(["Final follow-up risk"]);
   });
 });

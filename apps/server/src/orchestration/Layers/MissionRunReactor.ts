@@ -2,6 +2,7 @@ import {
   CommandId,
   CoordinationRequestId,
   EventId,
+  IntegrationBatchId,
   MessageId,
   ModelSelection,
   OwnershipRequestId,
@@ -23,7 +24,9 @@ import {
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import {
   buildTaskContextPackage,
+  buildMissionFinalReport,
   deterministicMissionTaskIds,
+  missionIntegrationOverlapPaths,
   planMissionRunScheduling,
   type MissionRunSchedulingDecision,
 } from "@t3tools/shared/missionRunner";
@@ -83,6 +86,8 @@ const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "thread.session-set",
   "resource.leases-acquired",
   "resource.leases-released",
+  "integration.created",
+  "integration.updated",
 ]);
 
 const decisionHash = (value: string) => {
@@ -359,6 +364,8 @@ const make = Effect.gen(function* () {
     readonly routingDecisions?: ReadonlyArray<RoutingDecision>;
     readonly coordinationRequests?: MissionRun["coordinationRequests"];
     readonly replanProposals?: MissionRun["replanProposals"];
+    readonly integrationBatchId?: MissionRun["integrationBatchId"];
+    readonly finalReport?: MissionRun["finalReport"];
   }) {
     const createdAt = yield* now;
     yield* engine.dispatch({
@@ -379,6 +386,10 @@ const make = Effect.gen(function* () {
         ? { coordinationRequests: [...input.coordinationRequests] }
         : {}),
       ...(input.replanProposals ? { replanProposals: [...input.replanProposals] } : {}),
+      ...(input.integrationBatchId !== undefined
+        ? { integrationBatchId: input.integrationBatchId }
+        : {}),
+      ...(input.finalReport !== undefined ? { finalReport: input.finalReport } : {}),
       createdAt,
     });
   });
@@ -1213,7 +1224,11 @@ const make = Effect.gen(function* () {
       const snapshotRuns = (task.qualityGateRuns ?? []).filter(
         (qualityRun) => qualityRun.snapshotId === task.reviewSnapshot!.id,
       );
-      const enabledGates = (project.qualityPolicy?.gates ?? []).filter((gate) => gate.enabled);
+      const enabledGates = (
+        run.swarmPolicy?.qualityPolicy?.gates ??
+        project.qualityPolicy?.gates ??
+        []
+      ).filter((gate) => gate.enabled);
       if (enabledGates.length > 0 && snapshotRuns.length === 0) {
         yield* engine.dispatch({
           type: "task.quality.run",
@@ -1231,7 +1246,7 @@ const make = Effect.gen(function* () {
       )
         return;
       if (requiredGateFailure(task)) return;
-      if (task.reviewRequired === true) {
+      if (task.reviewRequired === true || run.swarmPolicy?.independentReviewRequired === true) {
         const review = currentReview(task);
         if (!review) {
           const selection = yield* reviewerSelection(task);
@@ -1321,20 +1336,168 @@ const make = Effect.gen(function* () {
       });
       return;
     }
+    if (
+      run.swarmPolicy &&
+      (JSON.stringify(run.swarmPolicy.qualityPolicy) !==
+        JSON.stringify(project.qualityPolicy ?? null) ||
+        JSON.stringify(run.swarmPolicy.reviewPolicy) !==
+          JSON.stringify(project.reviewPolicy ?? null))
+    ) {
+      yield* updateRun({
+        runId: run.id,
+        status: "attention",
+        currentReadyTaskIds: [],
+        scheduledTaskIds: run.scheduledTaskIds,
+        attention: [
+          {
+            taskId: null,
+            code: "swarm_policy_changed",
+            detail:
+              "Project quality or review policy changed after this Swarm policy was frozen. Stop and start a new Run revision to apply it.",
+            blocksMission: true,
+          },
+        ],
+      });
+      return;
+    }
     if (missionTasks.every((task) => task.status === "completed")) {
+      const autoIntegration = run.swarmPolicy?.autoIntegration === true;
+      if (autoIntegration) {
+        const integrationBatchId =
+          run.integrationBatchId ??
+          mission.integrationBatchId ??
+          IntegrationBatchId.make(`swarm:${run.id}`);
+        const batch = (project.integrationBatches ?? []).find(
+          (candidate) => candidate.id === integrationBatchId,
+        );
+        if (!batch) {
+          const overlapPaths = missionIntegrationOverlapPaths(missionTasks);
+          const approved = new Set(run.swarmPolicy?.preapprovedOverlapPaths ?? []);
+          const unapproved = overlapPaths.filter((path) => !approved.has(path));
+          if (unapproved.length > 0) {
+            yield* updateRun({
+              runId: run.id,
+              status: "attention",
+              currentReadyTaskIds: [],
+              scheduledTaskIds: [],
+              attention: [
+                {
+                  taskId: null,
+                  code: "integration_overlap_acknowledgement",
+                  detail: `Automatic Integration requires explicit overlap approval for: ${unapproved.join(", ")}.`,
+                  blocksMission: true,
+                },
+              ],
+            });
+            return;
+          }
+          const createdAt = yield* now;
+          yield* engine.dispatch({
+            type: "integration.create",
+            commandId: commandId(run, null, "integration-create"),
+            batchId: integrationBatchId,
+            projectId: project.id,
+            taskIds: deterministicMissionTaskIds(mission),
+            acknowledgeOverlaps: overlapPaths.length > 0,
+            missionId: mission.id,
+            createdAt,
+          });
+          yield* updateRun({
+            runId: run.id,
+            status: "running",
+            currentReadyTaskIds: [],
+            scheduledTaskIds: [],
+            attention: [],
+            integrationBatchId,
+            decision: {
+              id: EventId.make(`mission-run:${run.id}:integration-created`),
+              kind: "pipeline",
+              taskId: null,
+              reason: "All Tasks completed. Automatic Integration started in Mission DAG order.",
+              sourceTaskIds: deterministicMissionTaskIds(mission),
+              occurredAt: createdAt,
+            },
+          });
+          return;
+        }
+        if (
+          batch.status === "conflict" ||
+          batch.status === "failed" ||
+          batch.status === "cancelled"
+        ) {
+          yield* updateRun({
+            runId: run.id,
+            status: "attention",
+            currentReadyTaskIds: [],
+            scheduledTaskIds: [],
+            attention: [
+              {
+                taskId: batch.conflict?.taskId ?? null,
+                code:
+                  batch.status === "conflict"
+                    ? "integration_conflict"
+                    : "integration_validation_failed",
+                detail:
+                  batch.status === "conflict"
+                    ? "Integration has a Git conflict. Resolve it in the Integration workspace, then continue."
+                    : (batch.failureReason ?? "Final Integration validation failed."),
+                blocksMission: true,
+              },
+            ],
+            integrationBatchId,
+          });
+          return;
+        }
+        if (batch.status !== "ready") return;
+        const completedAt = yield* now;
+        yield* updateRun({
+          runId: run.id,
+          status: "completed",
+          currentReadyTaskIds: [],
+          scheduledTaskIds: [],
+          attention: [],
+          integrationBatchId,
+          finalReport: buildMissionFinalReport({
+            mission,
+            run,
+            tasks: missionTasks,
+            integrationBranch: batch.branch,
+            finalValidation: "ready",
+            generatedAt: completedAt,
+          }),
+          decision: {
+            id: EventId.make(`mission-run:${run.id}:completed`),
+            kind: "completed",
+            taskId: null,
+            reason: "All Mission Tasks completed and Integration passed final validation.",
+            sourceTaskIds: mission.taskIds,
+            occurredAt: completedAt,
+          },
+        });
+        return;
+      }
+      const completedAt = yield* now;
       yield* updateRun({
         runId: run.id,
         status: "completed",
         currentReadyTaskIds: [],
         scheduledTaskIds: [],
         attention: [],
+        finalReport: buildMissionFinalReport({
+          mission,
+          run,
+          tasks: missionTasks,
+          integrationBranch: null,
+          finalValidation: "not_requested",
+          generatedAt: completedAt,
+        }),
         decision: {
           id: EventId.make(`mission-run:${run.id}:completed`),
           kind: "completed",
           taskId: null,
           reason: "All Mission Tasks completed. Mission is ready for Integration.",
           sourceTaskIds: mission.taskIds,
-          occurredAt: yield* now,
+          occurredAt: completedAt,
         },
       });
       return;

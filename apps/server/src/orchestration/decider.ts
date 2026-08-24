@@ -1411,7 +1411,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             id: command.runId,
             missionId: mission.id,
             projectId: mission.projectId,
-            mode: "supervised" as const,
+            mode: "supervised_swarm" as const,
             status: "running" as const,
             maxConcurrentTasks: command.maxConcurrentTasks,
             currentReadyTaskIds: [],
@@ -1438,6 +1438,30 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             routingDecisions: [],
             coordinationRequests: [],
             replanProposals: [],
+            swarmPolicy: {
+              revision: 1,
+              maxConcurrentTasks: command.maxConcurrentTasks,
+              routingProfile:
+                command.routingProfile ??
+                mission.routingProfile ??
+                project.routingProfile ??
+                "manual_only",
+              transportRetryLimit: command.transportRetryLimit ?? 2,
+              remediationLimit: command.remediationLimit ?? 2,
+              autoIntegration: command.autoIntegration ?? false,
+              stopOnConflict: command.stopOnConflict ?? true,
+              independentReviewRequired:
+                command.independentReviewRequired ??
+                project.reviewPolicy?.requireIndependentReview ??
+                true,
+              preapprovedOverlapPaths: command.preapprovedOverlapPaths ?? [],
+              autoCompleteMission: command.autoCompleteMission ?? false,
+              qualityPolicy: project.qualityPolicy ?? null,
+              reviewPolicy: project.reviewPolicy ?? null,
+              frozenAt: command.createdAt,
+            },
+            integrationBatchId: null,
+            finalReport: null,
             updatedAt: command.createdAt,
           },
         },
@@ -1551,6 +1575,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             routingDecisions: command.routingDecisions ?? run.routingDecisions ?? [],
             coordinationRequests: command.coordinationRequests ?? run.coordinationRequests ?? [],
             replanProposals: command.replanProposals ?? run.replanProposals ?? [],
+            integrationBatchId: command.integrationBatchId ?? run.integrationBatchId ?? null,
+            finalReport: command.finalReport ?? run.finalReport ?? null,
             updatedAt: command.createdAt,
           },
         },

@@ -1,5 +1,7 @@
 # Architect plans
 
+Architect always proposes and a human always approves. Approval may materialize a Mission that can later run in Manual, Assisted, or Supervised Swarm mode; no autonomy level bypasses this boundary. See [Supervised Swarm](swarm-mode.md).
+
 Architect plans turn a high-level engineering objective into a reviewable Mission proposal. In Command Deck → Missions, choose **Plan with Architect**, enter an objective and optional constraints/context paths, and explicitly select the Architect provider and model.
 
 Generation requires a clean Git repository and records the exact HEAD commit. Nebula sends a bounded context package: a limited-depth tree, selected small text files, project quality/review policy, and enabled Shared Resources. Protected paths, environment files, credentials, binaries, large files, build output, dependency trees, and Git internals are excluded. Repository text is evidence, not policy, and cannot override Nebula's schema or human approval boundary.

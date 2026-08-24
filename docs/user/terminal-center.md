@@ -39,4 +39,4 @@ Terminal Center and Command Deck are complementary. Terminal Center is for freef
 
 ## Current scope
 
-Terminal Center, Agent Canvas, quick provider launch, automatic layouts, freeform spatial layout, and Supervised Run Thread discovery are **implemented**. Canvas edges are reserved for canonical Mission dependencies; Terminal Center does not invent agent-to-agent communication, and Swarm Mode is not implemented.
+Terminal Center, Agent Canvas, quick provider launch, automatic layouts, freeform spatial layout, Supervised Run Thread discovery, and Swarm Mission Flow are **implemented**. Canvas edges are reserved for canonical Mission dependencies; Terminal Center does not invent agent-to-agent communication.

@@ -2,6 +2,7 @@ import type {
   Mission,
   MissionRun,
   MissionRunAttention,
+  MissionFinalReport,
   OrchestrationProject,
   OrchestrationTask,
   TaskId,
@@ -239,6 +240,77 @@ const lines = (values: ReadonlyArray<string>, limit: number) =>
 export interface TaskContextPackage {
   readonly text: string;
   readonly sourceTaskIds: ReadonlyArray<TaskId>;
+}
+
+export function missionIntegrationOverlapPaths(
+  tasks: ReadonlyArray<OrchestrationTask>,
+): ReadonlyArray<string> {
+  const owners = new Map<string, Set<TaskId>>();
+  for (const task of tasks) {
+    for (const file of task.result?.files ?? []) {
+      const taskIds = owners.get(file.path) ?? new Set<TaskId>();
+      taskIds.add(task.id);
+      owners.set(file.path, taskIds);
+    }
+  }
+  return [...owners]
+    .filter(([, taskIds]) => taskIds.size > 1)
+    .map(([path]) => path)
+    .toSorted();
+}
+
+export function buildMissionFinalReport(input: {
+  readonly mission: Mission;
+  readonly run: MissionRun;
+  readonly tasks: ReadonlyArray<OrchestrationTask>;
+  readonly integrationBranch: string | null;
+  readonly finalValidation: MissionFinalReport["finalValidation"];
+  readonly generatedAt: string;
+}): MissionFinalReport {
+  const recovery = input.run.taskRecovery ?? [];
+  const providersUsed = new Set(
+    recovery.flatMap((state) => state.attempts.map((attempt) => attempt.providerInstanceId)),
+  );
+  for (const task of input.tasks) {
+    if (task.result?.providerInstanceId) providersUsed.add(task.result.providerInstanceId);
+  }
+  return {
+    missionObjective: input.mission.objective,
+    taskIds: [...input.mission.taskIds],
+    completedTaskIds: input.tasks
+      .filter((task) => task.status === "completed")
+      .map((task) => task.id),
+    providersUsed: [...providersUsed].toSorted(),
+    providerReplacementCount: recovery.reduce(
+      (count, state) =>
+        count + state.attempts.filter((attempt) => attempt.kind === "replacement").length,
+      0,
+    ),
+    retryCount: recovery.reduce((count, state) => count + state.transientRetries, 0),
+    remediationRoundCount: recovery.reduce((count, state) => count + state.remediationRounds, 0),
+    qualityGateCount: input.tasks.reduce(
+      (count, task) => count + (task.qualityGateRuns?.length ?? 0),
+      0,
+    ),
+    reviewCount: input.tasks.reduce((count, task) => count + (task.reviews?.length ?? 0), 0),
+    filesChanged: [
+      ...new Set(
+        input.tasks.flatMap((task) => (task.result?.files ?? []).map((file) => file.path)),
+      ),
+    ].toSorted(),
+    integrationBranch: input.integrationBranch,
+    finalValidation: input.finalValidation,
+    humanInterventionCount: input.run.decisions.filter(
+      (decision) => decision.kind === "attention" || decision.kind === "request",
+    ).length,
+    knownRisks: [...new Set(input.tasks.flatMap((task) => task.result?.knownRisks ?? []))],
+    followUps: [...new Set(input.tasks.flatMap((task) => task.result?.followUps ?? []))],
+    elapsedMilliseconds: Math.max(
+      0,
+      new Date(input.generatedAt).getTime() - new Date(input.run.startedAt).getTime(),
+    ),
+    generatedAt: input.generatedAt,
+  };
 }
 
 export function buildTaskContextPackage(input: {

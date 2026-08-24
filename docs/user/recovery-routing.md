@@ -66,4 +66,4 @@ The proposal records affected Tasks and completed Tasks that must be preserved. 
 | Automatic ownership approval    | NOT IMPLEMENTED |
 | Unbounded remediation           | NOT IMPLEMENTED |
 | Unapproved Mission rewrite      | NOT IMPLEMENTED |
-| Swarm Mode                      | NOT YET         |
+| Swarm Mode                      | IMPLEMENTED     |

@@ -2,11 +2,11 @@
 
 For bounded retry, remediation, provider replacement, routing profiles, structured requests, and human-gated replanning, see [Recover and route supervised Missions](recovery-routing.md).
 
-A Supervised Mission Run executes an already approved and activated Architect Mission. It does not author or rewrite the plan, change Task ownership, invent Tasks, approve ownership requests, resolve conflicts, or start Integration. It may choose a new provider assignment only when the user starts the Run with an automatic routing profile.
+A Supervised Mission Run executes an already approved and activated Architect Mission. It does not author or rewrite the plan, change Task ownership, invent Tasks, approve ownership requests, resolve conflicts, or merge `main`. In **Supervised Swarm**, it may choose a provider under the frozen routing profile and may start the existing Integration Engine when the launch policy explicitly enables Automatic Integration.
 
 ## Start a Run
 
-Open **Command Deck → Missions** and select an active Mission created from an approved Architect plan. Set **Max active** to the maximum number of writable Tasks Nebula may run at once, choose an explicit routing profile, then choose **Start supervised Run**. The default concurrency is 2 and the default routing profile is **Manual Only**.
+Open **Command Deck → Missions** and select an active Mission created from an approved Architect plan. Choose **Supervised Swarm**, set **Max active**, choose a routing profile, and select **Run as Swarm**. Review the confirmation and choose **Run Swarm**. The default concurrency is 2.
 
 The confirmation explains the authorization boundary: Nebula may automatically start Tasks when dependencies, Shared Resources, provider readiness, ownership, and the concurrency limit allow. It stops the affected branch when a deterministic safety gate needs human judgment.
 
@@ -40,7 +40,7 @@ After a Builder turn settles, the Run advances through the existing server-side 
 4. Configured independent review using the current Project review policy.
 5. Canonical Task completion.
 
-Completion unlocks later Mission waves without another Start click. The Run completes when every Mission Task is completed and reports **Mission ready for Integration**. It does not create or start an Integration Batch.
+Completion unlocks later Mission waves without another Start click. With Automatic Integration disabled, the Run completes when every Mission Task is complete. With it enabled, the Run completes only after the linked Integration Batch reaches Ready through final quality validation.
 
 ## Attention policy
 
@@ -69,4 +69,4 @@ Terminal Center discovers active Run Task Threads and keeps using its existing c
 | Automatic remediation           | NOT IMPLEMENTED |
 | Automatic provider rerouting    | NOT IMPLEMENTED |
 | Plan rewriting                  | NOT IMPLEMENTED |
-| Swarm Mode                      | NOT YET         |
+| Swarm Mode                      | IMPLEMENTED     |
