@@ -106,6 +106,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "mission.run.resume":
     case "mission.run.stop":
     case "mission.run.reconcile":
+    case "mission.run.coordination-request.resolve":
+    case "mission.run.replan.resolve":
       return {
         aggregateKind: "mission",
         aggregateId: MissionId.make(command.runId),

@@ -10,6 +10,7 @@ import {
   ArchitectPlanProposalId,
   CheckpointRef,
   CommandId,
+  CoordinationRequestId,
   EventId,
   IsoDateTime,
   IntegrationBatchId,
@@ -23,6 +24,7 @@ import {
   PositiveInt,
   ProjectId,
   QualityGateRunId,
+  ReplanProposalId,
   TaskHandoffId,
   TaskIntegrationArtifactId,
   TaskId,
@@ -38,6 +40,14 @@ import {
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { ArchitectPlanMaterializationTask, ArchitectPlanProposal } from "./architectPlan.ts";
+import {
+  CoordinationRequest,
+  RecoveryPolicy,
+  ReplanProposal,
+  RoutingDecision,
+  RoutingProfile,
+  TaskRecoveryState,
+} from "./recoveryRouting.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -440,6 +450,8 @@ export const Mission = Schema.Struct({
   // Architect-approved Missions pin every Task workspace to one immutable common base.
   baseCommit: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   architectPlanProposalId: Schema.optional(Schema.NullOr(ArchitectPlanProposalId)),
+  // Mission override. Null/absent inherits the Project routing profile.
+  routingProfile: Schema.optional(Schema.NullOr(RoutingProfile)),
 });
 export type Mission = typeof Mission.Type;
 
@@ -473,6 +485,12 @@ export const MissionRunDecision = Schema.Struct({
     "pipeline",
     "attention",
     "completed",
+    "routing",
+    "retry",
+    "remediation",
+    "replacement",
+    "request",
+    "replan",
   ]),
   taskId: Schema.NullOr(TaskId),
   reason: TrimmedNonEmptyString,
@@ -481,11 +499,49 @@ export const MissionRunDecision = Schema.Struct({
 });
 export type MissionRunDecision = typeof MissionRunDecision.Type;
 
+export const SwarmPolicy = Schema.Struct({
+  revision: PositiveInt,
+  maxConcurrentTasks: PositiveInt.check(Schema.isLessThanOrEqualTo(32)),
+  routingProfile: RoutingProfile,
+  transportRetryLimit: NonNegativeInt,
+  remediationLimit: NonNegativeInt,
+  autoIntegration: Schema.Boolean,
+  stopOnConflict: Schema.Boolean,
+  independentReviewRequired: Schema.Boolean,
+  preapprovedOverlapPaths: Schema.Array(TrimmedNonEmptyString),
+  autoCompleteMission: Schema.Boolean,
+  qualityPolicy: Schema.NullOr(ProjectQualityPolicy),
+  reviewPolicy: Schema.NullOr(ProjectReviewPolicy),
+  frozenAt: IsoDateTime,
+});
+export type SwarmPolicy = typeof SwarmPolicy.Type;
+
+export const MissionFinalReport = Schema.Struct({
+  missionObjective: TrimmedNonEmptyString,
+  taskIds: Schema.Array(TaskId),
+  completedTaskIds: Schema.Array(TaskId),
+  providersUsed: Schema.Array(ProviderInstanceId),
+  providerReplacementCount: NonNegativeInt,
+  retryCount: NonNegativeInt,
+  remediationRoundCount: NonNegativeInt,
+  qualityGateCount: NonNegativeInt,
+  reviewCount: NonNegativeInt,
+  filesChanged: Schema.Array(TrimmedNonEmptyString),
+  integrationBranch: Schema.NullOr(TrimmedNonEmptyString),
+  finalValidation: Schema.Literals(["not_requested", "ready", "failed"]),
+  humanInterventionCount: NonNegativeInt,
+  knownRisks: Schema.Array(TrimmedNonEmptyString),
+  followUps: Schema.Array(TrimmedNonEmptyString),
+  elapsedMilliseconds: NonNegativeInt,
+  generatedAt: IsoDateTime,
+});
+export type MissionFinalReport = typeof MissionFinalReport.Type;
+
 export const MissionRun = Schema.Struct({
   id: MissionRunId,
   missionId: MissionId,
   projectId: ProjectId,
-  mode: Schema.Literal("supervised"),
+  mode: Schema.Literals(["supervised", "supervised_swarm"]),
   status: MissionRunStatus,
   maxConcurrentTasks: PositiveInt.check(Schema.isLessThanOrEqualTo(32)),
   currentReadyTaskIds: Schema.Array(TaskId),
@@ -499,6 +555,14 @@ export const MissionRun = Schema.Struct({
   stoppedAt: Schema.NullOr(IsoDateTime),
   failedAt: Schema.NullOr(IsoDateTime),
   failureReason: Schema.NullOr(TrimmedNonEmptyString),
+  recoveryPolicy: Schema.optional(RecoveryPolicy),
+  taskRecovery: Schema.optional(Schema.Array(TaskRecoveryState)),
+  routingDecisions: Schema.optional(Schema.Array(RoutingDecision)),
+  coordinationRequests: Schema.optional(Schema.Array(CoordinationRequest)),
+  replanProposals: Schema.optional(Schema.Array(ReplanProposal)),
+  swarmPolicy: Schema.optional(SwarmPolicy),
+  integrationBatchId: Schema.optional(Schema.NullOr(IntegrationBatchId)),
+  finalReport: Schema.optional(Schema.NullOr(MissionFinalReport)),
   updatedAt: IsoDateTime,
 });
 export type MissionRun = typeof MissionRun.Type;
@@ -546,6 +610,7 @@ export const OrchestrationProject = Schema.Struct({
   sharedResources: Schema.optional(Schema.Array(SharedResourceDefinition)),
   resourceLeases: Schema.optional(Schema.Array(ResourceLease)),
   architectPlans: Schema.optional(Schema.Array(ArchitectPlanProposal)),
+  routingProfile: Schema.optional(RoutingProfile),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -874,7 +939,7 @@ export const OwnershipRequest = Schema.Struct({
   status: Schema.Literals(["pending", "approved", "denied", "cancelled"]),
   requestedRules: Schema.Array(TaskOwnershipRule),
   reason: TrimmedNonEmptyString,
-  source: Schema.Literals(["human", "violation"]),
+  source: Schema.Literals(["human", "violation", "provider"]),
   createdAt: IsoDateTime,
   resolvedAt: Schema.NullOr(IsoDateTime),
   resolutionNote: Schema.NullOr(TrimmedString),
@@ -1537,6 +1602,14 @@ const MissionRunStartCommand = Schema.Struct({
   missionId: MissionId,
   projectId: ProjectId,
   maxConcurrentTasks: PositiveInt.check(Schema.isLessThanOrEqualTo(32)),
+  routingProfile: Schema.optional(RoutingProfile),
+  transportRetryLimit: Schema.optional(NonNegativeInt),
+  remediationLimit: Schema.optional(NonNegativeInt),
+  autoIntegration: Schema.optional(Schema.Boolean),
+  stopOnConflict: Schema.optional(Schema.Boolean),
+  independentReviewRequired: Schema.optional(Schema.Boolean),
+  preapprovedOverlapPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  autoCompleteMission: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
 });
 
@@ -1558,6 +1631,25 @@ const MissionRunStopCommand = Schema.Struct({
   type: Schema.Literal("mission.run.stop"),
   commandId: CommandId,
   runId: MissionRunId,
+  createdAt: IsoDateTime,
+});
+
+const MissionRunCoordinationRequestResolveCommand = Schema.Struct({
+  type: Schema.Literal("mission.run.coordination-request.resolve"),
+  commandId: CommandId,
+  runId: MissionRunId,
+  requestId: CoordinationRequestId,
+  resolution: Schema.Literals(["approved", "denied", "answered", "cancelled"]),
+  answer: Schema.optional(Schema.NullOr(TrimmedString)),
+  createdAt: IsoDateTime,
+});
+
+const MissionRunReplanResolveCommand = Schema.Struct({
+  type: Schema.Literal("mission.run.replan.resolve"),
+  commandId: CommandId,
+  runId: MissionRunId,
+  proposalId: ReplanProposalId,
+  resolution: Schema.Literals(["approved", "rejected", "cancelled"]),
   createdAt: IsoDateTime,
 });
 
@@ -1591,6 +1683,11 @@ const TaskBindThreadCommand = Schema.Struct({
   commandId: CommandId,
   taskId: TaskId,
   threadId: ThreadId,
+  // Server-supervised replacement keeps the canonical Task/worktree but may
+  // bind a fresh provider execution Thread. Clients cannot bypass the decider
+  // safeguards merely by setting this flag.
+  replaceProviderExecution: Schema.optional(Schema.Boolean),
+  modelSelection: Schema.optional(ModelSelection),
   createdAt: IsoDateTime,
 });
 
@@ -1660,7 +1757,7 @@ const TaskOwnershipRequestCreateCommand = Schema.Struct({
   requestId: OwnershipRequestId,
   requestedRules: Schema.Array(TaskOwnershipRule),
   reason: TrimmedNonEmptyString,
-  source: Schema.Literals(["human", "violation"]),
+  source: Schema.Literals(["human", "violation", "provider"]),
   createdAt: IsoDateTime,
 });
 
@@ -1757,6 +1854,12 @@ const MissionRunReconcileCommand = Schema.Struct({
   decision: Schema.optional(Schema.NullOr(MissionRunDecision)),
   completedAt: Schema.NullOr(IsoDateTime),
   failureReason: Schema.NullOr(TrimmedNonEmptyString),
+  taskRecovery: Schema.optional(Schema.Array(TaskRecoveryState)),
+  routingDecisions: Schema.optional(Schema.Array(RoutingDecision)),
+  coordinationRequests: Schema.optional(Schema.Array(CoordinationRequest)),
+  replanProposals: Schema.optional(Schema.Array(ReplanProposal)),
+  integrationBatchId: Schema.optional(Schema.NullOr(IntegrationBatchId)),
+  finalReport: Schema.optional(Schema.NullOr(MissionFinalReport)),
   createdAt: IsoDateTime,
 });
 
@@ -2111,6 +2214,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   MissionRunPauseCommand,
   MissionRunResumeCommand,
   MissionRunStopCommand,
+  MissionRunCoordinationRequestResolveCommand,
+  MissionRunReplanResolveCommand,
   IntegrationCreateCommand,
   IntegrationContinueCommand,
   IntegrationAbortCommand,
@@ -2190,6 +2295,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   MissionRunPauseCommand,
   MissionRunResumeCommand,
   MissionRunStopCommand,
+  MissionRunCoordinationRequestResolveCommand,
+  MissionRunReplanResolveCommand,
   IntegrationCreateCommand,
   IntegrationContinueCommand,
   IntegrationAbortCommand,
@@ -3038,6 +3145,8 @@ export const OrchestrationTaskRestoreUndonePayload = Schema.Struct({
 export const OrchestrationTaskThreadBoundPayload = Schema.Struct({
   taskId: TaskId,
   threadId: ThreadId,
+  previousThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  modelSelection: Schema.optional(ModelSelection),
   updatedAt: IsoDateTime,
 });
 

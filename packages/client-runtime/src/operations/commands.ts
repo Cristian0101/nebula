@@ -54,6 +54,9 @@ export type StartMissionRunInput = CommandInput<"mission.run.start">;
 export type PauseMissionRunInput = CommandInput<"mission.run.pause">;
 export type ResumeMissionRunInput = CommandInput<"mission.run.resume">;
 export type StopMissionRunInput = CommandInput<"mission.run.stop">;
+export type ResolveMissionRunCoordinationRequestInput =
+  CommandInput<"mission.run.coordination-request.resolve">;
+export type ResolveMissionRunReplanInput = CommandInput<"mission.run.replan.resolve">;
 export type CreateIntegrationInput = CommandInput<"integration.create">;
 export type ContinueIntegrationInput = CommandInput<"integration.continue">;
 export type AbortIntegrationInput = CommandInput<"integration.abort">;
@@ -250,7 +253,9 @@ const missionCommand = <
     | "mission.run.start"
     | "mission.run.pause"
     | "mission.run.resume"
-    | "mission.run.stop",
+    | "mission.run.stop"
+    | "mission.run.coordination-request.resolve"
+    | "mission.run.replan.resolve",
 >(
   type: T,
   input: CommandInput<T>,
@@ -307,6 +312,15 @@ export const resumeMissionRun: (input: ResumeMissionRunInput) => CommandEffect =
 export const stopMissionRun: (input: StopMissionRunInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.stopMissionRun",
 )((input) => missionCommand("mission.run.stop", input));
+export const resolveMissionRunCoordinationRequest: (
+  input: ResolveMissionRunCoordinationRequestInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.resolveMissionRunCoordinationRequest")(
+  (input) => missionCommand("mission.run.coordination-request.resolve", input),
+);
+export const resolveMissionRunReplan: (input: ResolveMissionRunReplanInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.resolveMissionRunReplan")((input) =>
+    missionCommand("mission.run.replan.resolve", input),
+  );
 
 export const createIntegration: (input: CreateIntegrationInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.createIntegration",

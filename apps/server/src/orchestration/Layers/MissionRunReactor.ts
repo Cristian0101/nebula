@@ -1,13 +1,19 @@
 import {
   CommandId,
+  CoordinationRequestId,
   EventId,
+  IntegrationBatchId,
   MessageId,
   ModelSelection,
+  OwnershipRequestId,
+  ReplanProposalId,
   TaskReviewId,
   ThreadId,
   type MissionRun,
   type MissionRunAttention,
   type MissionRunDecision,
+  type RoutingDecision,
+  type TaskRecoveryState,
   type OrchestrationEvent,
   type OrchestrationProject,
   type OrchestrationReadModel,
@@ -18,10 +24,20 @@ import {
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import {
   buildTaskContextPackage,
+  buildMissionFinalReport,
   deterministicMissionTaskIds,
+  missionIntegrationOverlapPaths,
   planMissionRunScheduling,
   type MissionRunSchedulingDecision,
 } from "@t3tools/shared/missionRunner";
+import {
+  classifyRuntimeFailure,
+  parseCoordinationRequest,
+  recommendWithFallback,
+  recoveryAction,
+  smallestReplanScope,
+  type RoutingCandidate,
+} from "@t3tools/shared/recoveryRouting";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -70,6 +86,8 @@ const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "thread.session-set",
   "resource.leases-acquired",
   "resource.leases-released",
+  "integration.created",
+  "integration.updated",
 ]);
 
 const decisionHash = (value: string) => {
@@ -234,6 +252,76 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const routingCandidates = Effect.fn("MissionRunReactor.routingCandidates")(function* (
+    model: OrchestrationReadModel,
+  ) {
+    const instances = yield* providers.listInstances;
+    const candidates: RoutingCandidate[] = [];
+    for (const instance of instances) {
+      const snapshot = yield* instance.snapshot.getSnapshot.pipe(Effect.orElseSucceed(() => null));
+      const activeLoad = model.threads.filter(
+        (thread) =>
+          thread.modelSelection.instanceId === instance.instanceId &&
+          (thread.latestTurn?.state === "running" || thread.session?.status === "running"),
+      ).length;
+      candidates.push({
+        instanceId: instance.instanceId,
+        driverKind: instance.driverKind,
+        model: snapshot?.models[0]?.slug ?? "auto",
+        ready:
+          instance.enabled &&
+          snapshot?.enabled === true &&
+          snapshot.installed &&
+          snapshot.status === "ready" &&
+          snapshot.availability !== "unavailable",
+        activeLoad,
+      });
+    }
+    return candidates;
+  });
+
+  const routeTask = Effect.fn("MissionRunReactor.routeTask")(function* (input: {
+    readonly run: MissionRun;
+    readonly task: OrchestrationTask;
+    readonly model: OrchestrationReadModel;
+    readonly excluded?: ReadonlySet<RoutingCandidate["instanceId"]>;
+  }) {
+    const profile = input.run.recoveryPolicy?.routingProfile ?? "manual_only";
+    const decidedAt = yield* now;
+    let candidates = yield* routingCandidates(input.model);
+    const ready = candidates.filter((candidate) => candidate.ready);
+    if (
+      input.task.reviewRequired === true &&
+      (profile === "balanced" || profile === "provider_diversity") &&
+      new Set(ready.map((candidate) => candidate.driverKind)).size > 1
+    ) {
+      const reserve = ready.toSorted(
+        (left, right) =>
+          left.activeLoad - right.activeLoad || left.instanceId.localeCompare(right.instanceId),
+      )[0];
+      candidates = candidates.map((candidate) => ({
+        ...candidate,
+        reservedForReview: candidate.instanceId === reserve?.instanceId,
+      }));
+    }
+    const currentDriver = input.task.modelSelection
+      ? candidates.find(
+          (candidate) => candidate.instanceId === input.task.modelSelection!.instanceId,
+        )?.driverKind
+      : null;
+    return recommendWithFallback({
+      taskId: input.task.id,
+      taskRole: input.task.role,
+      profile,
+      candidates,
+      ...(input.excluded ? { excludedInstanceIds: input.excluded } : {}),
+      ...(profile === "provider_diversity" && currentDriver
+        ? { preferredDifferentDriverFrom: currentDriver }
+        : {}),
+      decidedAt,
+    }).decision;
+  });
+
   const reviewerSelection = Effect.fn("MissionRunReactor.reviewerSelection")(function* (
     task: OrchestrationTask,
   ) {
@@ -272,6 +360,12 @@ const make = Effect.gen(function* () {
     readonly attention: ReadonlyArray<MissionRunAttention>;
     readonly decision?: MissionRunDecision | null;
     readonly failureReason?: string | null;
+    readonly taskRecovery?: ReadonlyArray<TaskRecoveryState>;
+    readonly routingDecisions?: ReadonlyArray<RoutingDecision>;
+    readonly coordinationRequests?: MissionRun["coordinationRequests"];
+    readonly replanProposals?: MissionRun["replanProposals"];
+    readonly integrationBatchId?: MissionRun["integrationBatchId"];
+    readonly finalReport?: MissionRun["finalReport"];
   }) {
     const createdAt = yield* now;
     yield* engine.dispatch({
@@ -286,6 +380,16 @@ const make = Effect.gen(function* () {
       decision: input.decision ?? null,
       completedAt: input.status === "completed" ? createdAt : null,
       failureReason: input.failureReason ?? null,
+      ...(input.taskRecovery ? { taskRecovery: [...input.taskRecovery] } : {}),
+      ...(input.routingDecisions ? { routingDecisions: [...input.routingDecisions] } : {}),
+      ...(input.coordinationRequests
+        ? { coordinationRequests: [...input.coordinationRequests] }
+        : {}),
+      ...(input.replanProposals ? { replanProposals: [...input.replanProposals] } : {}),
+      ...(input.integrationBatchId !== undefined
+        ? { integrationBatchId: input.integrationBatchId }
+        : {}),
+      ...(input.finalReport !== undefined ? { finalReport: input.finalReport } : {}),
       createdAt,
     });
   });
@@ -328,7 +432,57 @@ const make = Effect.gen(function* () {
     task: OrchestrationTask,
   ) {
     if (task.status === "completed" || task.status === "cancelled") return;
-    if (!(yield* providerReady(task))) return;
+    let selection = task.modelSelection ?? null;
+    if (!selection || !(yield* providerReady(task))) {
+      let existingDecision = (run.routingDecisions ?? []).findLast(
+        (candidate) => candidate.taskId === task.id,
+      );
+      if (existingDecision) {
+        const candidates = yield* routingCandidates(model);
+        if (
+          !candidates.some(
+            (candidate) =>
+              candidate.instanceId === existingDecision!.selectedProviderInstanceId &&
+              candidate.ready,
+          )
+        )
+          existingDecision = undefined;
+      }
+      const decision =
+        existingDecision ??
+        (yield* routeTask({
+          run,
+          task,
+          model,
+          ...(selection ? { excluded: new Set([selection.instanceId]) } : {}),
+        }));
+      if (!decision) return;
+      selection = ModelSelection.make({
+        instanceId: decision.selectedProviderInstanceId,
+        model: decision.selectedModel,
+      });
+      if (!existingDecision) {
+        yield* updateRun({
+          runId: run.id,
+          status: "running",
+          currentReadyTaskIds: run.currentReadyTaskIds,
+          scheduledTaskIds: run.scheduledTaskIds,
+          attention: run.attention,
+          routingDecisions: [...(run.routingDecisions ?? []), decision],
+          decision: {
+            id: EventId.make(
+              `mission-run:${run.id}:routing:${task.id}:${decision.selectedProviderInstanceId}`,
+            ),
+            kind: "routing",
+            taskId: task.id,
+            reason: `Selected ${decision.selectedProviderInstanceId}. ${decision.reasons.join(" ")}`,
+            sourceTaskIds: [],
+            occurredAt: decision.decidedAt,
+          },
+        });
+        return;
+      }
+    }
     if (task.status === "draft" && task.workspace?.status !== "ready") {
       if (!task.workspace) {
         yield* engine.dispatch({
@@ -344,7 +498,7 @@ const make = Effect.gen(function* () {
       task.workspace?.status !== "ready" ||
       !task.workspace.path ||
       !task.workspace.branch ||
-      !task.modelSelection
+      !selection
     )
       return;
 
@@ -358,7 +512,7 @@ const make = Effect.gen(function* () {
         threadId: deterministicThreadId,
         projectId: task.projectId,
         title: task.title,
-        modelSelection: task.modelSelection,
+        modelSelection: selection,
         runtimeMode: "full-access",
         interactionMode: "default",
         branch: task.workspace.branch,
@@ -373,6 +527,7 @@ const make = Effect.gen(function* () {
         commandId: commandId(run, task.id, "thread-bind"),
         taskId: task.id,
         threadId: thread.id,
+        modelSelection: selection,
         createdAt: run.startedAt,
       });
       return;
@@ -388,6 +543,40 @@ const make = Effect.gen(function* () {
     }
     if (task.status !== "active" || thread.latestTurn !== null || thread.messages.length > 0)
       return;
+    const recovery = (run.taskRecovery ?? []).find((candidate) => candidate.taskId === task.id);
+    if (!recovery) {
+      const initial: TaskRecoveryState = {
+        taskId: task.id,
+        transientRetries: 0,
+        remediationRounds: 0,
+        attempts: [
+          {
+            number: 1,
+            kind: "initial",
+            providerInstanceId: selection.instanceId,
+            threadId: thread.id,
+            status: "active",
+            failureClass: null,
+            summary: "Initial supervised Builder execution.",
+            startedAt: run.startedAt,
+            completedAt: null,
+          },
+        ],
+        latestFailureClass: null,
+        latestFailureSignature: null,
+        attentionRequired: false,
+        updatedAt: run.startedAt,
+      };
+      yield* updateRun({
+        runId: run.id,
+        status: "running",
+        currentReadyTaskIds: run.currentReadyTaskIds,
+        scheduledTaskIds: run.scheduledTaskIds,
+        attention: run.attention,
+        taskRecovery: [...(run.taskRecovery ?? []), initial],
+      });
+      return;
+    }
     const mission = (model.missions ?? []).find((candidate) => candidate.id === run.missionId);
     if (!mission) return;
     const context = buildTaskContextPackage({
@@ -427,13 +616,565 @@ const make = Effect.gen(function* () {
         text: [context.text, ownershipContext(task), resourceContext(project, task)].join("\n\n"),
         attachments: [],
       },
-      modelSelection: task.modelSelection,
+      modelSelection: selection,
       titleSeed: task.title,
       runtimeMode: "full-access",
       interactionMode: "default",
       createdAt: run.startedAt,
     });
   });
+
+  const recoveryMessage = (input: {
+    readonly task: OrchestrationTask;
+    readonly failureClass: string;
+    readonly detail: string;
+    readonly replacement: boolean;
+    readonly previousProvider: string;
+  }) => {
+    const review = currentReview(input.task);
+    const gate = requiredGateFailure(input.task);
+    return [
+      input.replacement
+        ? "Provider replacement context injected by Nebula (not hidden provider reasoning)"
+        : "Bounded remediation request from Nebula",
+      `Task objective: ${input.task.objective}`,
+      `Failure class: ${input.failureClass}`,
+      `Deterministic failure evidence: ${input.detail}`,
+      `Previous provider: ${input.previousProvider}`,
+      `Current changed files: ${(input.task.reviewSnapshot?.files ?? []).map((file) => file.path).join(", ") || "not yet snapshotted"}`,
+      `Latest handoff: ${input.task.handoff?.summary || "No structured handoff retained."}`,
+      `Gate failure: ${gate ? `${gate.label}: ${gate.outputSummary}` : "None"}`,
+      `Review: ${review?.summary || "None"}`,
+      `Required changes: ${review?.requiredChanges.join("; ") || "None"}`,
+      "Keep the same Task, workspace, ownership, Mission, and durable history. Address only the stated failure and do not broaden policy or ownership.",
+    ].join("\n\n");
+  };
+
+  const continueReplacement = Effect.fn("MissionRunReactor.continueReplacement")(function* (input: {
+    readonly run: MissionRun;
+    readonly model: OrchestrationReadModel;
+    readonly task: OrchestrationTask;
+    readonly state: TaskRecoveryState;
+    readonly detail: string;
+  }) {
+    const attempt = input.state.attempts.findLast(
+      (candidate) => candidate.kind === "replacement" && candidate.status === "active",
+    );
+    if (!attempt || !input.task.workspace?.path || !input.task.workspace.branch) return false;
+    const selection = (input.run.routingDecisions ?? []).findLast(
+      (decision) =>
+        decision.taskId === input.task.id &&
+        decision.selectedProviderInstanceId === attempt.providerInstanceId,
+    );
+    if (!selection) return false;
+    const modelSelection = ModelSelection.make({
+      instanceId: selection.selectedProviderInstanceId,
+      model: selection.selectedModel,
+    });
+    const thread = input.model.threads.find((candidate) => candidate.id === attempt.threadId);
+    if (!thread) {
+      yield* engine.dispatch({
+        type: "thread.create",
+        commandId: commandId(input.run, input.task.id, `replacement-thread:${attempt.number}`),
+        threadId: attempt.threadId,
+        projectId: input.task.projectId,
+        title: `${input.task.title} — attempt ${attempt.number}`,
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: input.task.workspace.branch,
+        worktreePath: input.task.workspace.path,
+        createdAt: attempt.startedAt,
+      });
+      return true;
+    }
+    if (input.task.threadId !== thread.id) {
+      yield* engine.dispatch({
+        type: "task.bind-thread",
+        commandId: commandId(input.run, input.task.id, `replacement-bind:${attempt.number}`),
+        taskId: input.task.id,
+        threadId: thread.id,
+        replaceProviderExecution: true,
+        modelSelection,
+        createdAt: attempt.startedAt,
+      });
+      return true;
+    }
+    if (thread.latestTurn === null && thread.messages.length === 0) {
+      yield* engine.dispatch({
+        type: "thread.turn.start",
+        commandId: commandId(input.run, input.task.id, `replacement-turn:${attempt.number}`),
+        threadId: thread.id,
+        message: {
+          messageId: MessageId.make(
+            `mission-run:${input.run.id}:task:${input.task.id}:replacement:${attempt.number}`,
+          ),
+          role: "user",
+          text: recoveryMessage({
+            task: input.task,
+            failureClass: input.state.latestFailureClass ?? "provider_execution_error",
+            detail: input.detail,
+            replacement: true,
+            previousProvider: input.state.attempts.at(-2)?.providerInstanceId ?? "unknown provider",
+          }),
+          attachments: [],
+        },
+        modelSelection,
+        titleSeed: input.task.title,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdAt: attempt.startedAt,
+      });
+    }
+    return true;
+  });
+
+  const recoverActiveTask = Effect.fn("MissionRunReactor.recoverActiveTask")(function* (input: {
+    readonly run: MissionRun;
+    readonly model: OrchestrationReadModel;
+    readonly task: OrchestrationTask;
+    readonly thread: OrchestrationThread | undefined;
+  }) {
+    const { run, model, task, thread } = input;
+    const state = (run.taskRecovery ?? []).find((candidate) => candidate.taskId === task.id);
+    if (!state || !thread) return false;
+    const gate = requiredGateFailure(task);
+    const review = currentReview(task);
+    const providerError =
+      thread.latestTurn?.state === "error" || thread.session?.status === "error"
+        ? (thread.session?.lastError ?? "Provider execution failed.")
+        : null;
+    const failureClass = providerError
+      ? classifyRuntimeFailure({ source: "provider", message: providerError })
+      : gate
+        ? classifyRuntimeFailure({ source: "quality" })
+        : review?.status === "completed" && review.verdict === "request_changes"
+          ? classifyRuntimeFailure({ source: "review", reviewVerdict: "request_changes" })
+          : null;
+    if (!failureClass) return false;
+    const detail =
+      providerError ??
+      (gate ? `${gate.label}: ${gate.outputSummary}` : review?.summary) ??
+      failureClass;
+    const signature = `${failureClass}:${thread.id}:${thread.latestTurn?.turnId ?? "no-turn"}:${task.reviewSnapshot?.id ?? "no-snapshot"}:${review?.id ?? "no-review"}`;
+    if (state.latestFailureSignature === signature) {
+      if (state.attentionRequired) return false;
+      const pendingAttempt = state.attempts.at(-1);
+      if (
+        pendingAttempt?.status === "active" &&
+        (pendingAttempt.kind === "retry" || pendingAttempt.kind === "remediation")
+      ) {
+        const action = pendingAttempt.kind === "remediation" ? "remediate" : "retry";
+        yield* engine.dispatch({
+          type: "thread.turn.start",
+          commandId: commandId(run, task.id, `${action}-turn:${pendingAttempt.number}`),
+          threadId: thread.id,
+          message: {
+            messageId: MessageId.make(
+              `mission-run:${run.id}:task:${task.id}:${action}:${pendingAttempt.number}`,
+            ),
+            role: "user",
+            text: recoveryMessage({
+              task,
+              failureClass,
+              detail,
+              replacement: false,
+              previousProvider: thread.modelSelection.instanceId,
+            }),
+            attachments: [],
+          },
+          modelSelection: thread.modelSelection,
+          titleSeed: task.title,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: pendingAttempt.startedAt,
+        });
+        return true;
+      }
+      return yield* continueReplacement({ run, model, task, state, detail });
+    }
+    const candidates = yield* routingCandidates(model);
+    const replacementAvailable = candidates.some(
+      (candidate) => candidate.ready && candidate.instanceId !== thread.modelSelection.instanceId,
+    );
+    const action = recoveryAction({
+      failureClass,
+      transientRetries: state.transientRetries,
+      remediationRounds: state.remediationRounds,
+      ...(run.recoveryPolicy
+        ? {
+            transportRetryLimit: run.recoveryPolicy.transportRetryLimit,
+            remediationLimit: run.recoveryPolicy.remediationLimit,
+          }
+        : {}),
+      replacementAvailable,
+    });
+    if (action === "attention") {
+      const next = {
+        ...state,
+        latestFailureClass: failureClass,
+        latestFailureSignature: signature,
+        attentionRequired: true,
+        updatedAt: yield* now,
+      } satisfies TaskRecoveryState;
+      yield* updateRun({
+        runId: run.id,
+        status: "attention",
+        currentReadyTaskIds: run.currentReadyTaskIds,
+        scheduledTaskIds: run.scheduledTaskIds,
+        attention: run.attention,
+        taskRecovery: (run.taskRecovery ?? []).map((candidate) =>
+          candidate.taskId === task.id ? next : candidate,
+        ),
+      });
+      return false;
+    }
+    const startedAt = yield* now;
+    const attemptNumber = (state.attempts.at(-1)?.number ?? 0) + 1;
+    const attemptKind =
+      action === "remediate" ? "remediation" : action === "replace" ? "replacement" : "retry";
+    let providerInstanceId = thread.modelSelection.instanceId;
+    let replacementDecision: RoutingDecision | null = null;
+    let replacementThreadId = thread.id;
+    if (action === "replace") {
+      replacementDecision = yield* routeTask({
+        run,
+        task,
+        model,
+        excluded: new Set([thread.modelSelection.instanceId]),
+      });
+      if (!replacementDecision) return false;
+      providerInstanceId = replacementDecision.selectedProviderInstanceId;
+      replacementThreadId = ThreadId.make(
+        `mission-run:${run.id}:task:${task.id}:attempt:${attemptNumber}`,
+      );
+    }
+    const nextState: TaskRecoveryState = {
+      ...state,
+      transientRetries: state.transientRetries + (action === "retry" ? 1 : 0),
+      remediationRounds: state.remediationRounds + (action === "remediate" ? 1 : 0),
+      attempts: [
+        ...state.attempts.map((attempt) =>
+          attempt.status === "active"
+            ? {
+                ...attempt,
+                status: action === "replace" ? ("replaced" as const) : ("failed" as const),
+                failureClass,
+                summary: detail,
+                completedAt: startedAt,
+              }
+            : attempt,
+        ),
+        {
+          number: attemptNumber,
+          kind: attemptKind,
+          providerInstanceId,
+          threadId: replacementThreadId,
+          status: "active",
+          failureClass: null,
+          summary: `${action} after ${failureClass}.`,
+          startedAt,
+          completedAt: null,
+        },
+      ],
+      latestFailureClass: failureClass,
+      latestFailureSignature: signature,
+      attentionRequired: false,
+      updatedAt: startedAt,
+    };
+    const reason =
+      action === "replace"
+        ? `${thread.modelSelection.instanceId} → ${providerInstanceId}. Reason: ${failureClass} after ${state.transientRetries} retries.`
+        : `${action} ${attemptNumber} for ${failureClass}: ${detail}`;
+    yield* updateRun({
+      runId: run.id,
+      status: "running",
+      currentReadyTaskIds: run.currentReadyTaskIds,
+      scheduledTaskIds: run.scheduledTaskIds,
+      attention: [],
+      taskRecovery: (run.taskRecovery ?? []).map((candidate) =>
+        candidate.taskId === task.id ? nextState : candidate,
+      ),
+      ...(replacementDecision
+        ? { routingDecisions: [...(run.routingDecisions ?? []), replacementDecision] }
+        : {}),
+      decision: {
+        id: EventId.make(`mission-run:${run.id}:${action}:${task.id}:${attemptNumber}`),
+        kind: attemptKind,
+        taskId: task.id,
+        reason,
+        sourceTaskIds: [],
+        occurredAt: startedAt,
+      },
+    });
+    if (action === "replace") {
+      yield* continueReplacement({
+        run: {
+          ...run,
+          taskRecovery: [nextState],
+          routingDecisions: [...(run.routingDecisions ?? []), replacementDecision!],
+        },
+        model,
+        task,
+        state: nextState,
+        detail,
+      });
+      return true;
+    }
+    yield* engine.dispatch({
+      type: "thread.turn.start",
+      commandId: commandId(run, task.id, `${action}-turn:${attemptNumber}`),
+      threadId: thread.id,
+      message: {
+        messageId: MessageId.make(
+          `mission-run:${run.id}:task:${task.id}:${action}:${attemptNumber}`,
+        ),
+        role: "user",
+        text: recoveryMessage({
+          task,
+          failureClass,
+          detail,
+          replacement: false,
+          previousProvider: thread.modelSelection.instanceId,
+        }),
+        attachments: [],
+      },
+      modelSelection: thread.modelSelection,
+      titleSeed: task.title,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: startedAt,
+    });
+    return true;
+  });
+
+  const handleCoordinationRequest = Effect.fn("MissionRunReactor.handleCoordinationRequest")(
+    function* (input: {
+      readonly run: MissionRun;
+      readonly mission: NonNullable<OrchestrationReadModel["missions"]>[number];
+      readonly model: OrchestrationReadModel;
+      readonly project: OrchestrationProject;
+      readonly task: OrchestrationTask;
+      readonly thread: OrchestrationThread | undefined;
+    }) {
+      const { run, mission, model, project, task, thread } = input;
+      if (task.status !== "active" || thread?.latestTurn?.state !== "completed") return null;
+      const latestAssistant = thread.messages.findLast((message) => message.role === "assistant");
+      if (!latestAssistant) return null;
+      const parsed = parseCoordinationRequest(latestAssistant.text);
+      if (!parsed) return null;
+      const id = CoordinationRequestId.make(
+        `mission-run:${run.id}:task:${task.id}:request:${thread.latestTurn.turnId}`,
+      );
+      const existing = (run.coordinationRequests ?? []).find((request) => request.id === id);
+      if (existing) {
+        if (existing.kind === "ownership_request" && existing.status === "pending") {
+          const ownership = (task.ownershipRequests ?? []).find(
+            (request) => request.id === OwnershipRequestId.make(id),
+          );
+          if (!ownership) {
+            yield* engine.dispatch({
+              type: "task.ownership-request.create",
+              commandId: commandId(run, task.id, `ownership-request:${id}`),
+              taskId: task.id,
+              requestId: OwnershipRequestId.make(id),
+              requestedRules: existing.requestedPaths.map((path, index) => ({
+                id: `provider-request:${id}:${index}`,
+                pattern: path.pattern,
+                access: path.access,
+                reason: path.reason,
+                createdAt: existing.createdAt,
+              })),
+              reason: existing.reason,
+              source: "provider",
+              createdAt: existing.createdAt,
+            });
+          }
+          if (ownership && ownership.status !== "pending") {
+            const resolvedAt = ownership.resolvedAt ?? (yield* now);
+            yield* updateRun({
+              runId: run.id,
+              status: ownership.status === "approved" ? "running" : "attention",
+              currentReadyTaskIds: run.currentReadyTaskIds,
+              scheduledTaskIds: run.scheduledTaskIds,
+              attention: run.attention,
+              coordinationRequests: (run.coordinationRequests ?? []).map((request) =>
+                request.id === id
+                  ? {
+                      ...request,
+                      status: ownership.status === "approved" ? "approved" : ownership.status,
+                      answer:
+                        ownership.status === "approved"
+                          ? "Ownership expansion approved through the canonical Task workflow."
+                          : request.answer,
+                      resolvedAt,
+                    }
+                  : request,
+              ),
+            });
+            return { handled: true, attention: null };
+          }
+        }
+        if (existing.status === "pending")
+          return {
+            handled: true,
+            attention: {
+              taskId: task.id,
+              code: existing.kind,
+              detail: existing.reason,
+              blocksMission: true,
+            } satisfies MissionRunAttention,
+          };
+        if (existing.status === "approved" || existing.status === "answered") {
+          yield* engine.dispatch({
+            type: "thread.turn.start",
+            commandId: commandId(run, task.id, `coordination-continue:${id}`),
+            threadId: thread.id,
+            message: {
+              messageId: MessageId.make(`mission-run:${run.id}:coordination-continue:${id}`),
+              role: "user",
+              text: `Coordination request resolved by Nebula policy boundary:\n\n${existing.answer ?? "Approved by human review."}`,
+              attachments: [],
+            },
+            modelSelection: thread.modelSelection,
+            titleSeed: task.title,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt: existing.resolvedAt ?? (yield* now),
+          });
+          return { handled: true, attention: null };
+        }
+        return { handled: false, attention: null };
+      }
+      const createdAt = yield* now;
+      const resource = parsed.resource
+        ? (project.sharedResources ?? []).find(
+            (candidate) => candidate.name.toLowerCase() === parsed.resource!.toLowerCase(),
+          )
+        : null;
+      const prerequisiteIds = mission.dependencies
+        .filter((edge) => edge.dependentTaskId === task.id)
+        .map((edge) => edge.prerequisiteTaskId);
+      const contractEvidence = prerequisiteIds.flatMap((taskId) => {
+        const prerequisite = (model.tasks ?? []).find((candidate) => candidate.id === taskId);
+        return prerequisite?.status === "completed"
+          ? (prerequisite.handoff?.interfaceChanges ?? prerequisite.result?.interfaceChanges ?? [])
+          : [];
+      });
+      const deterministicAnswer =
+        (parsed.kind === "contract_question" || parsed.kind === "dependency_question") &&
+        contractEvidence.length > 0
+          ? contractEvidence.join("\n")
+          : null;
+      const request = {
+        id,
+        taskId: task.id,
+        kind: parsed.kind,
+        reason: parsed.reason,
+        requestedPaths: parsed.paths,
+        resourceName: parsed.resource,
+        resourceId: resource?.id ?? null,
+        question: parsed.question,
+        status: deterministicAnswer ? ("answered" as const) : ("pending" as const),
+        answer: deterministicAnswer,
+        createdAt,
+        resolvedAt: deterministicAnswer ? createdAt : null,
+      };
+      const replanProposal =
+        parsed.kind === "replan_request"
+          ? {
+              id: ReplanProposalId.make(`replan:${id}`),
+              missionId: mission.id,
+              sourceTaskId: task.id,
+              scope: smallestReplanScope({
+                requested: parsed.scope,
+                affectedTaskCount: 1,
+                missionTaskCount: mission.taskIds.length,
+              }),
+              affectedTaskIds: [task.id],
+              summary: parsed.reason,
+              rationale: `Architect amendment requested from current approved Mission evidence after a blocker in Task '${task.title}'.`,
+              preservedCompletedTaskIds: mission.taskIds.filter(
+                (taskId) =>
+                  (model.tasks ?? []).find((candidate) => candidate.id === taskId)?.status ===
+                  "completed",
+              ),
+              architectPlanProposalId: null,
+              status: "pending" as const,
+              createdAt,
+              resolvedAt: null,
+            }
+          : null;
+      yield* updateRun({
+        runId: run.id,
+        status: deterministicAnswer ? "running" : "attention",
+        currentReadyTaskIds: run.currentReadyTaskIds,
+        scheduledTaskIds: run.scheduledTaskIds,
+        attention: run.attention,
+        coordinationRequests: [...(run.coordinationRequests ?? []), request],
+        ...(replanProposal
+          ? { replanProposals: [...(run.replanProposals ?? []), replanProposal] }
+          : {}),
+        decision: {
+          id: EventId.make(`mission-run:${run.id}:request:${id}`),
+          kind: replanProposal ? "replan" : "request",
+          taskId: task.id,
+          reason: deterministicAnswer
+            ? "Answered coordination question from completed prerequisite handoff evidence."
+            : `Human approval required for ${parsed.kind}.`,
+          sourceTaskIds: prerequisiteIds,
+          occurredAt: createdAt,
+        },
+      });
+      if (parsed.kind === "ownership_request") {
+        yield* engine.dispatch({
+          type: "task.ownership-request.create",
+          commandId: commandId(run, task.id, `ownership-request:${id}`),
+          taskId: task.id,
+          requestId: OwnershipRequestId.make(id),
+          requestedRules: parsed.paths.map((path, index) => ({
+            id: `provider-request:${id}:${index}`,
+            pattern: path.pattern,
+            access: path.access,
+            reason: path.reason,
+            createdAt,
+          })),
+          reason: parsed.reason,
+          source: "provider",
+          createdAt,
+        });
+      }
+      if (deterministicAnswer) {
+        yield* engine.dispatch({
+          type: "thread.turn.start",
+          commandId: commandId(run, task.id, `coordination-answer:${id}`),
+          threadId: thread.id,
+          message: {
+            messageId: MessageId.make(`mission-run:${run.id}:coordination-answer:${id}`),
+            role: "user",
+            text: `Nebula answered from completed prerequisite handoff evidence:\n\n${deterministicAnswer}`,
+            attachments: [],
+          },
+          modelSelection: thread.modelSelection,
+          titleSeed: task.title,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt,
+        });
+      }
+      return {
+        handled: true,
+        attention: deterministicAnswer
+          ? null
+          : ({
+              taskId: task.id,
+              code: parsed.kind,
+              detail: parsed.reason,
+              blocksMission: true,
+            } satisfies MissionRunAttention),
+      };
+    },
+  );
 
   const advanceCompletionPipeline = Effect.fn("MissionRunReactor.advanceCompletionPipeline")(
     function* (
@@ -483,7 +1224,11 @@ const make = Effect.gen(function* () {
       const snapshotRuns = (task.qualityGateRuns ?? []).filter(
         (qualityRun) => qualityRun.snapshotId === task.reviewSnapshot!.id,
       );
-      const enabledGates = (project.qualityPolicy?.gates ?? []).filter((gate) => gate.enabled);
+      const enabledGates = (
+        run.swarmPolicy?.qualityPolicy?.gates ??
+        project.qualityPolicy?.gates ??
+        []
+      ).filter((gate) => gate.enabled);
       if (enabledGates.length > 0 && snapshotRuns.length === 0) {
         yield* engine.dispatch({
           type: "task.quality.run",
@@ -501,7 +1246,7 @@ const make = Effect.gen(function* () {
       )
         return;
       if (requiredGateFailure(task)) return;
-      if (task.reviewRequired === true) {
+      if (task.reviewRequired === true || run.swarmPolicy?.independentReviewRequired === true) {
         const review = currentReview(task);
         if (!review) {
           const selection = yield* reviewerSelection(task);
@@ -591,32 +1336,212 @@ const make = Effect.gen(function* () {
       });
       return;
     }
+    if (
+      run.swarmPolicy &&
+      (JSON.stringify(run.swarmPolicy.qualityPolicy) !==
+        JSON.stringify(project.qualityPolicy ?? null) ||
+        JSON.stringify(run.swarmPolicy.reviewPolicy) !==
+          JSON.stringify(project.reviewPolicy ?? null))
+    ) {
+      yield* updateRun({
+        runId: run.id,
+        status: "attention",
+        currentReadyTaskIds: [],
+        scheduledTaskIds: run.scheduledTaskIds,
+        attention: [
+          {
+            taskId: null,
+            code: "swarm_policy_changed",
+            detail:
+              "Project quality or review policy changed after this Swarm policy was frozen. Stop and start a new Run revision to apply it.",
+            blocksMission: true,
+          },
+        ],
+      });
+      return;
+    }
     if (missionTasks.every((task) => task.status === "completed")) {
+      const autoIntegration = run.swarmPolicy?.autoIntegration === true;
+      if (autoIntegration) {
+        const integrationBatchId =
+          run.integrationBatchId ??
+          mission.integrationBatchId ??
+          IntegrationBatchId.make(`swarm:${run.id}`);
+        const batch = (project.integrationBatches ?? []).find(
+          (candidate) => candidate.id === integrationBatchId,
+        );
+        if (!batch) {
+          const overlapPaths = missionIntegrationOverlapPaths(missionTasks);
+          const approved = new Set(run.swarmPolicy?.preapprovedOverlapPaths ?? []);
+          const unapproved = overlapPaths.filter((path) => !approved.has(path));
+          if (unapproved.length > 0) {
+            yield* updateRun({
+              runId: run.id,
+              status: "attention",
+              currentReadyTaskIds: [],
+              scheduledTaskIds: [],
+              attention: [
+                {
+                  taskId: null,
+                  code: "integration_overlap_acknowledgement",
+                  detail: `Automatic Integration requires explicit overlap approval for: ${unapproved.join(", ")}.`,
+                  blocksMission: true,
+                },
+              ],
+            });
+            return;
+          }
+          const createdAt = yield* now;
+          yield* engine.dispatch({
+            type: "integration.create",
+            commandId: commandId(run, null, "integration-create"),
+            batchId: integrationBatchId,
+            projectId: project.id,
+            taskIds: deterministicMissionTaskIds(mission),
+            acknowledgeOverlaps: overlapPaths.length > 0,
+            missionId: mission.id,
+            createdAt,
+          });
+          yield* updateRun({
+            runId: run.id,
+            status: "running",
+            currentReadyTaskIds: [],
+            scheduledTaskIds: [],
+            attention: [],
+            integrationBatchId,
+            decision: {
+              id: EventId.make(`mission-run:${run.id}:integration-created`),
+              kind: "pipeline",
+              taskId: null,
+              reason: "All Tasks completed. Automatic Integration started in Mission DAG order.",
+              sourceTaskIds: deterministicMissionTaskIds(mission),
+              occurredAt: createdAt,
+            },
+          });
+          return;
+        }
+        if (
+          batch.status === "conflict" ||
+          batch.status === "failed" ||
+          batch.status === "cancelled"
+        ) {
+          yield* updateRun({
+            runId: run.id,
+            status: "attention",
+            currentReadyTaskIds: [],
+            scheduledTaskIds: [],
+            attention: [
+              {
+                taskId: batch.conflict?.taskId ?? null,
+                code:
+                  batch.status === "conflict"
+                    ? "integration_conflict"
+                    : "integration_validation_failed",
+                detail:
+                  batch.status === "conflict"
+                    ? "Integration has a Git conflict. Resolve it in the Integration workspace, then continue."
+                    : (batch.failureReason ?? "Final Integration validation failed."),
+                blocksMission: true,
+              },
+            ],
+            integrationBatchId,
+          });
+          return;
+        }
+        if (batch.status !== "ready") return;
+        const completedAt = yield* now;
+        yield* updateRun({
+          runId: run.id,
+          status: "completed",
+          currentReadyTaskIds: [],
+          scheduledTaskIds: [],
+          attention: [],
+          integrationBatchId,
+          finalReport: buildMissionFinalReport({
+            mission,
+            run,
+            tasks: missionTasks,
+            integrationBranch: batch.branch,
+            finalValidation: "ready",
+            generatedAt: completedAt,
+          }),
+          decision: {
+            id: EventId.make(`mission-run:${run.id}:completed`),
+            kind: "completed",
+            taskId: null,
+            reason: "All Mission Tasks completed and Integration passed final validation.",
+            sourceTaskIds: mission.taskIds,
+            occurredAt: completedAt,
+          },
+        });
+        return;
+      }
+      const completedAt = yield* now;
       yield* updateRun({
         runId: run.id,
         status: "completed",
         currentReadyTaskIds: [],
         scheduledTaskIds: [],
         attention: [],
+        finalReport: buildMissionFinalReport({
+          mission,
+          run,
+          tasks: missionTasks,
+          integrationBranch: null,
+          finalValidation: "not_requested",
+          generatedAt: completedAt,
+        }),
         decision: {
           id: EventId.make(`mission-run:${run.id}:completed`),
           kind: "completed",
           taskId: null,
           reason: "All Mission Tasks completed. Mission is ready for Integration.",
           sourceTaskIds: mission.taskIds,
-          occurredAt: yield* now,
+          occurredAt: completedAt,
         },
       });
       return;
     }
 
     const threadById = new Map(model.threads.map((thread) => [thread.id, thread] as const));
-    let attention = missionTasks.flatMap((task) =>
-      task.status === "active"
-        ? activeTaskAttention(task, task.threadId ? threadById.get(task.threadId) : undefined)
-        : [],
-    );
+    const recoveryHandled = new Set<TaskId>();
+    let attention: MissionRunAttention[] = [];
     for (const task of missionTasks) {
+      if (task.status !== "active") continue;
+      const thread = task.threadId ? threadById.get(task.threadId) : undefined;
+      const recovered = yield* recoverActiveTask({ run, model, task, thread }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Supervised Task recovery step deferred", {
+            taskId: task.id,
+            cause: Cause.pretty(cause),
+          }).pipe(Effect.as(false)),
+        ),
+      );
+      if (recovered) {
+        recoveryHandled.add(task.id);
+        continue;
+      }
+      const coordination = yield* handleCoordinationRequest({
+        run,
+        mission,
+        model,
+        project,
+        task,
+        thread,
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Structured coordination request step deferred", {
+            taskId: task.id,
+            cause: Cause.pretty(cause),
+          }).pipe(Effect.as(null)),
+        ),
+      );
+      if (coordination?.handled) recoveryHandled.add(task.id);
+      if (coordination?.attention) attention.push(coordination.attention);
+      if (!coordination?.handled) attention.push(...activeTaskAttention(task, thread));
+    }
+    for (const task of missionTasks) {
+      if (recoveryHandled.has(task.id)) continue;
       const pipelineAttention = yield* advanceCompletionPipeline(
         run,
         project,
@@ -636,6 +1561,14 @@ const make = Effect.gen(function* () {
 
     const readyTaskIds = new Set<TaskId>();
     for (const task of missionTasks) if (yield* providerReady(task)) readyTaskIds.add(task.id);
+    const automaticRouting =
+      (run.recoveryPolicy?.routingProfile ?? "manual_only") !== "manual_only";
+    const candidates = automaticRouting ? yield* routingCandidates(model) : [];
+    const autoRoutableTaskIds = new Set<TaskId>(
+      candidates.some((candidate) => candidate.ready)
+        ? missionTasks.filter((task) => task.status === "draft").map((task) => task.id)
+        : [],
+    );
     const scheduling = planMissionRunScheduling({
       mission,
       run,
@@ -643,6 +1576,7 @@ const make = Effect.gen(function* () {
       project,
       providerReadyTaskIds: readyTaskIds,
       blockedTaskIds: new Set(attention.flatMap((item) => (item.taskId ? [item.taskId] : []))),
+      autoRoutableTaskIds,
     });
     attention = [...attention, ...scheduling.attention];
     const nextStatus = attention.length > 0 ? "attention" : "running";

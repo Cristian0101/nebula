@@ -1411,7 +1411,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             id: command.runId,
             missionId: mission.id,
             projectId: mission.projectId,
-            mode: "supervised" as const,
+            mode: "supervised_swarm" as const,
             status: "running" as const,
             maxConcurrentTasks: command.maxConcurrentTasks,
             currentReadyTaskIds: [],
@@ -1425,6 +1425,43 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             stoppedAt: null,
             failedAt: null,
             failureReason: null,
+            recoveryPolicy: {
+              transportRetryLimit: command.transportRetryLimit ?? 2,
+              remediationLimit: command.remediationLimit ?? 2,
+              routingProfile:
+                command.routingProfile ??
+                mission.routingProfile ??
+                project.routingProfile ??
+                "manual_only",
+            },
+            taskRecovery: [],
+            routingDecisions: [],
+            coordinationRequests: [],
+            replanProposals: [],
+            swarmPolicy: {
+              revision: 1,
+              maxConcurrentTasks: command.maxConcurrentTasks,
+              routingProfile:
+                command.routingProfile ??
+                mission.routingProfile ??
+                project.routingProfile ??
+                "manual_only",
+              transportRetryLimit: command.transportRetryLimit ?? 2,
+              remediationLimit: command.remediationLimit ?? 2,
+              autoIntegration: command.autoIntegration ?? false,
+              stopOnConflict: command.stopOnConflict ?? true,
+              independentReviewRequired:
+                command.independentReviewRequired ??
+                project.reviewPolicy?.requireIndependentReview ??
+                true,
+              preapprovedOverlapPaths: command.preapprovedOverlapPaths ?? [],
+              autoCompleteMission: command.autoCompleteMission ?? false,
+              qualityPolicy: project.qualityPolicy ?? null,
+              reviewPolicy: project.reviewPolicy ?? null,
+              frozenAt: command.createdAt,
+            },
+            integrationBatchId: null,
+            finalReport: null,
             updatedAt: command.createdAt,
           },
         },
@@ -1534,6 +1571,112 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             completedAt: command.completedAt,
             failedAt: command.status === "failed" ? command.createdAt : run.failedAt,
             failureReason: command.failureReason,
+            taskRecovery: command.taskRecovery ?? run.taskRecovery ?? [],
+            routingDecisions: command.routingDecisions ?? run.routingDecisions ?? [],
+            coordinationRequests: command.coordinationRequests ?? run.coordinationRequests ?? [],
+            replanProposals: command.replanProposals ?? run.replanProposals ?? [],
+            integrationBatchId: command.integrationBatchId ?? run.integrationBatchId ?? null,
+            finalReport: command.finalReport ?? run.finalReport ?? null,
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "mission.run.coordination-request.resolve": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      const request = run?.coordinationRequests?.find(
+        (candidate) => candidate.id === command.requestId,
+      );
+      if (!run || !request || request.status !== "pending") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Coordination Request '${command.requestId}' is not pending.`,
+        });
+      }
+      if (command.resolution === "answered" && !command.answer?.trim()) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A contract or dependency answer must include deterministic human input.",
+        });
+      }
+      const updatedRequest = {
+        ...request,
+        status: command.resolution,
+        answer:
+          command.answer ??
+          (command.resolution === "approved" ? "Approved by human review." : null),
+        resolvedAt: command.createdAt,
+      };
+      const runEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: run.missionId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.run.reconciled" as const,
+        payload: {
+          run: {
+            ...run,
+            coordinationRequests: (run.coordinationRequests ?? []).map((candidate) =>
+              candidate.id === request.id ? updatedRequest : candidate,
+            ),
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+      if (
+        command.resolution !== "approved" ||
+        request.kind !== "resource_request" ||
+        request.resourceId === null
+      )
+        return runEvent;
+      const task = yield* requireTask({ readModel, command, taskId: request.taskId });
+      const resourceIds = [...new Set([...(task.requiredResourceIds ?? []), request.resourceId])];
+      const resourceEvents = yield* decideCommandSequence({
+        readModel,
+        commands: [
+          {
+            type: "task.resource-requirements.set",
+            commandId: command.commandId,
+            taskId: task.id,
+            resourceIds,
+            confirmActiveChange: true,
+            createdAt: command.createdAt,
+          },
+        ],
+      });
+      return [...resourceEvents, runEvent];
+    }
+
+    case "mission.run.replan.resolve": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      const proposal = run?.replanProposals?.find(
+        (candidate) => candidate.id === command.proposalId,
+      );
+      if (!run || !proposal || proposal.status !== "pending") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Replan Proposal '${command.proposalId}' is not pending.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: run.missionId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.run.reconciled" as const,
+        payload: {
+          run: {
+            ...run,
+            replanProposals: (run.replanProposals ?? []).map((candidate) =>
+              candidate.id === proposal.id
+                ? { ...candidate, status: command.resolution, resolvedAt: command.createdAt }
+                : candidate,
+            ),
             updatedAt: command.createdAt,
           },
         },
@@ -1818,13 +1961,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "task.bind-thread": {
       const task = yield* requireTask({ readModel, command, taskId: command.taskId });
-      if (task.status !== "draft") {
+      const replacing = command.replaceProviderExecution === true;
+      if (task.status !== "draft" && !(replacing && task.status === "active")) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: `Task '${command.taskId}' must be draft before binding a thread.`,
+          detail: `Task '${command.taskId}' must be draft, or active during a supervised provider replacement, before binding a thread.`,
         });
       }
-      if (task.threadId !== null) {
+      if (task.threadId !== null && !replacing) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Task '${command.taskId}' already has a primary thread.`,
@@ -1844,6 +1988,22 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Thread '${command.threadId}' is already bound to Task '${existingBinding.id}'.`,
+        });
+      }
+      if (replacing && (task.threadId === null || task.threadId === command.threadId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Provider replacement for Task '${command.taskId}' requires a distinct new execution Thread.`,
+        });
+      }
+      if (
+        command.modelSelection &&
+        (thread.modelSelection.instanceId !== command.modelSelection.instanceId ||
+          thread.modelSelection.model !== command.modelSelection.model)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Replacement assignment must match Thread '${command.threadId}' provider selection.`,
         });
       }
       if (task.role === "builder") {
@@ -1883,6 +2043,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           taskId: command.taskId,
           threadId: command.threadId,
+          previousThreadId: task.threadId,
+          ...(command.modelSelection ? { modelSelection: command.modelSelection } : {}),
           updatedAt: command.createdAt,
         },
       };

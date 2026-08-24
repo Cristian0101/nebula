@@ -13,6 +13,7 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationTask,
   type OrchestrationThreadShell,
+  type RoutingProfile,
 } from "@t3tools/contracts";
 import { computeMissionPlan, missionTopologicalTaskIds } from "@t3tools/shared/missionGraph";
 import {
@@ -65,6 +66,7 @@ interface MissionPanelProps {
   readonly onStartTask: (task: OrchestrationTask) => Promise<void>;
   readonly onOpenTask: (taskId: TaskId) => void;
   readonly onCreateTask: (missionId: MissionId) => void;
+  readonly onOpenTerminalCenter: () => void;
 }
 
 function commandError(result: AtomCommandResult<unknown, unknown>): string | null {
@@ -198,6 +200,7 @@ export function MissionPanel(props: MissionPanelProps) {
   );
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [swarmLaunchOpen, setSwarmLaunchOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [objective, setObjective] = useState("");
   const [description, setDescription] = useState("");
@@ -209,6 +212,13 @@ export function MissionPanel(props: MissionPanelProps) {
   const [busy, setBusy] = useState(false);
   const [integrationOrder, setIntegrationOrder] = useState<ReadonlyArray<TaskId>>([]);
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(2);
+  const [routingProfile, setRoutingProfile] = useState<RoutingProfile>("manual_only");
+  const [autonomyMode, setAutonomyMode] = useState<"manual" | "assisted" | "supervised_swarm">(
+    "manual",
+  );
+  const [retryBudget, setRetryBudget] = useState(2);
+  const [remediationBudget, setRemediationBudget] = useState(2);
+  const [autoIntegration, setAutoIntegration] = useState(true);
 
   const createMission = useAtomCommand(projectEnvironment.createMission, { reportFailure: false });
   const updateMission = useAtomCommand(projectEnvironment.updateMission, { reportFailure: false });
@@ -246,7 +256,20 @@ export function MissionPanel(props: MissionPanelProps) {
   const stopMissionRun = useAtomCommand(projectEnvironment.stopMissionRun, {
     reportFailure: false,
   });
+  const resolveCoordinationRequest = useAtomCommand(
+    projectEnvironment.resolveMissionRunCoordinationRequest,
+    { reportFailure: false },
+  );
+  const resolveReplan = useAtomCommand(projectEnvironment.resolveMissionRunReplan, {
+    reportFailure: false,
+  });
   const createIntegration = useAtomCommand(projectEnvironment.createIntegration, {
+    reportFailure: false,
+  });
+  const abortIntegration = useAtomCommand(projectEnvironment.abortIntegration, {
+    reportFailure: false,
+  });
+  const removeIntegrationWorkspace = useAtomCommand(projectEnvironment.removeIntegrationWorkspace, {
     reportFailure: false,
   });
 
@@ -268,6 +291,20 @@ export function MissionPanel(props: MissionPanelProps) {
     selectedMissionRun?.status === "running" ||
     selectedMissionRun?.status === "paused" ||
     selectedMissionRun?.status === "attention";
+  const swarmTaskCounts = useMemo(() => {
+    if (!selectedMission) return { completed: 0, active: 0, waitingResource: 0 };
+    const members = selectedMission.taskIds.flatMap((taskId) => {
+      const task = tasks.find((candidate) => candidate.id === taskId);
+      return task ? [task] : [];
+    });
+    return {
+      completed: members.filter((task) => task.status === "completed").length,
+      active: members.filter((task) => task.status === "active").length,
+      waitingResource:
+        selectedMissionRun?.decisions.filter((decision) => decision.kind === "waiting_resource")
+          .length ?? 0,
+    };
+  }, [selectedMission, selectedMissionRun, tasks]);
   const architectProposalApproved =
     selectedMission?.architectPlanProposalId != null &&
     (project.architectPlans ?? []).some(
@@ -396,11 +433,7 @@ export function MissionPanel(props: MissionPanelProps) {
   };
   const startSupervisedRun = async () => {
     if (!selectedMission) return;
-    const confirmed = window.confirm(
-      "Start a supervised Mission Run?\n\nNebula will automatically start Tasks when their dependencies, resources, provider, ownership, and concurrency conditions allow.\n\nNebula will stop for attention when deterministic safety gates cannot proceed.",
-    );
-    if (!confirmed) return;
-    await run("Could not start supervised Mission Run", () =>
+    const started = await run("Could not start supervised Mission Run", () =>
       startMissionRun({
         environmentId,
         input: {
@@ -408,9 +441,18 @@ export function MissionPanel(props: MissionPanelProps) {
           missionId: selectedMission.id,
           projectId: project.id,
           maxConcurrentTasks,
+          routingProfile,
+          transportRetryLimit: retryBudget,
+          remediationLimit: remediationBudget,
+          autoIntegration,
+          stopOnConflict: true,
+          independentReviewRequired: true,
+          preapprovedOverlapPaths: [],
+          autoCompleteMission: false,
         },
       }),
     );
+    if (started) setSwarmLaunchOpen(false);
   };
   const moveIntegration = (taskId: TaskId, offset: number) =>
     setIntegrationOrder((current) => {
@@ -421,6 +463,35 @@ export function MissionPanel(props: MissionPanelProps) {
       [next[index], next[target]] = [next[target]!, next[index]!];
       return next;
     });
+  const restoreMissionBaseline = async () => {
+    if (!selectedMission || !selectedMissionRun) return;
+    const batch = (project.integrationBatches ?? []).find(
+      (candidate) => candidate.id === selectedMission.integrationBatchId,
+    );
+    if (supervisedRunActive) {
+      const stopped = await run("Could not abort Swarm Run", () =>
+        stopMissionRun({ environmentId, input: { runId: selectedMissionRun.id } }),
+      );
+      if (!stopped) return;
+    }
+    if (batch && ["preparing", "applying", "conflict", "validating"].includes(batch.status)) {
+      await run("Could not abort Integration", () =>
+        abortIntegration({
+          environmentId,
+          input: { batchId: batch.id, projectId: project.id },
+        }),
+      );
+      return;
+    }
+    if (batch?.workspacePath && ["ready", "failed", "cancelled"].includes(batch.status)) {
+      await run("Could not remove Integration workspace", () =>
+        removeIntegrationWorkspace({
+          environmentId,
+          input: { batchId: batch.id, projectId: project.id },
+        }),
+      );
+    }
+  };
 
   return (
     <section
@@ -589,6 +660,24 @@ export function MissionPanel(props: MissionPanelProps) {
                     </Button>
                   ) : null}
                   {selectedMission.status === "active" && !supervisedRunActive ? (
+                    <select
+                      className="h-7 rounded-md border border-border bg-background px-2 text-xs"
+                      value={autonomyMode}
+                      onChange={(event) =>
+                        setAutonomyMode(
+                          event.target.value as "manual" | "assisted" | "supervised_swarm",
+                        )
+                      }
+                      aria-label="Mission autonomy level"
+                    >
+                      <option value="manual">Manual</option>
+                      <option value="assisted">Assisted</option>
+                      <option value="supervised_swarm">Supervised Swarm</option>
+                    </select>
+                  ) : null}
+                  {selectedMission.status === "active" &&
+                  !supervisedRunActive &&
+                  autonomyMode === "supervised_swarm" ? (
                     <label className="flex items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground">
                       Max active
                       <input
@@ -606,7 +695,26 @@ export function MissionPanel(props: MissionPanelProps) {
                       />
                     </label>
                   ) : null}
-                  {selectedMission.status === "active" && !supervisedRunActive ? (
+                  {selectedMission.status === "active" &&
+                  !supervisedRunActive &&
+                  autonomyMode === "supervised_swarm" ? (
+                    <select
+                      className="h-7 rounded-md border border-border bg-background px-2 text-xs"
+                      value={routingProfile}
+                      onChange={(event) => setRoutingProfile(event.target.value as RoutingProfile)}
+                      aria-label="Supervised Run routing profile"
+                    >
+                      <option value="manual_only">Manual Only</option>
+                      <option value="balanced">Balanced</option>
+                      <option value="maximum_quality">Maximum Quality</option>
+                      <option value="maximum_speed">Maximum Speed</option>
+                      <option value="preserve_capacity">Preserve Capacity</option>
+                      <option value="provider_diversity">Provider Diversity</option>
+                    </select>
+                  ) : null}
+                  {selectedMission.status === "active" &&
+                  !supervisedRunActive &&
+                  autonomyMode === "supervised_swarm" ? (
                     <Button
                       size="xs"
                       disabled={busy || !plan.graph.valid || !architectProposalApproved}
@@ -615,9 +723,9 @@ export function MissionPanel(props: MissionPanelProps) {
                           ? undefined
                           : "Approve and materialize the Architect plan before starting a supervised Run."
                       }
-                      onClick={() => void startSupervisedRun()}
+                      onClick={() => setSwarmLaunchOpen(true)}
                     >
-                      <PlayIcon /> Start supervised Run
+                      <PlayIcon /> Run as Swarm
                     </Button>
                   ) : null}
                   {(selectedMissionRun?.status === "running" ||
@@ -671,7 +779,21 @@ export function MissionPanel(props: MissionPanelProps) {
                         )
                       }
                     >
-                      <SquareIcon /> Stop Run
+                      <SquareIcon /> Abort Swarm Run
+                    </Button>
+                  ) : null}
+                  {selectedMissionRun ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() =>
+                        window.confirm(
+                          "Restore the Mission baseline? Nebula stops future scheduling and aborts or removes the current Integration workspace. Task results, recovery refs, audit history, and the source checkout are preserved. Run this action again after an active Integration finishes aborting to remove its workspace.",
+                        ) && void restoreMissionBaseline()
+                      }
+                    >
+                      <Trash2Icon /> Restore Mission Baseline
                     </Button>
                   ) : null}
                   {selectedMission.status === "active" && plan.completionEligible ? (
@@ -746,6 +868,15 @@ export function MissionPanel(props: MissionPanelProps) {
                   ))}
                 </div>
               ) : null}
+              {selectedMission.status === "active" && !supervisedRunActive ? (
+                <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
+                  {autonomyMode === "manual"
+                    ? "Manual: you create and start every Task."
+                    : autonomyMode === "assisted"
+                      ? "Assisted: Architect proposes the plan; you approve it and start execution manually."
+                      : "Supervised Swarm: after approval and explicit launch, Nebula schedules the frozen DAG and pauses at high-risk boundaries."}
+                </p>
+              ) : null}
             </header>
 
             <div className="space-y-4 p-4">
@@ -756,15 +887,38 @@ export function MissionPanel(props: MissionPanelProps) {
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <h3 className="text-sm font-medium">Supervised Mission Run</h3>
+                      <h3 className="text-sm font-medium">
+                        {selectedMissionRun.status === "running"
+                          ? "Swarm running"
+                          : `Swarm ${selectedMissionRun.status}`}
+                      </h3>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        Max {selectedMissionRun.maxConcurrentTasks} active writable Tasks · started{" "}
-                        {new Date(selectedMissionRun.startedAt).toLocaleString()}
+                        {swarmTaskCounts.completed} / {selectedMission.taskIds.length} Tasks
+                        complete · {swarmTaskCounts.active} active ·{" "}
+                        {swarmTaskCounts.waitingResource} waiting on resource ·{" "}
+                        {selectedMissionRun.attention.length} attention
                       </p>
                     </div>
                     <Badge variant={statusVariant(selectedMissionRun.status)}>
                       {selectedMissionRun.status}
                     </Badge>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>
+                      Recorded elapsed{" "}
+                      {Math.max(
+                        0,
+                        Math.round(
+                          (new Date(selectedMissionRun.updatedAt).getTime() -
+                            new Date(selectedMissionRun.startedAt).getTime()) /
+                            1000,
+                        ),
+                      )}
+                      s
+                    </span>
+                    <Button size="xs" variant="outline" onClick={props.onOpenTerminalCenter}>
+                      <ActivityIcon /> Terminal Center
+                    </Button>
                   </div>
                   {selectedMissionRun.status === "completed" ? (
                     <p className="mt-3 rounded-md border border-success/25 bg-success/10 p-2 text-xs text-success">
@@ -782,6 +936,169 @@ export function MissionPanel(props: MissionPanelProps) {
                         </li>
                       ))}
                     </ul>
+                  ) : null}
+                  {(selectedMissionRun.taskRecovery ?? []).length > 0 ? (
+                    <details className="mt-3 text-xs" open>
+                      <summary className="cursor-pointer text-muted-foreground">
+                        Execution attempts
+                      </summary>
+                      <div className="mt-2 space-y-2">
+                        {(selectedMissionRun.taskRecovery ?? []).map((state) => (
+                          <div key={state.taskId} className="rounded-md bg-background/65 p-2">
+                            <p className="text-foreground">
+                              {taskById.get(state.taskId)?.title ?? state.taskId} · retries{" "}
+                              {state.transientRetries}/
+                              {selectedMissionRun.recoveryPolicy?.transportRetryLimit ?? 2} ·
+                              remediation {state.remediationRounds}/
+                              {selectedMissionRun.recoveryPolicy?.remediationLimit ?? 2}
+                            </p>
+                            {state.attempts.map((attempt) => (
+                              <p
+                                key={`${attempt.threadId}:${attempt.number}`}
+                                className="mt-1 text-muted-foreground"
+                              >
+                                Attempt {attempt.number} — {attempt.providerInstanceId} ·{" "}
+                                {attempt.kind} · {attempt.status}
+                              </p>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                  {(selectedMissionRun.coordinationRequests ?? []).some(
+                    (request) => request.status === "pending",
+                  ) ? (
+                    <div className="mt-3 space-y-2">
+                      {(selectedMissionRun.coordinationRequests ?? [])
+                        .filter((request) => request.status === "pending")
+                        .map((request) => (
+                          <div
+                            key={request.id}
+                            className="rounded-md border border-warning/30 bg-warning/10 p-2 text-xs"
+                          >
+                            <p className="text-foreground">{request.kind.replaceAll("_", " ")}</p>
+                            <p className="mt-1 text-muted-foreground">{request.reason}</p>
+                            {request.kind === "ownership_request" ? (
+                              <p className="mt-2 text-warning">
+                                Approve or deny this in the Task ownership request workflow.
+                              </p>
+                            ) : (
+                              <div className="mt-2 flex gap-2">
+                                <Button
+                                  size="xs"
+                                  onClick={() => {
+                                    const answer =
+                                      request.kind === "contract_question" ||
+                                      request.kind === "dependency_question"
+                                        ? window.prompt(
+                                            "Answer from an approved contract or human decision",
+                                          )
+                                        : null;
+                                    if (
+                                      (request.kind === "contract_question" ||
+                                        request.kind === "dependency_question") &&
+                                      !answer
+                                    )
+                                      return;
+                                    void run("Could not resolve request", () =>
+                                      resolveCoordinationRequest({
+                                        environmentId,
+                                        input: {
+                                          runId: selectedMissionRun.id,
+                                          requestId: request.id,
+                                          resolution: answer ? "answered" : "approved",
+                                          answer,
+                                        },
+                                      }),
+                                    );
+                                  }}
+                                >
+                                  {request.kind.includes("question") ? "Answer" : "Approve"}
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  onClick={() =>
+                                    void run("Could not deny request", () =>
+                                      resolveCoordinationRequest({
+                                        environmentId,
+                                        input: {
+                                          runId: selectedMissionRun.id,
+                                          requestId: request.id,
+                                          resolution: "denied",
+                                        },
+                                      }),
+                                    )
+                                  }
+                                >
+                                  Deny
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  ) : null}
+                  {(selectedMissionRun.replanProposals ?? []).some(
+                    (proposal) => proposal.status === "pending",
+                  ) ? (
+                    <div className="mt-3 space-y-2">
+                      {(selectedMissionRun.replanProposals ?? [])
+                        .filter((proposal) => proposal.status === "pending")
+                        .map((proposal) => (
+                          <div
+                            key={proposal.id}
+                            className="rounded-md border border-warning/30 p-2 text-xs"
+                          >
+                            <p className="text-foreground">
+                              Replan proposal · {proposal.scope.replaceAll("_", " ")}
+                            </p>
+                            <p className="mt-1 text-muted-foreground">{proposal.summary}</p>
+                            <p className="mt-1 text-muted-foreground">
+                              Completed Task history preserved:{" "}
+                              {proposal.preservedCompletedTaskIds.length}
+                            </p>
+                            <div className="mt-2 flex gap-2">
+                              <Button
+                                size="xs"
+                                onClick={() =>
+                                  void run("Could not approve replan proposal", () =>
+                                    resolveReplan({
+                                      environmentId,
+                                      input: {
+                                        runId: selectedMissionRun.id,
+                                        proposalId: proposal.id,
+                                        resolution: "approved",
+                                      },
+                                    }),
+                                  )
+                                }
+                              >
+                                Approve proposal
+                              </Button>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() =>
+                                  void run("Could not reject replan proposal", () =>
+                                    resolveReplan({
+                                      environmentId,
+                                      input: {
+                                        runId: selectedMissionRun.id,
+                                        proposalId: proposal.id,
+                                        resolution: "rejected",
+                                      },
+                                    }),
+                                  )
+                                }
+                              >
+                                Reject
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
                   ) : null}
                   {selectedMissionRun.decisions.length > 0 ? (
                     <details className="mt-3 text-xs">
@@ -806,6 +1123,54 @@ export function MissionPanel(props: MissionPanelProps) {
                             </li>
                           ))}
                       </ol>
+                    </details>
+                  ) : null}
+                  {selectedMissionRun.finalReport ? (
+                    <details className="mt-3 text-xs" open>
+                      <summary className="cursor-pointer font-medium text-foreground">
+                        Final Mission report
+                      </summary>
+                      <dl className="mt-2 grid gap-2 rounded-md bg-background/65 p-2 sm:grid-cols-2">
+                        <div>
+                          <dt className="text-muted-foreground">Providers used</dt>
+                          <dd>
+                            {selectedMissionRun.finalReport.providersUsed.join(", ") || "None"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">Recovery</dt>
+                          <dd>
+                            {selectedMissionRun.finalReport.retryCount} retries ·{" "}
+                            {selectedMissionRun.finalReport.remediationRoundCount} remediation
+                            rounds
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">Quality and reviews</dt>
+                          <dd>
+                            {selectedMissionRun.finalReport.qualityGateCount} gates ·{" "}
+                            {selectedMissionRun.finalReport.reviewCount} reviews
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">Final validation</dt>
+                          <dd>
+                            {selectedMissionRun.finalReport.finalValidation.replaceAll("_", " ")}
+                          </dd>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <dt className="text-muted-foreground">Integration branch</dt>
+                          <dd>
+                            {selectedMissionRun.finalReport.integrationBranch ?? "Not requested"}
+                          </dd>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <dt className="text-muted-foreground">Files changed</dt>
+                          <dd>
+                            {selectedMissionRun.finalReport.filesChanged.join(", ") || "None"}
+                          </dd>
+                        </div>
+                      </dl>
                     </details>
                   ) : null}
                 </section>
@@ -1318,6 +1683,92 @@ export function MissionPanel(props: MissionPanelProps) {
           </div>
         )}
       </div>
+
+      <Dialog open={swarmLaunchOpen} onOpenChange={setSwarmLaunchOpen}>
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>Run as Swarm</DialogTitle>
+            <DialogDescription>
+              Review the frozen policy snapshot. Nebula will never approve the plan or merge main.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            <ol className="list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
+              <li>Architect proposed this plan and you approved it.</li>
+              <li>Nebula schedules only the approved Tasks.</li>
+              <li>Provider work stays isolated by Task.</li>
+              <li>Quality gates and independent reviews run automatically.</li>
+              <li>
+                Nebula pauses for ownership, policy, conflict, and exhausted recovery decisions.
+              </li>
+              <li>Integration may become Ready, but main is never merged automatically.</li>
+            </ol>
+            <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 rounded-lg border border-border/70 p-3 text-xs">
+              <dt className="text-muted-foreground">Mission</dt>
+              <dd>{selectedMission?.title ?? "Mission"}</dd>
+              <dt className="text-muted-foreground">Tasks</dt>
+              <dd>{selectedMission?.taskIds.length ?? 0}</dd>
+              <dt className="text-muted-foreground">Providers</dt>
+              <dd>{[...selectedProviderCounts.keys()].join(", ") || "Automatic routing"}</dd>
+              <dt className="text-muted-foreground">Concurrency</dt>
+              <dd>{maxConcurrentTasks}</dd>
+              <dt className="text-muted-foreground">Routing</dt>
+              <dd>{routingProfile.replaceAll("_", " ")}</dd>
+              <dt className="text-muted-foreground">Retry budget</dt>
+              <dd>
+                <input
+                  aria-label="Swarm retry budget"
+                  className="h-6 w-12 rounded border border-border bg-background text-center"
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={retryBudget}
+                  onChange={(event) =>
+                    setRetryBudget(Math.min(10, Math.max(0, Number(event.target.value) || 0)))
+                  }
+                />
+              </dd>
+              <dt className="text-muted-foreground">Remediation rounds</dt>
+              <dd>
+                <input
+                  aria-label="Swarm remediation budget"
+                  className="h-6 w-12 rounded border border-border bg-background text-center"
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={remediationBudget}
+                  onChange={(event) =>
+                    setRemediationBudget(Math.min(10, Math.max(0, Number(event.target.value) || 0)))
+                  }
+                />
+              </dd>
+              <dt className="text-muted-foreground">Independent review</dt>
+              <dd>Required</dd>
+              <dt className="text-muted-foreground">Automatic Integration</dt>
+              <dd>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={autoIntegration}
+                    onChange={(event) => setAutoIntegration(event.target.checked)}
+                  />
+                  {autoIntegration ? "Enabled" : "Disabled"}
+                </label>
+              </dd>
+              <dt className="text-muted-foreground">Main branch merge</dt>
+              <dd>Never</dd>
+            </dl>
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSwarmLaunchOpen(false)}>
+              Cancel
+            </Button>
+            <Button disabled={busy} onClick={() => void startSupervisedRun()}>
+              <PlayIcon /> Run Swarm
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogPopup>

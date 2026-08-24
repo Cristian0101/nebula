@@ -256,7 +256,11 @@ export function CommandDeckPage({ projectKey }: { readonly projectKey: string })
     <SidebarInset className="h-dvh min-h-0 w-auto overflow-hidden bg-background text-foreground isolate">
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <CommandDeckHeader projectKey={projectKey} title={group.displayName} />
-        <CommandDeck project={representative} displayName={group.displayName} />
+        <CommandDeck
+          project={representative}
+          projectKey={projectKey}
+          displayName={group.displayName}
+        />
       </div>
     </SidebarInset>
   );
@@ -264,9 +268,11 @@ export function CommandDeckPage({ projectKey }: { readonly projectKey: string })
 
 export function CommandDeck({
   project,
+  projectKey,
   displayName,
 }: {
   readonly project: CommandDeckProject;
+  readonly projectKey: string;
   readonly displayName: string;
 }) {
   const navigate = useNavigate();
@@ -1052,6 +1058,12 @@ export function CommandDeck({
                 setCreateMissionId(missionId);
                 setCreateOpen(true);
               }}
+              onOpenTerminalCenter={() =>
+                void navigate({
+                  to: "/projects/$projectKey/terminal-center",
+                  params: { projectKey },
+                })
+              }
             />
           </div>
         ) : null}

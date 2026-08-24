@@ -225,6 +225,29 @@ function TerminalCenter({
     );
     return tasks.flatMap((task) => (taskIds.has(task.id) && task.threadId ? [task.threadId] : []));
   }, [activeMissionRuns, missions, tasks]);
+  const attemptByThread = useMemo(
+    () =>
+      new Map(
+        activeMissionRuns.flatMap((run) =>
+          (run.taskRecovery ?? []).flatMap((state) =>
+            state.attempts.map((attempt) => [attempt.threadId, attempt] as const),
+          ),
+        ),
+      ),
+    [activeMissionRuns],
+  );
+  const historicalAttemptThreadIds = useMemo(
+    () =>
+      activeMissionRuns.flatMap((run) =>
+        (run.taskRecovery ?? []).flatMap((state) => {
+          const currentThreadId = tasks.find((task) => task.id === state.taskId)?.threadId;
+          return state.attempts.flatMap((attempt) =>
+            attempt.threadId !== currentThreadId ? [attempt.threadId] : [],
+          );
+        }),
+      ),
+    [activeMissionRuns, tasks],
+  );
 
   useEffect(() => {
     const missing = supervisedThreadIds.filter(
@@ -238,6 +261,12 @@ function TerminalCenter({
       ),
     );
   }, [project.id, showThread, state.positions, state.visibleThreadIds, supervisedThreadIds]);
+
+  useEffect(() => {
+    historicalAttemptThreadIds
+      .filter((threadId) => state.visibleThreadIds.includes(threadId))
+      .forEach((threadId) => hideThread(project.id, threadId));
+  }, [hideThread, historicalAttemptThreadIds, project.id, state.visibleThreadIds]);
 
   const visibleThreads = useMemo(
     () => hydrateTerminalCanvasThreads(state.visibleThreadIds, projectThreads),
@@ -881,6 +910,7 @@ function TerminalCenter({
                 );
                 const task = taskByThread.get(thread.id);
                 const mission = task ? missionByTask.get(task.id) : null;
+                const attempt = attemptByThread.get(thread.id);
                 const selected = state.selectedThreadId === thread.id;
                 return (
                   <article
@@ -917,6 +947,7 @@ function TerminalCenter({
                         <p className="truncate text-[11px] text-slate-400">
                           {entry?.displayName ?? thread.modelSelection.instanceId} ·{" "}
                           {thread.modelSelection.model}
+                          {attempt ? ` · Attempt ${attempt.number}` : ""}
                         </p>
                       </div>
                       <span

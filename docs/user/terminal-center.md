@@ -1,5 +1,7 @@
 # Work with provider sessions in Terminal Center
 
+During supervised recovery, Terminal Center keeps one visible node for the canonical Task's current provider attempt. Earlier attempt Threads stay durable and can be opened explicitly. See [Recover and route supervised Missions](recovery-routing.md).
+
 Terminal Center is Nebula's freeform manual provider workspace. Open it from a Project's menu, Project settings, or the command palette. It works with zero Tasks and zero Missions: choose a configured provider and Nebula creates one canonical Thread, ready for its first prompt.
 
 ## Configure quick launch
@@ -37,4 +39,4 @@ Terminal Center and Command Deck are complementary. Terminal Center is for freef
 
 ## Current scope
 
-Terminal Center, Agent Canvas, quick provider launch, automatic layouts, freeform spatial layout, and Supervised Run Thread discovery are **implemented**. Canvas edges are reserved for canonical Mission dependencies; Terminal Center does not invent agent-to-agent communication, and Swarm Mode is not implemented.
+Terminal Center, Agent Canvas, quick provider launch, automatic layouts, freeform spatial layout, Supervised Run Thread discovery, and Swarm Mission Flow are **implemented**. Canvas edges are reserved for canonical Mission dependencies; Terminal Center does not invent agent-to-agent communication.

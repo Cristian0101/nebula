@@ -6,6 +6,7 @@ import {
   MissionRunId,
   ProjectId,
   ProviderInstanceId,
+  ReplanProposalId,
   TaskId,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -29,6 +30,7 @@ const taskB = TaskId.make("task-b");
 const taskC = TaskId.make("task-c");
 const proposalId = ArchitectPlanProposalId.make("architect-plan-1");
 const runId = MissionRunId.make("mission-run-1");
+const replanProposalId = ReplanProposalId.make("replan-proposal-1");
 
 const persistedEvent = (
   sequence: number,
@@ -343,10 +345,43 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
         missionId,
         projectId,
         maxConcurrentTasks: 2,
+        routingProfile: "balanced",
+        transportRetryLimit: 3,
+        remediationLimit: 1,
+        autoIntegration: true,
+        stopOnConflict: true,
+        independentReviewRequired: true,
         createdAt: now,
       });
       expect(model.missionRuns).toEqual([
-        expect.objectContaining({ id: runId, mode: "supervised", status: "running" }),
+        expect.objectContaining({
+          id: runId,
+          mode: "supervised_swarm",
+          status: "running",
+          recoveryPolicy: {
+            transportRetryLimit: 3,
+            remediationLimit: 1,
+            routingProfile: "balanced",
+          },
+          swarmPolicy: expect.objectContaining({
+            revision: 1,
+            maxConcurrentTasks: 2,
+            routingProfile: "balanced",
+            transportRetryLimit: 3,
+            remediationLimit: 1,
+            autoIntegration: true,
+            stopOnConflict: true,
+            independentReviewRequired: true,
+            autoCompleteMission: false,
+            frozenAt: now,
+          }),
+          integrationBatchId: null,
+          finalReport: null,
+          taskRecovery: [],
+          routingDecisions: [],
+          coordinationRequests: [],
+          replanProposals: [],
+        }),
       ]);
 
       const duplicate = yield* Effect.flip(
@@ -405,6 +440,49 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
         currentReadyTaskIds: [taskA],
         attentionReason: "No independent Reviewer is ready.",
       });
+
+      const approvedMission = model.missions?.[0];
+      model = yield* apply(model, {
+        type: "mission.run.reconcile",
+        commandId: CommandId.make("record-replan-proposal"),
+        runId,
+        status: "attention",
+        currentReadyTaskIds: [taskA],
+        scheduledTaskIds: [],
+        attention: model.missionRuns?.[0]?.attention ?? [],
+        attentionReason: "A Task-level repair needs human approval.",
+        decision: null,
+        completedAt: null,
+        failureReason: null,
+        replanProposals: [
+          {
+            id: replanProposalId,
+            missionId,
+            sourceTaskId: taskA,
+            scope: "task_repair",
+            affectedTaskIds: [taskA],
+            summary: "Repair Task A without changing the approved graph.",
+            rationale: "The current implementation is blocked.",
+            preservedCompletedTaskIds: [],
+            architectPlanProposalId: null,
+            status: "pending",
+            createdAt: now,
+            resolvedAt: null,
+          },
+        ],
+        createdAt: now,
+      });
+      model = yield* apply(model, {
+        type: "mission.run.replan.resolve",
+        commandId: CommandId.make("approve-replan-proposal"),
+        runId,
+        proposalId: replanProposalId,
+        resolution: "approved",
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("approved");
+      expect(model.missions?.[0]).toEqual(approvedMission);
+
       model = yield* apply(model, {
         type: "mission.run.stop",
         commandId: CommandId.make("stop-run"),
