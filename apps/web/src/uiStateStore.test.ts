@@ -15,7 +15,9 @@ import {
   setProjectExpanded,
   setThreadChangedFilesExpanded,
   type UiState,
+  useUiStateStore,
 } from "./uiStateStore";
+import { DEFAULT_TERMINAL_CENTER_STATE } from "./components/terminalCenter/terminalCenterLogic";
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
@@ -30,6 +32,31 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
 }
 
 describe("uiStateStore pure functions", () => {
+  it("restores dragged Freeform positions after using an arranged layout", () => {
+    const projectId = "terminal-project";
+    const threadId = "terminal-thread";
+    const initialPosition = { x: 36, y: 42 };
+    const draggedPosition = { x: 180, y: 140 };
+    useUiStateStore.getState().setTerminalCenterState(projectId, {
+      ...DEFAULT_TERMINAL_CENTER_STATE,
+      visibleThreadIds: [threadId],
+      positions: { [threadId]: initialPosition },
+      freeformPositions: { [threadId]: initialPosition },
+    });
+
+    useUiStateStore.getState().setTerminalCenterNodePosition(projectId, threadId, draggedPosition);
+    useUiStateStore
+      .getState()
+      .setTerminalCenterLayout(projectId, "grid", { [threadId]: { x: 420, y: 270 } });
+    useUiStateStore
+      .getState()
+      .setTerminalCenterLayout(projectId, "freeform", { [threadId]: { x: 420, y: 270 } });
+
+    expect(useUiStateStore.getState().terminalCenterByProjectId[projectId]?.positions).toEqual({
+      [threadId]: draggedPosition,
+    });
+  });
+
   it("stores server timestamps without moving visit state backwards", () => {
     const threadId = ThreadId.make("thread-1");
     const initialState = makeUiState();

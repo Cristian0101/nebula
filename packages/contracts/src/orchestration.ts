@@ -267,6 +267,9 @@ export const QualityGateDefinition = Schema.Struct({
   command: TrimmedNonEmptyString,
   enabled: Schema.Boolean,
   required: Schema.Boolean,
+  // Task and Integration validation have different evidence boundaries. Older
+  // definitions omit this field and therefore continue to run in both.
+  scope: Schema.optional(Schema.Literals(["task", "integration", "both"])),
   timeoutSeconds: PositiveInt.check(Schema.isLessThanOrEqualTo(3600)),
   // Approval is bound to the exact command text. Editing the command makes
   // this value differ (or null), so the prior approval cannot carry forward.

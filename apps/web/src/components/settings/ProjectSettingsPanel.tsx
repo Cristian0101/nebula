@@ -411,10 +411,24 @@ function ProjectQualityAndReviewSettings({ project }: { project: SidebarProjectG
             />
             <Input
               aria-label={`${gate.label} command`}
-              className="font-mono text-xs sm:col-span-6"
+              className="font-mono text-xs sm:col-span-4"
               value={gate.command}
               onChange={(event) => updateGate(index, { command: event.currentTarget.value })}
             />
+            <select
+              aria-label={`${gate.label} scope`}
+              className="rounded-md border border-black/[0.08] bg-transparent px-2 text-sm sm:col-span-2"
+              value={gate.scope ?? "both"}
+              onChange={(event) =>
+                updateGate(index, {
+                  scope: event.currentTarget.value as "task" | "integration" | "both",
+                })
+              }
+            >
+              <option value="both">Task + Integration</option>
+              <option value="task">Task only</option>
+              <option value="integration">Integration only</option>
+            </select>
             <Input
               aria-label={`${gate.label} timeout seconds`}
               className="sm:col-span-2"
@@ -483,6 +497,7 @@ function ProjectQualityAndReviewSettings({ project }: { project: SidebarProjectG
                   command: "npm test",
                   enabled: true,
                   required: true,
+                  scope: "both",
                   timeoutSeconds: 600,
                   approvedCommand: null,
                 },

@@ -53,6 +53,16 @@ const readModel = (input?: {
             timeoutSeconds: 60,
             approvedCommand: "npm test",
           },
+          {
+            id: "integration",
+            label: "Integration",
+            command: "npm run test:integration",
+            enabled: true,
+            required: true,
+            scope: "integration",
+            timeoutSeconds: 60,
+            approvedCommand: "npm run test:integration",
+          },
         ],
         updatedAt: now,
       },
@@ -218,6 +228,25 @@ const readModel = (input?: {
 });
 
 it.layer(NodeServices.layer)("Task quality and review policy", (it) => {
+  it.effect("runs only Task-scoped gates for Task snapshots", () =>
+    Effect.gen(function* () {
+      const requested = yield* decideOrchestrationCommand({
+        readModel: readModel(),
+        command: {
+          type: "task.quality.run",
+          commandId: CommandId.make("task-scoped-quality"),
+          taskId,
+          snapshotId,
+          createdAt: now,
+        },
+      });
+      expect(requested).toMatchObject({
+        type: "task.quality.run-requested",
+        payload: { runs: [{ gateId: "tests" }] },
+      });
+    }),
+  );
+
   it.effect("requires exact command approval and all required gates", () =>
     Effect.gen(function* () {
       const mismatch = yield* Effect.flip(
