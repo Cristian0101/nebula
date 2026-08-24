@@ -80,7 +80,7 @@ Do not introduce a second provider registry, task runtime, event architecture, G
 
 ## 9. Swarm and Command Deck share one runtime
 
-Command Deck and future Swarm Mode must share the same Task, Workspace, Provider, Session, Event, Diff, and Review primitives. Manual assignment and automatic planning are two application policies over one runtime, not separate products.
+Command Deck and Supervised Swarm share the same Task, Workspace, Provider, Session, Event, Diff, and Review primitives. Manual assignment and automatic routing are two application policies over one runtime, not separate products.
 
 ## 10. Security
 

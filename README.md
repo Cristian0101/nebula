@@ -2,59 +2,57 @@
 
 Your coding agents. One engineering team.
 
-Nebula is an open-source, local-first orchestration layer for multi-agent software development, built on top of [T3 Code](https://github.com/pingdotgg/t3code).
+Nebula is an open-source, local-first orchestration layer for multi-agent software development, built on [T3 Code](https://github.com/pingdotgg/t3code). It keeps provider credentials in provider-owned CLIs and uses Git as the durable execution and recovery boundary.
 
-## Status
+## Alpha capabilities
 
-**Early development / repository foundation.**
+- **Terminal Center** launches and arranges canonical provider Threads in Grid, Provider Columns, Status Lanes, Radial, Compact, or persisted Freeform layouts.
+- **Command Deck** turns work into isolated Tasks with path ownership, Shared Resource leases, quality gates, review snapshots, structured handoffs, and reversible restore.
+- **Architect** asks a real provider for a bounded Mission proposal against an exact clean commit. A human edits and approves it before any execution state exists.
+- **Missions** model an explicit Task DAG and deterministic execution waves.
+- **Supervised Swarm** schedules approved Tasks, injects prerequisite context, applies bounded retry/remediation/provider routing, runs independent review, and can start the Integration Engine.
+- **Integration Engine** applies immutable Task artifacts in DAG order inside a separate worktree and runs explicitly approved final gates. It never merges `main`.
 
-Nebula currently preserves the proven T3 Code runtime, provider, Git, checkpoint, and client foundations. Nebula-specific orchestration functionality has not been implemented yet. In particular, Swarm Mode, a mission engine, ownership enforcement, review gates, and integration automation are future work.
+Nebula supports the existing Codex, Claude Code, Cursor, Grok, and OpenCode adapters and adds Antigravity as a first-party provider. Availability and authentication are detected from local provider installations; Nebula does not store provider credentials.
 
-## Direction
+## Alpha safety model
 
-Nebula will coordinate the coding agents a developer already uses. Its planned capabilities include:
+Nebula coordinates. Providers execute. Git records the result.
 
-- Provider-neutral orchestration across independently authenticated coding agents
-- Isolated writable tasks backed by Git worktrees
-- Explicit file ownership and shared-resource policies
-- Structured handoffs, reviews, and reversible integration
-- A manual Command Deck before higher-autonomy workflows
+- Writable Tasks use isolated Git worktrees.
+- Repository-relative ownership and deny rules are checked against the complete Task delta.
+- Shared Resources serialize declared cross-Task write contention.
+- Quality commands require explicit approval and can be scoped to Tasks, final Integration, or both.
+- Independent review is bound to an immutable snapshot.
+- Recovery is bounded and visible. Human-attention states stop the affected branch.
+- Supervised Swarm never approves its own plan, silently expands ownership, resolves conflicts, publishes a PR, or merges `main`.
 
-Nebula coordinates. Providers execute. Git remains the source of history.
+## Quick start
 
-## Architecture
-
-T3 Code already provides the execution boundary Nebula needs: provider adapters, subprocess and terminal management, Git/VCS operations, worktrees, checkpoints, persisted orchestration events, relational projections, Electron desktop, web, mobile, and typed RPC.
-
-Nebula will extend those primitives in small, isolated modules rather than recreate a provider system, Git system, event bus, or desktop shell. See [UPSTREAM.md](./UPSTREAM.md) for the baseline, sync policy, and planned extension points.
-
-## Development setup
-
-This is a T3 Code fork. Follow the upstream-compatible setup before contributing:
+Nebula currently targets contributors and early local Alpha users:
 
 ```bash
 # Node 24 and Vite+ are required by the current upstream baseline.
 vp i
-vp run dev:desktop
+vp run dev
 ```
 
-The full inherited development notes live in [docs/internals/scripts.md](./docs/internals/scripts.md).
+The server prints a pairing URL. Open the complete URL, add a disposable or local Git repository, check provider readiness in **Settings → Providers**, then open **Terminal Center** or **Command Deck**. See the [five-minute quick start](./docs/user/quick-start.md) and the evidence-based [Alpha acceptance checklist](./docs/release/ALPHA_ACCEPTANCE.md).
 
-## Roadmap
+## Current Alpha limitations
 
-1. Map the existing T3 runtime and define the Nebula extension contract.
-2. Build Command Deck foundations: missions, bounded tasks, and isolated workspaces.
-3. Add ownership, handoff, review, and integration policies.
-4. Introduce Swarm Mode only after the manual workflow is reliable and observable.
+- Provider subprocesses cannot always survive a server process restart; Nebula must report and recover the interrupted state.
+- Provider routing and remediation are bounded heuristics, not unattended autonomy.
+- Integration conflicts and unsafe overlap require a human.
+- A complete cross-provider live Mission and full crash matrix remain release gates until recorded as PASS in the checklist.
+- The production vector icon may still change.
 
-## Contributing
+## Architecture and contributing
 
-Nebula is intentionally preserving upstream compatibility while its orchestration layer is designed. Read [CONTRIBUTING.md](./CONTRIBUTING.md) before proposing changes.
+Start with [Nebula source of truth](./docs/nebula/README.md), [architecture](./docs/nebula/ARCHITECTURE.md), [upstream policy](./UPSTREAM.md), and [contributing guide](./CONTRIBUTING.md). Behavior changes belong in the appropriate user or internal documentation; implementation plans and QA scratch files do not belong in the repository.
 
-## Security
+## Security and attribution
 
-Nebula must remain local-first and must not become a credential vault. See [SECURITY.md](./SECURITY.md) for disclosure guidance and protected boundaries.
+Nebula must remain local-first and must not become a credential vault. See [SECURITY.md](./SECURITY.md) for disclosure guidance.
 
-## Upstream attribution
-
-Nebula is a fork of [T3 Code](https://github.com/pingdotgg/t3code), licensed under MIT. T3 Code supplies the underlying execution harness that Nebula extends. The original copyright and license notice are preserved in [LICENSE](./LICENSE).
+Nebula is a fork of [T3 Code](https://github.com/pingdotgg/t3code), licensed under MIT. T3 Code supplies the execution harness that Nebula extends. Original copyright and license notices remain in [LICENSE](./LICENSE).
