@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   activeReplacementOwnsProviderTurn,
   missionProviderTurnInFlight,
+  providerSupportsStructuredReview,
 } from "./MissionRunReactor.ts";
 
 describe("MissionRunReactor recovery", () => {
@@ -40,6 +41,15 @@ describe("MissionRunReactor recovery", () => {
         },
         { session: { status: "starting" }, latestTurn: null },
       ),
+    ).toBe(true);
+  });
+
+  it("routes independent review only to providers with structured generation", () => {
+    expect(providerSupportsStructuredReview({ textGeneration: {} })).toBe(false);
+    expect(
+      providerSupportsStructuredReview({
+        textGeneration: { generateStructured: () => undefined },
+      }),
     ).toBe(true);
   });
 });

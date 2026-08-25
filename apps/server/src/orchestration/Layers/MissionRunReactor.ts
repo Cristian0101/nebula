@@ -215,6 +215,12 @@ export function activeReplacementOwnsProviderTurn(
   );
 }
 
+export function providerSupportsStructuredReview(instance: {
+  readonly textGeneration: { readonly generateStructured?: unknown };
+}): boolean {
+  return typeof instance.textGeneration.generateStructured === "function";
+}
+
 const activeTaskAttention = (
   task: OrchestrationTask,
   thread: OrchestrationThread | undefined,
@@ -358,6 +364,7 @@ const make = Effect.gen(function* () {
 
   const reviewerSelection = Effect.fn("MissionRunReactor.reviewerSelection")(function* (
     task: OrchestrationTask,
+    excludedInstanceIds: ReadonlySet<string> = new Set(),
   ) {
     const builder = task.modelSelection
       ? yield* providers.getInstance(task.modelSelection.instanceId)
@@ -365,7 +372,12 @@ const make = Effect.gen(function* () {
     const instances = yield* providers.listInstances;
     const ready: Array<{ instance: (typeof instances)[number]; model: string }> = [];
     for (const instance of instances) {
-      if (!instance.enabled) continue;
+      if (
+        !instance.enabled ||
+        excludedInstanceIds.has(instance.instanceId) ||
+        !providerSupportsStructuredReview(instance)
+      )
+        continue;
       const snapshot = yield* instance.snapshot.getSnapshot.pipe(Effect.orElseSucceed(() => null));
       if (
         snapshot?.enabled &&
@@ -1362,8 +1374,22 @@ const make = Effect.gen(function* () {
       if (requiredGateFailure(task)) return;
       if (task.reviewRequired === true || run.swarmPolicy?.independentReviewRequired === true) {
         const review = currentReview(task);
-        if (!review) {
-          const selection = yield* reviewerSelection(task);
+        if (!review || review.status === "failed") {
+          const failedReviews = (task.reviews ?? []).filter(
+            (candidate) =>
+              candidate.snapshotId === task.reviewSnapshot!.id && candidate.status === "failed",
+          );
+          if (failedReviews.length >= 2)
+            return {
+              taskId: task.id,
+              code: "review_failed",
+              detail: "Independent review failed after two eligible provider attempts.",
+              blocksMission: false,
+            } satisfies MissionRunAttention;
+          const selection = yield* reviewerSelection(
+            task,
+            new Set(failedReviews.map((candidate) => candidate.reviewerModelSelection.instanceId)),
+          );
           if (!selection)
             return {
               taskId: task.id,
@@ -1371,13 +1397,18 @@ const make = Effect.gen(function* () {
               detail: "No configured independent Reviewer is currently ready.",
               blocksMission: false,
             } satisfies MissionRunAttention;
+          const attempt = failedReviews.length + 1;
           yield* engine.dispatch({
             type: "task.independent-review.request",
-            commandId: commandId(run, task.id, `independent-review:${task.reviewSnapshot.id}`),
+            commandId: commandId(
+              run,
+              task.id,
+              `independent-review:${task.reviewSnapshot.id}:${attempt}`,
+            ),
             taskId: task.id,
             snapshotId: task.reviewSnapshot.id,
             reviewId: TaskReviewId.make(
-              `mission-run:${run.id}:task:${task.id}:review:${task.reviewSnapshot.id}`,
+              `mission-run:${run.id}:task:${task.id}:review:${task.reviewSnapshot.id}:attempt:${attempt}`,
             ),
             reviewerModelSelection: selection,
             createdAt: task.reviewSnapshot.capturedAt,
