@@ -34,6 +34,7 @@ export interface TerminalCenterQuickLaunchProfile {
 export interface TerminalCenterProjectState {
   readonly visibleThreadIds: ReadonlyArray<string>;
   readonly positions: Readonly<Record<string, CanvasPoint>>;
+  readonly freeformPositions: Readonly<Record<string, CanvasPoint>>;
   readonly layout: TerminalCenterLayout;
   readonly viewport: CanvasViewport;
   readonly selectedThreadId: string | null;
@@ -43,6 +44,7 @@ export interface TerminalCenterProjectState {
 export const DEFAULT_TERMINAL_CENTER_STATE: TerminalCenterProjectState = {
   visibleThreadIds: [],
   positions: {},
+  freeformPositions: {},
   layout: "freeform",
   viewport: { x: 0, y: 0, zoom: 1 },
   selectedThreadId: null,

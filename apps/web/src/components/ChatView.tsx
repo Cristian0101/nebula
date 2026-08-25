@@ -22,10 +22,7 @@ import {
   RuntimeMode,
   TerminalOpenInput,
 } from "@t3tools/contracts";
-import {
-  connectionStatusTitle,
-  type EnvironmentConnectionPresentation,
-} from "@t3tools/client-runtime/connection";
+import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { wasBootstrapThreadDeleted } from "@t3tools/client-runtime/errors";
 import {
   changeRequestAutoSettles,
@@ -2135,10 +2132,11 @@ function ChatViewContent(props: ChatViewProps) {
           id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
           variant: unavailableConnection.phase === "error" ? "error" : "warning",
           icon: <WifiOffIcon />,
-          title: `${activeEnvironmentUnavailableState.label}: ${connectionStatusTitle(unavailableConnection)}`,
+          title: "Nebula runtime disconnected",
           description:
-            unavailableConnection.error ??
-            "Reconnect this environment before sending messages or running actions.",
+            unavailableConnection.phase === "error"
+              ? "Your work is safe. The runtime may have restarted, the environment may be offline, or authentication may have expired."
+              : "Trying to reconnect. Your work is safe while Nebula restores the live session.",
           actions: (
             <>
               <Button
@@ -2150,14 +2148,14 @@ function ChatViewContent(props: ChatViewProps) {
                   )
                 }
               >
-                {environmentReconnecting ? "Reconnecting..." : "Reconnect"}
+                {environmentReconnecting ? "Reconnecting..." : "Retry"}
               </Button>
               <Button
                 size="xs"
                 variant="outline"
                 onClick={() => void navigate({ to: "/settings/connections" })}
               >
-                Connections
+                Diagnostics
               </Button>
             </>
           ),

@@ -32,7 +32,7 @@ Command Deck is the implemented desktop-first manual orchestration surface over 
 
 Terminal Center is the implemented freeform complement to Command Deck. It creates and reuses canonical provider Threads, optionally composes the existing isolated Task workspace flow, and presents those sessions on a persisted UI-only spatial canvas. It introduces no provider, terminal, Task, Git, event, or database runtime. Removing a canvas node only changes local visibility.
 
-Quality Gates, independent Reviewer, the deterministic Integration Engine, Shared Resources, Architect proposals, Missions, and Supervised Mission Runs are implemented. A human approves and activates an Architect Mission, then separately authorizes a supervised Run. Nebula deterministically advances canonical Tasks under dependency, resource, provider, ownership, and concurrency policy while stopping affected branches for human attention. Completed Mission results can seed an existing Integration Batch in suggested topological order, which the user reviews and confirms. Nebula does not rewrite plans, reroute providers, remediate failures, merge main, or open a PR automatically. Swarm Mode is not implemented.
+Quality Gates, independent Reviewer, the deterministic Integration Engine, Shared Resources, Architect proposals, Missions, Supervised Mission Runs, bounded recovery/routing, and Supervised Swarm are implemented. A human approves and activates an Architect Mission, then separately authorizes a Run with a frozen policy. Nebula deterministically advances canonical Tasks under dependency, resource, provider, ownership, and concurrency policy. The configured recovery budget may retry a transient provider failure, request bounded remediation after a gate or review failure, or choose a ready replacement provider. Human judgment remains required for unsafe ownership/resource changes, replanning, path overlap, conflicts, and exhausted recovery. With Automatic Integration enabled, completed Mission results seed an Integration Batch in deterministic DAG order and the Run completes only after final validation reaches Ready. Nebula never approves plans, merges `main`, or opens a PR automatically.
 
 Antigravity CLI is the implemented Google first-party provider for individual Google accounts. Nebula invokes its official headless CLI, keeps authentication provider-owned, and binds each run to the canonical Task worktree. The preserved Gemini CLI prototype remains experimental and blocked for the individual-account authentication path; it is not a mainline provider.
 
@@ -75,7 +75,7 @@ The code is authoritative for current behavior. These documents are authoritativ
 | Supervised Mission scheduler          | Implemented     |
 | Automatic wave advancement            | Implemented     |
 | Dependency context injection          | Implemented     |
-| Automatic provider routing            | Not implemented |
+| Automatic provider routing            | Implemented     |
 | Shared Resource definitions           | Implemented     |
 | Exclusive Task resource leases        | Implemented     |
 | Mission resource blocking             | Implemented     |
@@ -83,7 +83,10 @@ The code is authoritative for current behavior. These documents are authoritativ
 | Human-approved ownership requests     | Implemented     |
 | Provider-generated ownership requests | Not implemented |
 | Architect                             | Implemented     |
-| Swarm Mode                            | Not implemented |
+| Bounded recovery and remediation      | Implemented     |
+| Provider replacement                  | Implemented     |
+| Supervised Swarm                      | Implemented     |
+| Automatic main merge                  | Not implemented |
 
 Shared Resources are Project-defined logical resources whose repository-relative patterns may be
 edited by only one active Task at a time. They complement worktree isolation and path ownership; they

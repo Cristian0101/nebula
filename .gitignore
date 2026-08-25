@@ -13,6 +13,8 @@ packages/*/dist
 build/
 .logs/
 release/
+!docs/release/
+!docs/release/**
 release-mock/
 .t3
 .idea/

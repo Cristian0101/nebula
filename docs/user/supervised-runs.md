@@ -46,7 +46,7 @@ Completion unlocks later Mission waves without another Start click. With Automat
 
 `REQUEST_CHANGES`, a failed required quality gate, handoff generation that needs human input, provider failure, ownership/resource violation, or an unavailable required Reviewer places that Task in attention. Its dependent subgraph remains blocked by ordinary dependency readiness. Independent eligible Tasks may continue.
 
-Nebula fails the Run and stops all automatic progression only when Mission integrity is uncertain—for example, the active Mission, Project, or an approved Mission Task is missing. Prompt 14 does not automatically remediate failures or requested changes.
+Nebula fails the Run and stops all automatic progression only when Mission integrity is uncertain—for example, the active Mission, Project, or an approved Mission Task is missing. In Supervised Swarm, configured retry and remediation budgets may recover a provider, quality, or review failure. Exhausted budgets, unsafe coordination changes, and unresolved conflicts become explicit attention instead of silently expanding authority.
 
 ## Pause, resume, and stop
 
@@ -66,7 +66,7 @@ Terminal Center discovers active Run Task Threads and keeps using its existing c
 | Dependency context injection    | IMPLEMENTED     |
 | Automatic review pipeline       | IMPLEMENTED     |
 | Pause/resume/stop               | IMPLEMENTED     |
-| Automatic remediation           | NOT IMPLEMENTED |
-| Automatic provider rerouting    | NOT IMPLEMENTED |
+| Automatic remediation           | IMPLEMENTED     |
+| Automatic provider rerouting    | IMPLEMENTED     |
 | Plan rewriting                  | NOT IMPLEMENTED |
 | Swarm Mode                      | IMPLEMENTED     |

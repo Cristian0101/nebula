@@ -73,7 +73,7 @@ Implemented placement:
 - Task prepares its workspace before creating and binding the canonical Thread; provider/session identity remains derived from inherited state; and
 - shared client commands and the existing shell cache feed a focused project Task surface.
 
-No `packages/nebula-*` package or parallel runtime was created. Ownership enforcement, Integration, Missions, shared resources, Architect planning, and supervised Mission execution are implemented over stable Task/Result identity, hidden checkpoint refs, the inherited Git executor, process runner, typed commands, and event projection. Command Deck, Quality Gates, independent Reviewer, Mission membership, dependency edges, MissionRun scheduling, and automatic wave advancement use the same shell and persistence contracts. Agent ownership requests, automatic remediation, automatic provider rerouting, plan rewriting during a run, automatic integration queues, and Swarm Mode remain not implemented.
+No `packages/nebula-*` package or parallel runtime was created. Ownership enforcement, Integration, Missions, shared resources, Architect planning, supervised Mission execution, bounded recovery/routing, and Supervised Swarm are implemented over stable Task/Result identity, hidden checkpoint refs, the inherited Git executor, process runner, typed commands, and event projection. Command Deck, Quality Gates, independent Reviewer, Mission membership, dependency edges, MissionRun scheduling, automatic wave advancement, provider replacement, and Automatic Integration use the same shell and persistence contracts. Provider-generated ownership grants, plan rewriting during a run, AI conflict resolution, automatic publication, and automatic `main` merge remain unimplemented.
 
 Why this boundary is first:
 

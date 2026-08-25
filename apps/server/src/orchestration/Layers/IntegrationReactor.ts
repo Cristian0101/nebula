@@ -686,7 +686,9 @@ const make = Effect.gen(function* () {
       updatedAt: startedAt,
     };
     yield* update(projectId, next, "reconciled");
-    const configuredGates = (project.qualityPolicy?.gates ?? []).filter((gate) => gate.enabled);
+    const configuredGates = (project.qualityPolicy?.gates ?? []).filter(
+      (gate) => gate.enabled && gate.scope !== "task",
+    );
     const unapprovedGate = configuredGates.find((gate) => gate.approvedCommand !== gate.command);
     if (unapprovedGate) {
       return yield* fail(

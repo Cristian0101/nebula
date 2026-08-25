@@ -1228,7 +1228,7 @@ const make = Effect.gen(function* () {
         run.swarmPolicy?.qualityPolicy?.gates ??
         project.qualityPolicy?.gates ??
         []
-      ).filter((gate) => gate.enabled);
+      ).filter((gate) => gate.enabled && gate.scope !== "integration");
       if (enabledGates.length > 0 && snapshotRuns.length === 0) {
         yield* engine.dispatch({
           type: "task.quality.run",

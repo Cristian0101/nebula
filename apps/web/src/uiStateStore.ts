@@ -84,10 +84,17 @@ function sanitizeTerminalCenterState(value: unknown): Record<string, TerminalCen
           Boolean(entry[0]) && Number.isFinite(entry[1]?.x) && Number.isFinite(entry[1]?.y),
       ),
     );
+    const freeformPositions = Object.fromEntries(
+      Object.entries(candidate.freeformPositions ?? positions).filter(
+        (entry): entry is [string, CanvasPoint] =>
+          Boolean(entry[0]) && Number.isFinite(entry[1]?.x) && Number.isFinite(entry[1]?.y),
+      ),
+    );
     const viewport = candidate.viewport;
     result[projectId] = {
       visibleThreadIds: sanitizeStringArray(candidate.visibleThreadIds),
       positions,
+      freeformPositions,
       layout,
       viewport:
         viewport &&
@@ -508,6 +515,9 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
             visibleThreadIds: [...current.visibleThreadIds, threadId],
             selectedThreadId: threadId,
             positions: point ? { ...current.positions, [threadId]: point } : current.positions,
+            freeformPositions: point
+              ? { ...current.freeformPositions, [threadId]: point }
+              : current.freeformPositions,
           },
         },
       };
@@ -516,6 +526,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => {
       const current = projectTerminalState(state, projectId);
       const { [threadId]: _removed, ...positions } = current.positions;
+      const { [threadId]: _removedFreeform, ...freeformPositions } = current.freeformPositions;
       return {
         terminalCenterByProjectId: {
           ...state.terminalCenterByProjectId,
@@ -525,6 +536,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
             selectedThreadId:
               current.selectedThreadId === threadId ? null : current.selectedThreadId,
             positions,
+            freeformPositions,
           },
         },
       };
@@ -535,17 +547,31 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
       return {
         terminalCenterByProjectId: {
           ...state.terminalCenterByProjectId,
-          [projectId]: { ...current, positions: { ...current.positions, [threadId]: point } },
+          [projectId]: {
+            ...current,
+            positions: { ...current.positions, [threadId]: point },
+            freeformPositions:
+              current.layout === "freeform"
+                ? { ...current.freeformPositions, [threadId]: point }
+                : current.freeformPositions,
+          },
         },
       };
     }),
   setTerminalCenterLayout: (projectId, layout, positions) =>
     set((state) => {
       const current = projectTerminalState(state, projectId);
+      const freeformPositions =
+        current.layout === "freeform" ? current.positions : current.freeformPositions;
       return {
         terminalCenterByProjectId: {
           ...state.terminalCenterByProjectId,
-          [projectId]: { ...current, layout, positions: { ...positions } },
+          [projectId]: {
+            ...current,
+            layout,
+            positions: layout === "freeform" ? { ...freeformPositions } : { ...positions },
+            freeformPositions: { ...freeformPositions },
+          },
         },
       };
     }),

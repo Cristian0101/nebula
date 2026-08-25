@@ -214,7 +214,7 @@ function requiredQualityGateFailure(
 ): string | null {
   const project = readModel.projects.find((candidate) => candidate.id === task.projectId);
   const required = (project?.qualityPolicy?.gates ?? []).filter(
-    (gate) => gate.enabled && gate.required,
+    (gate) => gate.enabled && gate.required && gate.scope !== "integration",
   );
   for (const gate of required) {
     const passed = (task.qualityGateRuns ?? []).some(
@@ -2888,7 +2888,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Task '${command.taskId}' quality gates must target its current managed review snapshot.`,
         });
       }
-      const gates = (project.qualityPolicy?.gates ?? []).filter((gate) => gate.enabled);
+      const gates = (project.qualityPolicy?.gates ?? []).filter(
+        (gate) => gate.enabled && gate.scope !== "integration",
+      );
       const unapproved = gates.find((gate) => gate.approvedCommand !== gate.command);
       if (unapproved) {
         return yield* new OrchestrationCommandInvariantError({

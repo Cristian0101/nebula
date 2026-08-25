@@ -139,7 +139,7 @@ A Mission is the durable coordination boundary for a human-authored engineering 
 
 ### IMPLEMENTED v0.4 — Supervised deterministic execution
 
-A human-approved active Mission can start one durable supervised Run. The runner deterministically schedules canonical Tasks by dependency wave, Mission order, stable ID, Shared Resource availability, provider/ownership readiness, and a configured writable concurrency cap. It injects bounded prerequisite evidence, advances the existing completion/review pipeline, survives restart idempotently, and stops affected branches for attention. It does not rewrite plans, reroute providers, remediate failures, or start Integration.
+A human-approved active Mission can start one durable supervised Run. The runner deterministically schedules canonical Tasks by dependency wave, Mission order, stable ID, Shared Resource availability, provider/ownership readiness, and a configured writable concurrency cap. It injects bounded prerequisite evidence and advances the existing completion/review pipeline. In Supervised Swarm, a frozen policy may apply bounded retry, remediation, provider routing/replacement, and Automatic Integration. It never rewrites or approves plans, expands ownership, resolves conflicts, publishes, or merges `main` without a human boundary.
 
 Command Deck and Swarm Mode must use the same Task, Workspace, Provider, Session, Event, Diff, and Review primitives.
 
