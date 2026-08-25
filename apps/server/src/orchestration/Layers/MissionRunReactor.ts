@@ -1316,11 +1316,7 @@ const make = Effect.gen(function* () {
         if (task.ownership?.status === "pending") return;
         yield* engine.dispatch({
           type: "task.review.prepare",
-          commandId: commandId(
-            run,
-            task.id,
-            `review-prepare:${thread.latestTurn.turnId}:${task.ownership?.updatedAt ?? "pending"}`,
-          ),
+          commandId: commandId(run, task.id, `review-prepare:${thread.latestTurn.turnId}`),
           taskId: task.id,
           generation: "provider",
           createdAt: thread.latestTurn.completedAt ?? run.startedAt,

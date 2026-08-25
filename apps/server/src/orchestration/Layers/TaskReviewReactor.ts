@@ -53,6 +53,7 @@ type ReviewEvent = Extract<
       | "task.restore.undo-requested"
       | "task.independent-review.requested"
       | "task.review.findings-sent"
+      | "task.ownership-validated"
       | "thread.turn-diff-completed";
   }
 >;
@@ -74,10 +75,7 @@ export function shouldRecoverReviewPreparation(
   snapshotIsCurrent: boolean,
 ): boolean {
   return (
-    task.status === "active" &&
-    task.ownership?.status === "valid" &&
-    thread?.latestTurn?.state === "completed" &&
-    !snapshotIsCurrent
+    task.status === "active" && thread?.latestTurn?.state === "completed" && !snapshotIsCurrent
   );
 }
 
@@ -676,7 +674,30 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const interruptedReviewPreparations = new Set<string>();
+
   const process = Effect.fn("TaskReviewReactor.process")(function* (event: ReviewEvent) {
+    if (event.type === "task.ownership-validated") {
+      if (!interruptedReviewPreparations.delete(event.payload.taskId)) return;
+      if (event.payload.status !== "valid") return;
+      yield* prepare(event.payload.taskId, "provider").pipe(
+        Effect.catch((error) =>
+          engine.dispatch({
+            type: "task.review.prepare-failed",
+            commandId: CommandId.make(
+              `server:task-review-recovery-prepare-failed:${event.eventId}`,
+            ),
+            taskId: event.payload.taskId,
+            failureReason:
+              typeof error === "object" && error !== null && "message" in error
+                ? String(error.message)
+                : "Task review snapshot recovery failed.",
+            createdAt: event.occurredAt,
+          }),
+        ),
+      );
+      return;
+    }
     if (event.type === "task.review.prepare-requested") {
       yield* prepare(event.payload.taskId, event.payload.generation).pipe(
         Effect.catch((error) =>
@@ -757,23 +778,27 @@ const make = Effect.gen(function* () {
       }
       const thread = model.threads.find((candidate) => candidate.id === task.threadId);
       if (shouldRecoverReviewPreparation(task, thread, snapshotIsCurrent)) {
-        const recoveredAt = thread?.latestTurn?.completedAt ?? (yield* now);
-        yield* prepare(task.id, "provider").pipe(
-          Effect.catch((error) =>
-            engine.dispatch({
-              type: "task.review.prepare-failed",
-              commandId: CommandId.make(
-                `server:task-review-startup-prepare-failed:${task.id}:${thread?.latestTurn?.turnId ?? "no-turn"}`,
-              ),
-              taskId: task.id,
-              failureReason:
-                typeof error === "object" && error !== null && "message" in error
-                  ? String(error.message)
-                  : "Task review snapshot recovery failed.",
-              createdAt: recoveredAt,
-            }),
-          ),
-        );
+        if (task.ownership?.status === "pending") {
+          interruptedReviewPreparations.add(task.id);
+        } else if (task.ownership?.status === "valid") {
+          const recoveredAt = thread?.latestTurn?.completedAt ?? (yield* now);
+          yield* prepare(task.id, "provider").pipe(
+            Effect.catch((error) =>
+              engine.dispatch({
+                type: "task.review.prepare-failed",
+                commandId: CommandId.make(
+                  `server:task-review-startup-prepare-failed:${task.id}:${thread?.latestTurn?.turnId ?? "no-turn"}`,
+                ),
+                taskId: task.id,
+                failureReason:
+                  typeof error === "object" && error !== null && "message" in error
+                    ? String(error.message)
+                    : "Task review snapshot recovery failed.",
+                createdAt: recoveredAt,
+              }),
+            ),
+          );
+        }
       }
       if (task.restore?.status === "requested") {
         yield* restore(task.id, task.restore.id).pipe(
@@ -818,6 +843,7 @@ const make = Effect.gen(function* () {
           event.type === "task.restore.undo-requested" ||
           event.type === "task.independent-review.requested" ||
           event.type === "task.review.findings-sent" ||
+          event.type === "task.ownership-validated" ||
           event.type === "thread.turn-diff-completed"
         ) {
           return worker.enqueue(event as ReviewEvent);
