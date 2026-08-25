@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { parseGeneratedTaskHandoff } from "./taskHandoff.ts";
+import { parseGeneratedTaskHandoff, parseStructuredTaskHandoffValue } from "./taskHandoff.ts";
 
 describe("parseGeneratedTaskHandoff", () => {
   it("normalizes provider markdown into the canonical handoff fields", () => {
@@ -23,6 +23,36 @@ describe("parseGeneratedTaskHandoff", () => {
       migrations: ["Migration 044"],
       knownRisks: ["Provider claims are reported"],
       followUps: ["Add Reviewer later"],
+    });
+  });
+});
+
+describe("parseStructuredTaskHandoffValue", () => {
+  it("normalizes provider-reported tests without inventing verified evidence", () => {
+    expect(
+      parseStructuredTaskHandoffValue({
+        summary: "Added notification preference storage.",
+        testsRun: [{ command: "npm test", result: "Provider reports that it passed." }],
+        assumptions: ["The store remains fixture-local."],
+        interfaceChanges: ["Added readPreferences."],
+        migrations: [],
+        knownRisks: [],
+        followUps: [],
+      }),
+    ).toEqual({
+      summary: "Added notification preference storage.",
+      testsRun: [
+        {
+          command: "npm test",
+          result: "Provider reports that it passed.",
+          evidence: "reported",
+        },
+      ],
+      assumptions: ["The store remains fixture-local."],
+      interfaceChanges: ["Added readPreferences."],
+      migrations: [],
+      knownRisks: [],
+      followUps: [],
     });
   });
 });

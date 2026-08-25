@@ -29,7 +29,12 @@ import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { TaskReviewReactor, type TaskReviewReactorShape } from "../Services/TaskReviewReactor.ts";
 import { TaskChangeSetQuery } from "../TaskChangeSetQuery.ts";
-import { parseGeneratedTaskHandoff } from "../taskHandoff.ts";
+import {
+  buildStructuredTaskHandoffPrompt,
+  parseGeneratedTaskHandoff,
+  parseStructuredTaskHandoffValue,
+  StructuredTaskHandoffGenerationOutput,
+} from "../taskHandoff.ts";
 import {
   buildIndependentReviewPrompt,
   parseStructuredReviewOutput,
@@ -211,27 +216,22 @@ const make = Effect.gen(function* () {
         generationError = "The Task thread was unavailable for provider handoff generation.";
         resolvedGeneration = "manual";
       } else {
-        const generated = yield* textGeneration
-          .generatePrContent({
-            cwd: captured.changeSet.workspace,
-            baseBranch: captured.changeSet.baseCommit,
-            headBranch: captured.changeSet.branch,
-            commitSummary: `Task: ${task.title}\nObjective: ${task.objective}`,
-            diffSummary: captured.changeSet.files
-              .map((file) => `${file.changeType}: ${file.path}`)
-              .join("\n"),
-            diffPatch:
-              "The immutable Task snapshot is the factual source. Do not invent tests or outcomes.",
-            changeRequestTemplate:
-              "Write a structured engineering handoff with sections: Summary, Tests run, Assumptions, Interface changes, Migrations, Known risks, Follow-ups. Clearly label unverified claims as reported. Do not invent commands or results.",
-            modelSelection: thread.modelSelection,
-          })
-          .pipe(Effect.result);
-        if (generated._tag === "Success") {
-          const narrative = parseGeneratedTaskHandoff(
-            generated.success.title,
-            generated.success.body,
-          );
+        const generated = textGeneration.generateStructured
+          ? yield* textGeneration
+              .generateStructured({
+                cwd: captured.changeSet.workspace,
+                prompt: buildStructuredTaskHandoffPrompt({
+                  title: task.title,
+                  objective: task.objective,
+                  files: captured.changeSet.files,
+                }),
+                outputSchema: StructuredTaskHandoffGenerationOutput,
+                modelSelection: thread.modelSelection,
+              })
+              .pipe(Effect.result)
+          : null;
+        if (generated?._tag === "Success") {
+          const narrative = parseStructuredTaskHandoffValue(generated.success);
           summary = narrative.summary;
           testsRun = narrative.testsRun;
           assumptions = narrative.assumptions;
@@ -240,8 +240,36 @@ const make = Effect.gen(function* () {
           knownRisks = narrative.knownRisks;
           followUps = narrative.followUps;
         } else {
-          generationError = generated.failure.detail;
-          resolvedGeneration = "manual";
+          const legacy = yield* textGeneration
+            .generatePrContent({
+              cwd: captured.changeSet.workspace,
+              baseBranch: captured.changeSet.baseCommit,
+              headBranch: captured.changeSet.branch,
+              commitSummary: `Task: ${task.title}\nObjective: ${task.objective}`,
+              diffSummary: captured.changeSet.files
+                .map((file) => `${file.changeType}: ${file.path}`)
+                .join("\n"),
+              diffPatch:
+                "The immutable Task snapshot is the factual source. Do not invent tests or outcomes.",
+              changeRequestTemplate:
+                "Write a structured engineering handoff with sections: Summary, Tests run, Assumptions, Interface changes, Migrations, Known risks, Follow-ups. Clearly label unverified claims as reported. Do not invent commands or results.",
+              modelSelection: thread.modelSelection,
+            })
+            .pipe(Effect.result);
+          if (legacy._tag === "Success") {
+            const narrative = parseGeneratedTaskHandoff(legacy.success.title, legacy.success.body);
+            summary = narrative.summary;
+            testsRun = narrative.testsRun;
+            assumptions = narrative.assumptions;
+            interfaceChanges = narrative.interfaceChanges;
+            migrations = narrative.migrations;
+            knownRisks = narrative.knownRisks;
+            followUps = narrative.followUps;
+          } else {
+            generationError =
+              generated?._tag === "Failure" ? generated.failure.detail : legacy.failure.detail;
+            resolvedGeneration = "manual";
+          }
         }
       }
     }
