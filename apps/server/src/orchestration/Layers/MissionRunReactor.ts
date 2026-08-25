@@ -45,6 +45,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { MissionRunReactor, type MissionRunReactorShape } from "../Services/MissionRunReactor.ts";
@@ -194,8 +195,8 @@ export function missionProviderTurnInFlight(thread: {
 }
 
 export function reviewSnapshotCoversLatestTurn(
-  task: { readonly reviewSnapshot?: { readonly capturedAt: string } | null },
-  thread: { readonly latestTurn?: { readonly requestedAt: string } | null },
+  task: { readonly reviewSnapshot?: { readonly capturedAt: string } | null | undefined },
+  thread: { readonly latestTurn?: { readonly requestedAt: string } | null | undefined },
 ): boolean {
   const snapshot = task.reviewSnapshot;
   const latestTurn = thread.latestTurn;
@@ -287,6 +288,7 @@ const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery;
   const providers = yield* ProviderInstanceRegistry;
+  const providerSnapshots = yield* ProviderRegistry;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
   const read = () => snapshots.getCommandReadModel();
@@ -1834,6 +1836,10 @@ const make = Effect.gen(function* () {
     yield* forkParkedStream(engine.streamDomainEvents, (event) =>
       RELEVANT_EVENTS.has(event.type) ? worker.enqueue(event) : Effect.void,
     );
+    // Provider readiness changes are not orchestration domain events. Wake the
+    // scheduler when a provider finishes probing so a Task held at the
+    // provider-unavailable boundary resumes without a manual Mission action.
+    yield* forkParkedStream(providerSnapshots.streamChanges, () => worker.enqueue(null));
     yield* forkParked(worker.enqueue(null));
   });
 
