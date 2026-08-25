@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { missionProviderTurnInFlight } from "./MissionRunReactor.ts";
+import {
+  activeReplacementOwnsProviderTurn,
+  missionProviderTurnInFlight,
+} from "./MissionRunReactor.ts";
 
 describe("MissionRunReactor recovery", () => {
   it("does not start a second remediation while the provider turn is in flight", () => {
@@ -22,5 +25,21 @@ describe("MissionRunReactor recovery", () => {
         latestTurn: { state: "completed" },
       }),
     ).toBe(false);
+  });
+
+  it("keeps an in-flight replacement out of the original Task start path", () => {
+    expect(
+      activeReplacementOwnsProviderTurn(
+        {
+          attempts: [
+            {
+              kind: "replacement",
+              status: "active",
+            },
+          ],
+        },
+        { session: { status: "starting" }, latestTurn: null },
+      ),
+    ).toBe(true);
   });
 });

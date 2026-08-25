@@ -192,6 +192,29 @@ export function missionProviderTurnInFlight(thread: {
   );
 }
 
+export function activeReplacementOwnsProviderTurn(
+  state: {
+    readonly attempts: ReadonlyArray<{
+      readonly kind: string;
+      readonly status: string;
+    }>;
+  },
+  thread:
+    | {
+        readonly session: { readonly status: string } | null;
+        readonly latestTurn: { readonly state: string } | null;
+      }
+    | undefined,
+): boolean {
+  return (
+    thread !== undefined &&
+    state.attempts.some(
+      (attempt) => attempt.kind === "replacement" && attempt.status === "active",
+    ) &&
+    missionProviderTurnInFlight(thread)
+  );
+}
+
 const activeTaskAttention = (
   task: OrchestrationTask,
   thread: OrchestrationThread | undefined,
@@ -598,10 +621,10 @@ const make = Effect.gen(function* () {
     });
     yield* engine.dispatch({
       type: "thread.activity.append",
-      commandId: commandId(run, task.id, "context-provenance"),
+      commandId: commandId(run, task.id, `context-provenance:${thread.id}`),
       threadId: thread.id,
       activity: {
-        id: EventId.make(`mission-run:${run.id}:task:${task.id}:context`),
+        id: EventId.make(`mission-run:${run.id}:task:${task.id}:context:${thread.id}`),
         tone: "info",
         kind: "mission.context.injected",
         summary: "Mission context injected by Nebula",
@@ -619,10 +642,10 @@ const make = Effect.gen(function* () {
     });
     yield* engine.dispatch({
       type: "thread.turn.start",
-      commandId: commandId(run, task.id, "builder-turn"),
+      commandId: commandId(run, task.id, `builder-turn:${thread.id}`),
       threadId: thread.id,
       message: {
-        messageId: MessageId.make(`mission-run:${run.id}:task:${task.id}:message`),
+        messageId: MessageId.make(`mission-run:${run.id}:task:${task.id}:message:${thread.id}`),
         role: "user",
         text: [context.text, ownershipContext(task), resourceContext(project, task)].join("\n\n"),
         attachments: [],
@@ -795,10 +818,11 @@ const make = Effect.gen(function* () {
     const { run, model, task, thread } = input;
     const state = (run.taskRecovery ?? []).find((candidate) => candidate.taskId === task.id);
     if (!state) return false;
-    if (thread && missionProviderTurnInFlight(thread)) return false;
     const activeReplacement = state.attempts.findLast(
       (attempt) => attempt.kind === "replacement" && attempt.status === "active",
     );
+    if (activeReplacementOwnsProviderTurn(state, thread)) return true;
+    if (thread && missionProviderTurnInFlight(thread)) return false;
     const replacementNeedsContinuation =
       activeReplacement !== undefined &&
       (!thread ||
