@@ -44,6 +44,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
+  HouseIcon,
   LayoutDashboardIcon,
   MessageSquareIcon,
   PinIcon,
@@ -1993,6 +1994,20 @@ export default function Sidebar() {
         setOpenMobile(false);
       }
       void router.navigate({
+        to: "/projects/$projectKey/settings",
+        params: { projectKey: projectGroup.projectKey },
+      });
+    },
+    [isMobile, router, setOpenMobile],
+  );
+
+  const handleProjectHome = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setProjectScopeMenuOpen(false);
+      if (isMobile) setOpenMobile(false);
+      void router.navigate({
         to: "/projects/$projectKey",
         params: { projectKey: projectGroup.projectKey },
       });
@@ -3419,6 +3434,19 @@ export default function Sidebar() {
           // Lifted above the stage backdrop, whose fade bleeds below the
           // header and would otherwise paint across the search row's outline.
           <SidebarGroup className="relative z-[1] gap-1 p-[var(--sidebar-content-inset)]">
+            <SidebarMenuButton
+              type="button"
+              onClick={() => {
+                if (isMobile) setOpenMobile(false);
+                void router.navigate({ to: "/terminal-center" });
+              }}
+              className="mb-1 border border-sidebar-border bg-sidebar-accent/35 text-sidebar-foreground"
+              aria-label="Open Global Terminal Center"
+            >
+              <TerminalIcon />
+              <span className="min-w-0 flex-1 truncate">Terminal Center</span>
+              <span className="text-[10px] text-sidebar-muted-foreground">Global</span>
+            </SidebarMenuButton>
             <div className="flex items-center gap-1">
               <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
                 <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
@@ -3570,9 +3598,20 @@ export default function Sidebar() {
                             <Button
                               size="icon-xs"
                               variant="ghost-muted"
+                              aria-label={`Open Project Home for ${project.displayName}`}
+                              title={`Project Home for ${project.displayName}`}
+                              className="ml-auto size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={(event) => handleProjectHome(event, project)}
+                            >
+                              <HouseIcon className="size-3.5" />
+                            </Button>
+                            <Button
+                              size="icon-xs"
+                              variant="ghost-muted"
                               aria-label={`Open Command Deck for ${project.displayName}`}
                               title={`Command Deck for ${project.displayName}`}
-                              className="ml-auto size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
+                              className="size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
                               onPointerDown={(event) => event.stopPropagation()}
                               onClick={(event) => {
                                 handleCommandDeck(event, project);

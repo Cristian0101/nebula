@@ -2,6 +2,8 @@
 
 Supervised Swarm turns an approved Architect Mission into one deterministic run. Open **Command Deck → Missions**, activate the approved Mission, choose **Supervised Swarm**, review the frozen launch policy, then choose **Run Swarm**.
 
+The shortest entry path is **Project Home → Run a Swarm**. This opens Command Deck directly in Missions so you can describe the objective to Architect, review the proposed Task graph, explicitly approve it, and then run it. The empty Tasks state offers the same **Plan with Architect** action; manual Task creation remains available as a secondary path.
+
 The launch summary records concurrency, routing, retry and remediation budgets, independent review, automatic Integration, and the permanent rule that Nebula never merges `main`. Once started, the policy is immutable. If the Project quality or review policy changes, the Run stops for attention; stop it and launch a new revision to adopt the change.
 
 Nebula schedules the approved DAG, injects bounded prerequisite evidence, validates ownership and Shared Resources, executes quality gates and independent review, uses bounded recovery, and unlocks later waves without manual Task-start clicks. Terminal Center exposes the live provider Threads using the same canonical Mission flow.

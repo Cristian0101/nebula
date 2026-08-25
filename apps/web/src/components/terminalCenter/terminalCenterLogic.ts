@@ -9,6 +9,7 @@ import { computeMissionPlan } from "@t3tools/shared/missionGraph";
 
 export const TERMINAL_CENTER_LAYOUTS = [
   "grid",
+  "project-columns",
   "provider-columns",
   "status-lanes",
   "mission-flow",
@@ -51,8 +52,28 @@ export const DEFAULT_TERMINAL_CENTER_STATE: TerminalCenterProjectState = {
   quickLaunch: null,
 };
 
+export const FOCUSED_TERMINAL_SHELL_CLASS = "relative h-dvh min-h-0 overflow-hidden bg-background";
+
+export function terminalCenterKeyboardAction(input: {
+  readonly key: string;
+  readonly selectedThreadId: string | null;
+  readonly focused: boolean;
+  readonly targetIsFormControl: boolean;
+}): "focus" | "exit" | null {
+  if (input.key === "Escape" && input.focused) return "exit";
+  if (
+    input.key === "Enter" &&
+    input.selectedThreadId !== null &&
+    !input.focused &&
+    !input.targetIsFormControl
+  )
+    return "focus";
+  return null;
+}
+
 export interface TerminalCanvasNode {
   readonly threadId: ThreadId;
+  readonly projectId: string;
   readonly providerId: string;
   readonly status: "ready" | "working" | "attention";
   readonly taskId: string | null;
@@ -142,6 +163,7 @@ export function arrangeTerminalNodes(input: {
   if (layout === "freeform") return { ...input.currentPositions };
   if (layout === "grid") return grid(nodes, false);
   if (layout === "compact") return grid(nodes, true);
+  if (layout === "project-columns") return columns(nodes, (node) => node.projectId);
   if (layout === "provider-columns") return columns(nodes, (node) => node.providerId);
   if (layout === "status-lanes")
     return columns(

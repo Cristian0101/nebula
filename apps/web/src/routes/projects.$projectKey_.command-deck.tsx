@@ -7,7 +7,13 @@ const CommandDeckPage = lazy(() =>
   })),
 );
 
+export interface CommandDeckSearch {
+  readonly mode?: "swarm";
+}
+
 export const Route = createFileRoute("/projects/$projectKey_/command-deck")({
+  validateSearch: (search: Record<string, unknown>): CommandDeckSearch =>
+    search.mode === "swarm" ? { mode: "swarm" } : {},
   beforeLoad: async ({ context }) => {
     if (
       context.authGateState.status !== "authenticated" &&
@@ -21,6 +27,7 @@ export const Route = createFileRoute("/projects/$projectKey_/command-deck")({
 
 function CommandDeckRoute() {
   const { projectKey } = Route.useParams();
+  const { mode } = Route.useSearch();
   return (
     <Suspense
       fallback={
@@ -29,7 +36,10 @@ function CommandDeckRoute() {
         </div>
       }
     >
-      <CommandDeckPage projectKey={projectKey} />
+      <CommandDeckPage
+        projectKey={projectKey}
+        initialSection={mode === "swarm" ? "missions" : "tasks"}
+      />
     </Suspense>
   );
 }

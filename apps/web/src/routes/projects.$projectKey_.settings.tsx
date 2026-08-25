@@ -1,8 +1,8 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { ProjectLaunchpadPage } from "../components/project/ProjectLaunchpad";
+import { ProjectSettingsPage } from "../components/settings/ProjectSettingsPanel";
 
-export const Route = createFileRoute("/projects/$projectKey")({
+export const Route = createFileRoute("/projects/$projectKey_/settings")({
   beforeLoad: async ({ context }) => {
     if (
       context.authGateState.status !== "authenticated" &&
@@ -11,5 +11,5 @@ export const Route = createFileRoute("/projects/$projectKey")({
       throw redirect({ to: "/pair", replace: true });
     }
   },
-  component: () => <ProjectLaunchpadPage projectKey={Route.useParams().projectKey} />,
+  component: () => <ProjectSettingsPage projectKey={Route.useParams().projectKey} />,
 });

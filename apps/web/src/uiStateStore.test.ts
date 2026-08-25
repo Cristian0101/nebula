@@ -32,6 +32,30 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
 }
 
 describe("uiStateStore pure functions", () => {
+  it("keeps global and project Terminal Center canvases independent", () => {
+    const globalKey = "nebula:global-terminal-center";
+    const projectKey = "project-one";
+    useUiStateStore.getState().setTerminalCenterState(globalKey, {
+      ...DEFAULT_TERMINAL_CENTER_STATE,
+      visibleThreadIds: ["global-thread"],
+      layout: "project-columns",
+    });
+    useUiStateStore.getState().setTerminalCenterState(projectKey, {
+      ...DEFAULT_TERMINAL_CENTER_STATE,
+      visibleThreadIds: ["project-thread"],
+      layout: "grid",
+    });
+
+    expect(useUiStateStore.getState().terminalCenterByProjectId[globalKey]).toMatchObject({
+      visibleThreadIds: ["global-thread"],
+      layout: "project-columns",
+    });
+    expect(useUiStateStore.getState().terminalCenterByProjectId[projectKey]).toMatchObject({
+      visibleThreadIds: ["project-thread"],
+      layout: "grid",
+    });
+  });
+
   it("restores dragged Freeform positions after using an arranged layout", () => {
     const projectId = "terminal-project";
     const threadId = "terminal-thread";
