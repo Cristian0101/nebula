@@ -393,7 +393,12 @@ const make = Effect.gen(function* () {
       reportedTests: task.handoff.testsRun,
       quality: (task.qualityGateRuns ?? [])
         .filter((run) => run.snapshotId === task.reviewSnapshot!.id)
-        .map((run) => ({ label: run.label, status: run.status, exitCode: run.exitCode })),
+        .map((run) => ({
+          label: run.label,
+          command: run.command,
+          status: run.status,
+          exitCode: run.exitCode,
+        })),
     });
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
