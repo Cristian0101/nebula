@@ -6,6 +6,7 @@ import {
   missionProviderTurnInFlight,
   providerSupportsStructuredReview,
   reviewSnapshotCoversLatestTurn,
+  shouldReconcileMissionRunEventType,
 } from "./MissionRunReactor.ts";
 
 describe("MissionRunReactor recovery", () => {
@@ -74,5 +75,10 @@ describe("MissionRunReactor recovery", () => {
         { latestTurn: { requestedAt: "2026-08-25T13:53:26.551Z" } },
       ),
     ).toBe(true);
+  });
+
+  it("does not wake the scheduler from its own reconciliation output", () => {
+    expect(shouldReconcileMissionRunEventType("mission.run.reconciled")).toBe(false);
+    expect(shouldReconcileMissionRunEventType("integration.updated")).toBe(true);
   });
 });

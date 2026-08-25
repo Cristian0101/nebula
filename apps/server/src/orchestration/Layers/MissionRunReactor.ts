@@ -55,7 +55,6 @@ const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "mission.run.started",
   "mission.run.resumed",
   "mission.run.paused",
-  "mission.run.reconciled",
   "mission.updated",
   "mission.task-added",
   "mission.task-removed",
@@ -89,6 +88,9 @@ const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "integration.created",
   "integration.updated",
 ]);
+
+export const shouldReconcileMissionRunEventType = (eventType: OrchestrationEvent["type"]) =>
+  RELEVANT_EVENTS.has(eventType);
 
 const decisionHash = (value: string) => {
   let hash = 2_166_136_261;
@@ -1834,7 +1836,7 @@ const make = Effect.gen(function* () {
 
   const start: MissionRunReactorShape["start"] = Effect.fn("MissionRunReactor.start")(function* () {
     yield* forkParkedStream(engine.streamDomainEvents, (event) =>
-      RELEVANT_EVENTS.has(event.type) ? worker.enqueue(event) : Effect.void,
+      shouldReconcileMissionRunEventType(event.type) ? worker.enqueue(event) : Effect.void,
     );
     // Provider readiness changes are not orchestration domain events. Wake the
     // scheduler when a provider finishes probing so a Task held at the
