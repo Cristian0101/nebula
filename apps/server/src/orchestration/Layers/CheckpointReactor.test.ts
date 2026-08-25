@@ -546,6 +546,7 @@ describe("CheckpointReactor", () => {
       payload: { state: "completed" },
     });
 
+    await waitForEvent(harness.engine, (event) => event.type === "thread.turn-diff-completed");
     await harness.drain();
 
     expect(gitStatusRefreshCalls).toEqual([harness.cwd]);

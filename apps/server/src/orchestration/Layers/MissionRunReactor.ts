@@ -43,10 +43,10 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
 
 import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
-import { forkParked } from "../../serverActivation.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { MissionRunReactor, type MissionRunReactorShape } from "../Services/MissionRunReactor.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -55,7 +55,6 @@ const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "mission.run.started",
   "mission.run.resumed",
   "mission.run.paused",
-  "mission.run.reconciled",
   "mission.updated",
   "mission.task-added",
   "mission.task-removed",
@@ -89,6 +88,9 @@ const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "integration.created",
   "integration.updated",
 ]);
+
+export const shouldReconcileMissionRunEventType = (eventType: OrchestrationEvent["type"]) =>
+  RELEVANT_EVENTS.has(eventType);
 
 const decisionHash = (value: string) => {
   let hash = 2_166_136_261;
@@ -194,6 +196,20 @@ export function missionProviderTurnInFlight(thread: {
   );
 }
 
+export function reviewSnapshotCoversLatestTurn(
+  task: { readonly reviewSnapshot?: { readonly capturedAt: string } | null | undefined },
+  thread: { readonly latestTurn?: { readonly requestedAt: string } | null | undefined },
+): boolean {
+  const snapshot = task.reviewSnapshot;
+  const latestTurn = thread.latestTurn;
+  return snapshot !== null &&
+    snapshot !== undefined &&
+    latestTurn !== null &&
+    latestTurn !== undefined
+    ? snapshot.capturedAt.localeCompare(latestTurn.requestedAt) >= 0
+    : snapshot !== null && snapshot !== undefined;
+}
+
 export function activeReplacementOwnsProviderTurn(
   state: {
     readonly attempts: ReadonlyArray<{
@@ -274,6 +290,7 @@ const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery;
   const providers = yield* ProviderInstanceRegistry;
+  const providerSnapshots = yield* ProviderRegistry;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
   const read = () => snapshots.getCommandReadModel();
@@ -865,7 +882,7 @@ const make = Effect.gen(function* () {
     }
     if (!thread) return false;
     const gate = requiredGateFailure(task);
-    const review = currentReview(task);
+    const review = reviewSnapshotCoversLatestTurn(task, thread) ? currentReview(task) : null;
     const providerError =
       thread.latestTurn?.state === "error" || thread.session?.status === "error"
         ? (thread.session?.lastError ?? "Provider execution failed.")
@@ -1818,12 +1835,14 @@ const make = Effect.gen(function* () {
   );
 
   const start: MissionRunReactorShape["start"] = Effect.fn("MissionRunReactor.start")(function* () {
-    yield* forkParked(
-      Stream.runForEach(engine.streamDomainEvents, (event) =>
-        RELEVANT_EVENTS.has(event.type) ? worker.enqueue(event) : Effect.void,
-      ),
+    yield* forkParkedStream(engine.streamDomainEvents, (event) =>
+      shouldReconcileMissionRunEventType(event.type) ? worker.enqueue(event) : Effect.void,
     );
-    yield* worker.enqueue(null);
+    // Provider readiness changes are not orchestration domain events. Wake the
+    // scheduler when a provider finishes probing so a Task held at the
+    // provider-unavailable boundary resumes without a manual Mission action.
+    yield* forkParkedStream(providerSnapshots.streamChanges, () => worker.enqueue(null));
+    yield* forkParked(worker.enqueue(null));
   });
 
   return { start, drain: worker.drain } satisfies MissionRunReactorShape;

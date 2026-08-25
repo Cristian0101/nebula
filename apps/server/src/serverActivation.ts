@@ -2,6 +2,7 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 
 export class ServerActivation extends Context.Reference<Effect.Effect<void> | undefined>(
   "t3/serverActivation",
@@ -23,4 +24,18 @@ export const forkParked = <A, E, R>(
       Deferred.succeed(parked, undefined).pipe(Effect.andThen(activation), Effect.andThen(effect)),
     );
     yield* Deferred.await(parked);
+  });
+
+/**
+ * Subscribes to a hot stream before activation, then parks processing until the
+ * runtime is active. Startup reconciliation can therefore publish work without
+ * racing subscribers that would otherwise attach only after activation.
+ */
+export const forkParkedStream = <A, E, R, A2, E2, R2>(
+  stream: Stream.Stream<A, E, R>,
+  process: (value: A) => Effect.Effect<A2, E2, R2>,
+): Effect.Effect<void, never, Scope.Scope | R | R2> =>
+  Effect.gen(function* () {
+    const queue = yield* Stream.toQueue(stream, { capacity: "unbounded" });
+    yield* forkParked(Stream.runForEach(Stream.fromQueue(queue), process));
   });

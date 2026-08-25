@@ -18,11 +18,10 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
 
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
-import { forkParked } from "../../serverActivation.ts";
+import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import * as TextGeneration from "../../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -834,24 +833,22 @@ const make = Effect.gen(function* () {
   );
 
   const start: TaskReviewReactorShape["start"] = Effect.fn("TaskReviewReactor.start")(function* () {
-    yield* forkParked(
-      Stream.runForEach(engine.streamDomainEvents, (event) => {
-        if (
-          event.type === "task.review.prepare-requested" ||
-          event.type === "task.completion.freshness-requested" ||
-          event.type === "task.restore.requested" ||
-          event.type === "task.restore.undo-requested" ||
-          event.type === "task.independent-review.requested" ||
-          event.type === "task.review.findings-sent" ||
-          event.type === "task.ownership-validated" ||
-          event.type === "thread.turn-diff-completed"
-        ) {
-          return worker.enqueue(event as ReviewEvent);
-        }
-        return Effect.void;
-      }),
-    );
-    yield* reconcile;
+    yield* forkParkedStream(engine.streamDomainEvents, (event) => {
+      if (
+        event.type === "task.review.prepare-requested" ||
+        event.type === "task.completion.freshness-requested" ||
+        event.type === "task.restore.requested" ||
+        event.type === "task.restore.undo-requested" ||
+        event.type === "task.independent-review.requested" ||
+        event.type === "task.review.findings-sent" ||
+        event.type === "task.ownership-validated" ||
+        event.type === "thread.turn-diff-completed"
+      ) {
+        return worker.enqueue(event as ReviewEvent);
+      }
+      return Effect.void;
+    });
+    yield* forkParked(reconcile);
   });
 
   return { start, drain: worker.drain } satisfies TaskReviewReactorShape;

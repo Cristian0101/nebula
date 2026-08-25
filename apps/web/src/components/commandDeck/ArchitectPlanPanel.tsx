@@ -281,7 +281,7 @@ export function ArchitectPlanPanel({
               {selected.validation?.errors.map((item) => (
                 <p
                   role="alert"
-                  key={`${item.code}:${item.taskKey ?? ""}`}
+                  key={`${item.code}:${item.taskKey ?? ""}:${item.message}`}
                   className="flex gap-1 text-xs text-destructive"
                 >
                   <TriangleAlertIcon className="size-3.5" />
@@ -290,7 +290,7 @@ export function ArchitectPlanPanel({
               ))}
               {selected.validation?.warnings.map((item) => (
                 <p
-                  key={`${item.code}:${item.taskKey ?? ""}`}
+                  key={`${item.code}:${item.taskKey ?? ""}:${item.message}`}
                   className="flex gap-1 text-xs text-warning"
                 >
                   <TriangleAlertIcon className="size-3.5" />

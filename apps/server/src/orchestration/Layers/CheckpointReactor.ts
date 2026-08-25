@@ -17,7 +17,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as PlatformError from "effect/PlatformError";
-import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 
@@ -29,7 +28,7 @@ import {
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { CheckpointReactor, type CheckpointReactorShape } from "../Services/CheckpointReactor.ts";
-import { forkParked } from "../../serverActivation.ts";
+import { forkParkedStream } from "../../serverActivation.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
@@ -913,28 +912,24 @@ const make = Effect.gen(function* () {
   const worker = yield* makeDrainableWorker(processInputSafely);
 
   const start: CheckpointReactorShape["start"] = Effect.fn("start")(function* () {
-    yield* forkParked(
-      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-        if (
-          event.type !== "thread.turn-start-requested" &&
-          event.type !== "thread.message-sent" &&
-          event.type !== "thread.checkpoint-revert-requested" &&
-          event.type !== "thread.turn-diff-completed"
-        ) {
-          return Effect.void;
-        }
-        return worker.enqueue({ source: "domain", event });
-      }),
-    );
+    yield* forkParkedStream(orchestrationEngine.streamDomainEvents, (event) => {
+      if (
+        event.type !== "thread.turn-start-requested" &&
+        event.type !== "thread.message-sent" &&
+        event.type !== "thread.checkpoint-revert-requested" &&
+        event.type !== "thread.turn-diff-completed"
+      ) {
+        return Effect.void;
+      }
+      return worker.enqueue({ source: "domain", event });
+    });
 
-    yield* forkParked(
-      Stream.runForEach(providerService.streamEvents, (event) => {
-        if (event.type !== "turn.started" && event.type !== "turn.completed") {
-          return Effect.void;
-        }
-        return worker.enqueue({ source: "runtime", event });
-      }),
-    );
+    yield* forkParkedStream(providerService.streamEvents, (event) => {
+      if (event.type !== "turn.started" && event.type !== "turn.completed") {
+        return Effect.void;
+      }
+      return worker.enqueue({ source: "runtime", event });
+    });
   });
 
   return {

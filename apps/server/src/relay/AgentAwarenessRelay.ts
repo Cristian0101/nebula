@@ -27,7 +27,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import type * as Scope from "effect/Scope";
-import * as Stream from "effect/Stream";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
@@ -45,7 +44,7 @@ import { getOrCreateEnvironmentKeyPairFromSecretStore } from "../cloud/environme
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { forkParked } from "../serverActivation.ts";
+import { forkParked, forkParkedStream } from "../serverActivation.ts";
 
 export class AgentAwarenessRelay extends Context.Service<
   AgentAwarenessRelay,
@@ -606,29 +605,27 @@ export const make = Effect.gen(function* () {
           Effect.andThen(publishActiveThreadsOnceWhenConfigured(startupState !== "enabled")),
         ),
       );
-      yield* forkParked(
-        Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-          const threadId = eventThreadId(event);
-          if (threadId === null) {
-            return Effect.logDebug("agent activity publishing ignored event without thread id", {
-              eventType: event.type,
-            });
-          }
-          if (!shouldPublishAgentAwarenessEvent(event)) {
-            return Effect.logDebug(
-              "agent activity publishing ignored event without activity changes",
-              {
-                eventType: event.type,
-                threadId,
-              },
-            );
-          }
-          return Effect.logDebug("agent activity publishing queued thread publish", {
+      yield* forkParkedStream(orchestrationEngine.streamDomainEvents, (event) => {
+        const threadId = eventThreadId(event);
+        if (threadId === null) {
+          return Effect.logDebug("agent activity publishing ignored event without thread id", {
             eventType: event.type,
-            threadId,
-          }).pipe(Effect.andThen(worker.enqueue(threadId)));
-        }),
-      );
+          });
+        }
+        if (!shouldPublishAgentAwarenessEvent(event)) {
+          return Effect.logDebug(
+            "agent activity publishing ignored event without activity changes",
+            {
+              eventType: event.type,
+              threadId,
+            },
+          );
+        }
+        return Effect.logDebug("agent activity publishing queued thread publish", {
+          eventType: event.type,
+          threadId,
+        }).pipe(Effect.andThen(worker.enqueue(threadId)));
+      });
     },
   );
 

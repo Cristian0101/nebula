@@ -9,7 +9,10 @@ import * as Path from "effect/Path";
 import * as ServerConfig from "../../config.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
-import { taskNeedsOwnershipReconciliation } from "./TaskOwnershipReactor.ts";
+import {
+  taskNeedsCompletionRecovery,
+  taskNeedsOwnershipReconciliation,
+} from "./TaskOwnershipReactor.ts";
 import { mergeUntrackedChanges, parseNameStatus } from "../taskChangeSet.ts";
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
@@ -63,6 +66,49 @@ it("revalidates active ownership-managed ready workspaces after restart", () => 
   } as unknown as OrchestrationTask;
   expect(taskNeedsOwnershipReconciliation(task)).toBe(true);
   expect(taskNeedsOwnershipReconciliation({ ...task, status: "completed" })).toBe(false);
+});
+
+it("recovers final completion only for a certified task in a live Mission run", () => {
+  const snapshotId = "snapshot-reconcile";
+  const task = {
+    id: "task-reconcile",
+    status: "active",
+    workspace: { status: "ready" },
+    ownership: {
+      required: true,
+      rules: [{ access: "write" }],
+      status: "valid",
+    },
+    reviewRequired: true,
+    reviewSnapshot: { id: snapshotId, status: "current" },
+    handoff: { snapshotId, status: "ready" },
+    reviews: [
+      {
+        id: "review-reconcile",
+        snapshotId,
+        status: "completed",
+        verdict: "approve",
+        createdAt: "2026-08-25T12:00:00.000Z",
+      },
+    ],
+  } as unknown as OrchestrationTask;
+  const runningMission = [{ status: "running", scheduledTaskIds: [task.id] }];
+
+  expect(taskNeedsCompletionRecovery(task, runningMission)).toBe(true);
+  expect(taskNeedsCompletionRecovery(task, [])).toBe(false);
+  expect(taskNeedsCompletionRecovery({ ...task, reviews: [] }, runningMission)).toBe(false);
+  expect(
+    taskNeedsCompletionRecovery(
+      {
+        ...task,
+        reviews: [{ ...task.reviews![0], verdict: "request_changes" }],
+      } as unknown as OrchestrationTask,
+      runningMission,
+    ),
+  ).toBe(false);
+  expect(
+    taskNeedsCompletionRecovery(task, [{ status: "completed", scheduledTaskIds: [task.id] }]),
+  ).toBe(false);
 });
 const layer = Layer.mergeAll(GitVcsDriver.vcsLayer, GitVcsDriver.layer).pipe(
   Layer.provide(ServerConfigLayer),
