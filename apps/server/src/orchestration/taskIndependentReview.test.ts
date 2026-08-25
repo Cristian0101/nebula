@@ -78,10 +78,32 @@ describe("independent Task review", () => {
     });
   });
 
+  it("normalizes portable decimal source lines to the canonical number", () => {
+    expect(
+      parseStructuredReviewValue({
+        verdict: "request_changes",
+        findings: [
+          {
+            severity: "blocking",
+            title: "Missing assertion",
+            detail: "The Ada case is absent.",
+            file: "tests/preferences.test.js",
+            line: "42",
+          },
+        ],
+        criteria: [],
+        securityConcerns: [],
+        requiredChanges: ["Add the Ada assertion."],
+        summary: "One regression is missing.",
+      }).findings[0],
+    ).toMatchObject({ file: "tests/preferences.test.js", line: 42 });
+  });
+
   it("emits a Codex-compatible provider schema", () => {
-    expect(JSON.stringify(toJsonSchemaObject(StructuredReviewGenerationOutput))).not.toContain(
-      '"allOf"',
-    );
+    const jsonSchema = JSON.stringify(toJsonSchemaObject(StructuredReviewGenerationOutput));
+    expect(jsonSchema).not.toContain('"allOf"');
+    expect(jsonSchema).not.toContain("Infinity");
+    expect(jsonSchema).not.toContain("NaN");
   });
 
   it("accepts every declared verdict through one shared schema", () => {
