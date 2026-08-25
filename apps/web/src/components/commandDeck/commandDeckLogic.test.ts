@@ -18,6 +18,7 @@ import {
   resolveTaskModelSelection,
   selectProjectTasks,
   summarizeCommandDeck,
+  taskRequiredQualityGatesPassed,
   taskChangedFileCount,
 } from "./commandDeckLogic";
 
@@ -125,6 +126,59 @@ describe("Command Deck presentation", () => {
     });
     expect(attention).toContainEqual({ kind: "provider", label: "Provider unavailable" });
     expect(task.modelSelection).toEqual({ instanceId: codex, model: "gpt-5" });
+  });
+
+  it("does not require integration-only gates before a Task review", () => {
+    const snapshotId = TaskReviewSnapshotId.make("snapshot-current");
+    const task = makeTask({
+      reviewSnapshot: {
+        id: snapshotId,
+        taskId: TaskId.make("task-1"),
+        baseCommit: "base",
+        checkpointRef: CheckpointRef.make("refs/t3/checkpoints/task-1"),
+        fingerprint: "fingerprint",
+        branchHead: "head",
+        changedFiles: 1,
+        additions: 1,
+        deletions: 0,
+        files: [],
+        ownershipStatus: "valid",
+        status: "current",
+        capturedAt: "2026-08-22T12:00:00.000Z",
+      },
+      qualityGateRuns: [
+        {
+          snapshotId,
+          gateId: "task-tests",
+          command: "npm test",
+          status: "passed",
+        } as never,
+      ],
+    });
+    const gates = [
+      {
+        id: "task-tests",
+        label: "Task tests",
+        command: "npm test",
+        scope: "both" as const,
+        required: true,
+        timeoutSeconds: 600,
+        enabled: true,
+        approvedCommand: "npm test",
+      },
+      {
+        id: "integration-tests",
+        label: "Integration tests",
+        command: "npm run test:integration",
+        scope: "integration" as const,
+        required: true,
+        timeoutSeconds: 600,
+        enabled: true,
+        approvedCommand: "npm run test:integration",
+      },
+    ];
+
+    expect(taskRequiredQualityGatesPassed(gates, task)).toBe(true);
   });
 
   it("summarizes eight Tasks with four active Threads and bounds meaningful activity", () => {

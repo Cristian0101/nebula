@@ -102,6 +102,7 @@ import {
   resolveTaskProviderEntry,
   selectProjectTasks,
   summarizeCommandDeck,
+  taskRequiredQualityGatesPassed,
   taskChangedFileCount,
   type CommandDeckAttention,
 } from "./commandDeckLogic";
@@ -927,13 +928,9 @@ export function CommandDeck({
         (run) => run.snapshotId === selectedTask.reviewSnapshot?.id,
       )
     : [];
-  const requiredGatesPassed = configuredGates
-    .filter((gate) => gate.required)
-    .every((gate) =>
-      currentQualityRuns.some(
-        (run) => run.gateId === gate.id && run.command === gate.command && run.status === "passed",
-      ),
-    );
+  const requiredGatesPassed = selectedTask
+    ? taskRequiredQualityGatesPassed(configuredGates, selectedTask)
+    : false;
   const latestReview = selectedTask?.reviews?.at(-1) ?? null;
   const currentApprovedReview =
     selectedTask?.reviews?.findLast(

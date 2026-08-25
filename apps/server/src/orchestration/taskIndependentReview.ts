@@ -1,9 +1,31 @@
-import { ReviewCriterionResult, ReviewFinding, TaskReviewVerdict } from "@t3tools/contracts";
+import {
+  ReviewCriterionResult,
+  ReviewFinding,
+  ReviewFindingSeverity,
+  TaskReviewVerdict,
+} from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-const StructuredReviewOutput = Schema.Struct({
+export const StructuredReviewOutput = Schema.Struct({
   verdict: TaskReviewVerdict,
   findings: Schema.Array(ReviewFinding),
+  criteria: Schema.Array(ReviewCriterionResult),
+  securityConcerns: Schema.Array(Schema.String),
+  requiredChanges: Schema.Array(Schema.String),
+  summary: Schema.String,
+});
+
+export const StructuredReviewGenerationOutput = Schema.Struct({
+  verdict: TaskReviewVerdict,
+  findings: Schema.Array(
+    Schema.Struct({
+      severity: ReviewFindingSeverity,
+      title: Schema.String,
+      detail: Schema.String,
+      file: Schema.NullOr(Schema.String),
+      line: Schema.NullOr(Schema.Number),
+    }),
+  ),
   criteria: Schema.Array(ReviewCriterionResult),
   securityConcerns: Schema.Array(Schema.String),
   requiredChanges: Schema.Array(Schema.String),
@@ -14,6 +36,10 @@ export type StructuredReviewOutput = typeof StructuredReviewOutput.Type;
 
 const decodeStructuredReviewOutput = Schema.decodeUnknownSync(
   Schema.fromJsonString(StructuredReviewOutput),
+);
+const decodeStructuredReviewValue = Schema.decodeUnknownSync(StructuredReviewOutput);
+const decodeStructuredReviewGenerationValue = Schema.decodeUnknownSync(
+  StructuredReviewGenerationOutput,
 );
 
 function extractJsonObject(input: string): string {
@@ -51,9 +77,7 @@ export function resolveReviewDiversity(input: {
   return input.builderDriverKind === input.reviewerDriverKind ? "same-provider" : "cross-provider";
 }
 
-export function parseStructuredReviewOutput(input: string): StructuredReviewOutput {
-  const json = extractJsonObject(input);
-  const decoded = decodeStructuredReviewOutput(json);
+function validateStructuredReview(decoded: StructuredReviewOutput): StructuredReviewOutput {
   const hasBlocking = decoded.findings.some(
     (finding) => finding.severity === "blocking" || finding.severity === "security",
   );
@@ -61,6 +85,24 @@ export function parseStructuredReviewOutput(input: string): StructuredReviewOutp
     throw new Error("Blocking or security findings cannot approve a Task review.");
   }
   return decoded;
+}
+
+export function parseStructuredReviewOutput(input: string): StructuredReviewOutput {
+  return validateStructuredReview(decodeStructuredReviewOutput(extractJsonObject(input)));
+}
+
+export function parseStructuredReviewValue(input: unknown): StructuredReviewOutput {
+  const generated = decodeStructuredReviewGenerationValue(input);
+  return validateStructuredReview(
+    decodeStructuredReviewValue({
+      ...generated,
+      findings: generated.findings.map(({ file, line, ...finding }) => ({
+        ...finding,
+        ...(file ? { file } : {}),
+        ...(line === null ? {} : { line }),
+      })),
+    }),
+  );
 }
 
 export function buildIndependentReviewPrompt(input: {

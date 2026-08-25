@@ -33,7 +33,9 @@ import { parseGeneratedTaskHandoff } from "../taskHandoff.ts";
 import {
   buildIndependentReviewPrompt,
   parseStructuredReviewOutput,
+  parseStructuredReviewValue,
   resolveReviewDiversity,
+  StructuredReviewGenerationOutput,
 } from "../taskIndependentReview.ts";
 
 type ReviewEvent = Extract<
@@ -365,7 +367,7 @@ const make = Effect.gen(function* () {
         .filter((run) => run.snapshotId === task.reviewSnapshot!.id)
         .map((run) => ({ label: run.label, status: run.status, exitCode: run.exitCode })),
     });
-    const generated = yield* Effect.scoped(
+    const result = yield* Effect.scoped(
       Effect.gen(function* () {
         // The reviewer receives only the bounded prompt. Its provider process
         // starts in an empty disposable directory, not the source checkout or
@@ -373,7 +375,24 @@ const make = Effect.gen(function* () {
         const reviewCwd = yield* fileSystem.makeTempDirectoryScoped({
           prefix: "t3-task-review-",
         });
-        return yield* textGeneration.generatePrContent({
+        if (textGeneration.generateStructured) {
+          const generated = yield* textGeneration.generateStructured({
+            cwd: reviewCwd,
+            prompt,
+            outputSchema: StructuredReviewGenerationOutput,
+            modelSelection: review.reviewerModelSelection,
+          });
+          return yield* Effect.try({
+            try: () => parseStructuredReviewValue(generated),
+            catch: (cause) =>
+              new IndependentReviewParseError({
+                message:
+                  cause instanceof Error ? cause.message : "Independent review output was invalid.",
+                cause,
+              }),
+          });
+        }
+        const generated = yield* textGeneration.generatePrContent({
           cwd: reviewCwd,
           baseBranch: reviewSnapshot.baseCommit,
           headBranch: reviewSnapshot.branchHead,
@@ -384,17 +403,17 @@ const make = Effect.gen(function* () {
             "Return the requested JSON object verbatim in the body. The title may be 'Task review'.",
           modelSelection: review.reviewerModelSelection,
         });
+        return yield* Effect.try({
+          try: () => parseStructuredReviewOutput(generated.body),
+          catch: (cause) =>
+            new IndependentReviewParseError({
+              message:
+                cause instanceof Error ? cause.message : "Independent review output was invalid.",
+              cause,
+            }),
+        });
       }),
     );
-    const result = yield* Effect.try({
-      try: () => parseStructuredReviewOutput(generated.body),
-      catch: (cause) =>
-        new IndependentReviewParseError({
-          message:
-            cause instanceof Error ? cause.message : "Independent review output was invalid.",
-          cause,
-        }),
-    });
     const completedAt = yield* now;
     yield* engine.dispatch({
       type: "task.independent-review.completed",

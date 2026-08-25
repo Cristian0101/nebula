@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { toJsonSchemaObject } from "../textGeneration/TextGenerationUtils.ts";
 import {
   buildIndependentReviewPrompt,
   parseStructuredReviewOutput,
+  parseStructuredReviewValue,
   resolveReviewDiversity,
+  StructuredReviewGenerationOutput,
 } from "./taskIndependentReview.ts";
 
 describe("independent Task review", () => {
@@ -49,6 +52,36 @@ describe("independent Task review", () => {
         }),
       ),
     ).toMatchObject({ verdict: "request_changes" });
+  });
+
+  it("accepts the native structured-generation value", () => {
+    expect(
+      parseStructuredReviewValue({
+        verdict: "approve_with_notes",
+        findings: [
+          {
+            severity: "info",
+            title: "Portable schema",
+            detail: "Native structured generation uses nullable source locations.",
+            file: null,
+            line: null,
+          },
+        ],
+        criteria: [],
+        securityConcerns: [],
+        requiredChanges: [],
+        summary: "Reviewed through the provider's structured output path.",
+      }),
+    ).toMatchObject({
+      verdict: "approve_with_notes",
+      findings: [{ severity: "info", title: "Portable schema" }],
+    });
+  });
+
+  it("emits a Codex-compatible provider schema", () => {
+    expect(JSON.stringify(toJsonSchemaObject(StructuredReviewGenerationOutput))).not.toContain(
+      '"allOf"',
+    );
   });
 
   it("accepts every declared verdict through one shared schema", () => {
