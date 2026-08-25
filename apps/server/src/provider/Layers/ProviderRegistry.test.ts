@@ -817,6 +817,49 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         ]);
       });
 
+      it("accepts authoritative empty capabilities for explicit Antigravity models", () => {
+        const previousProvider = {
+          instanceId: ProviderInstanceId.make("antigravity"),
+          driver: ProviderDriverKind.make("antigravity"),
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: { status: "unknown" },
+          checkedAt: "2026-08-25T00:00:00.000Z",
+          version: "1.1.20",
+          models: [
+            {
+              slug: "gemini-3.7-flash-high",
+              name: "Gemini 3.7 Flash (High)",
+              isCustom: false,
+              capabilities: createModelCapabilities({
+                optionDescriptors: [
+                  selectDescriptor("effort", "Reasoning", [
+                    { id: "medium", label: "Medium", isDefault: true },
+                  ]),
+                ],
+              }),
+            },
+          ],
+          slashCommands: [],
+          skills: [],
+        } as const satisfies ServerProvider;
+        const refreshedProvider = {
+          ...previousProvider,
+          checkedAt: "2026-08-25T00:01:00.000Z",
+          models: [
+            {
+              ...previousProvider.models[0],
+              capabilities: createModelCapabilities({ optionDescriptors: [] }),
+            },
+          ],
+        } satisfies ServerProvider;
+
+        assert.deepStrictEqual(mergeProviderSnapshot(previousProvider, refreshedProvider).models, [
+          ...refreshedProvider.models,
+        ]);
+      });
+
       it.effect("does not run provider probes during layer construction", () =>
         Effect.gen(function* () {
           const codexDriver = ProviderDriverKind.make("codex");

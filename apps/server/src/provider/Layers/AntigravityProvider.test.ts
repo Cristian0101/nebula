@@ -9,6 +9,7 @@ import {
   antigravityModelsFromSettings,
   buildInitialAntigravityProviderSnapshot,
   checkAntigravityProviderStatus,
+  parseAntigravityModelsOutput,
 } from "./AntigravityProvider.ts";
 
 const decodeSettings = Schema.decodeSync(AntigravitySettings);
@@ -32,6 +33,21 @@ describe("Antigravity provider status", () => {
       "Gemini 3.7 Flash",
     ]);
   });
+
+  it("parses the documented agy models output without inventing model ids", () => {
+    const discovered = parseAntigravityModelsOutput(
+      [
+        "Fetching available models...",
+        "gemini-3.7-flash-high\tGemini 3.7 Flash (High)",
+        "claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)",
+        "gemini-3.7-flash-high\tDuplicate",
+      ].join("\n"),
+    );
+    expect(discovered.map((model) => [model.slug, model.name])).toEqual([
+      ["gemini-3.7-flash-high", "Gemini 3.7 Flash (High)"],
+      ["claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)"],
+    ]);
+  });
 });
 
 it.layer(NodeServices.layer)("checkAntigravityProviderStatus", (it) => {
@@ -53,7 +69,19 @@ it.layer(NodeServices.layer)("checkAntigravityProviderStatus", (it) => {
           const path = yield* Path.Path;
           const dir = yield* fs.makeTempDirectoryScoped({ prefix: "nebula-agy-version-" });
           const binary = path.join(dir, "agy");
-          yield* fs.writeFileString(binary, '#!/bin/sh\nprintf "1.1.18\\n"\n');
+          yield* fs.writeFileString(
+            binary,
+            [
+              "#!/bin/sh",
+              'if [ "$1" = "models" ]; then',
+              "  read -r _ignored || true",
+              "  printf 'gemini-3.7-flash-high\\tGemini 3.7 Flash (High)\\n'",
+              "else",
+              '  printf "1.1.18\\n"',
+              "fi",
+              "",
+            ].join("\n"),
+          );
           yield* fs.chmod(binary, 0o755);
           return yield* checkAntigravityProviderStatus(
             decodeSettings({ enabled: true, binaryPath: binary }),
@@ -65,6 +93,7 @@ it.layer(NodeServices.layer)("checkAntigravityProviderStatus", (it) => {
       expect(snapshot.status).toBe("ready");
       expect(snapshot.auth.status).toBe("unknown");
       expect(snapshot.message).toContain("required or unverified");
+      expect(snapshot.models.map((model) => model.slug)).toEqual(["auto", "gemini-3.7-flash-high"]);
     }),
   );
 });
