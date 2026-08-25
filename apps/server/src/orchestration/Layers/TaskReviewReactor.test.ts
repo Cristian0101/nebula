@@ -18,6 +18,7 @@ import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import {
   restoreTaskWorkspaceToBaseline,
+  shouldRecoverReviewPreparation,
   taskBranchIsPublished,
   taskRestoreCheckpointRef,
   taskWorkspacePathsMatch,
@@ -41,6 +42,23 @@ const layer = Layer.mergeAll(GitVcsDriver.layer, checkpointLayer).pipe(
 );
 
 describe("TaskReviewReactor restore safety", () => {
+  it("recovers snapshot preparation after a completed turn", () => {
+    expect(
+      shouldRecoverReviewPreparation(
+        { status: "active", ownership: { status: "valid" } },
+        { latestTurn: { state: "completed" } },
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      shouldRecoverReviewPreparation(
+        { status: "active", ownership: { status: "valid" } },
+        { latestTurn: { state: "running" } },
+        false,
+      ),
+    ).toBe(false);
+  });
+
   it("uses a Task-scoped hidden recovery ref", () => {
     expect(taskRestoreCheckpointRef("task-1", TaskRestoreId.make("restore-1"))).toBe(
       "refs/t3/checkpoints/tasks/task-1/restore/restore-1",

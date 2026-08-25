@@ -49,6 +49,20 @@ describe("bounded recovery", () => {
     expect(classifyRuntimeFailure({ source: "provider", code: "AUTH_EXPIRED" })).toBe(
       "provider_unavailable_auth",
     );
+    expect(
+      classifyRuntimeFailure({
+        source: "provider",
+        message:
+          "Provider session did not survive a server restart. Send a new message to continue.",
+      }),
+    ).toBe("transport_transient");
+    expect(
+      classifyRuntimeFailure({
+        source: "provider",
+        message:
+          "Provider validation failed: Provider instance 'antigravity' is disabled in Nebula settings.",
+      }),
+    ).toBe("provider_unavailable_auth");
     expect(classifyRuntimeFailure({ source: "quality" })).toBe("quality_failure");
     expect(classifyRuntimeFailure({ source: "review", reviewVerdict: "request_changes" })).toBe(
       "review_request_changes",

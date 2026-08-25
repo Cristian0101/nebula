@@ -98,10 +98,12 @@ import {
   deriveTaskAttention,
   deriveTaskPresentationStatus,
   providerTaskCounts,
+  providerSupportsStructuredReview,
   resolveTaskModelSelection,
   resolveTaskProviderEntry,
   selectProjectTasks,
   summarizeCommandDeck,
+  taskRequiredQualityGatesPassed,
   taskChangedFileCount,
   type CommandDeckAttention,
 } from "./commandDeckLogic";
@@ -290,6 +292,10 @@ export function CommandDeck({
   const modelOptionsByInstance = useMemo(
     () => getCustomModelOptionsByInstance(settings, serverProviders),
     [serverProviders, settings],
+  );
+  const reviewerInstanceEntries = useMemo(
+    () => instanceEntries.filter(providerSupportsStructuredReview),
+    [instanceEntries],
   );
   const fallbackSelection = useMemo(
     () => resolveDefaultProviderModelSelection(serverProviders, project.defaultModelSelection),
@@ -480,24 +486,24 @@ export function CommandDeck({
     : null;
   useEffect(() => {
     if (!selectedTaskIdForReviewer) return setReviewerSelection(null);
-    const builderEntry = instanceEntries.find(
+    const builderEntry = reviewerInstanceEntries.find(
       (entry) => entry.instanceId === selectedBuilderSelection?.instanceId,
     );
-    const different = instanceEntries.find(
+    const different = reviewerInstanceEntries.find(
       (entry) =>
         entry.driverKind !== builderEntry?.driverKind &&
         entry.enabled &&
         entry.isAvailable &&
         entry.status === "ready",
     );
-    const fallback = instanceEntries.find(
+    const fallback = reviewerInstanceEntries.find(
       (entry) => entry.enabled && entry.isAvailable && entry.status === "ready",
     );
     const entry = different ?? fallback;
     setReviewerSelection(
       entry ? createModelSelection(entry.instanceId, entry.models[0]?.slug ?? "auto") : null,
     );
-  }, [instanceEntries, selectedBuilderSelection?.instanceId, selectedTaskIdForReviewer]);
+  }, [reviewerInstanceEntries, selectedBuilderSelection?.instanceId, selectedTaskIdForReviewer]);
 
   const reportError = useCallback((title: string, description: string) => {
     toastManager.add(stackedThreadToast({ type: "error", title, description }));
@@ -927,13 +933,9 @@ export function CommandDeck({
         (run) => run.snapshotId === selectedTask.reviewSnapshot?.id,
       )
     : [];
-  const requiredGatesPassed = configuredGates
-    .filter((gate) => gate.required)
-    .every((gate) =>
-      currentQualityRuns.some(
-        (run) => run.gateId === gate.id && run.command === gate.command && run.status === "passed",
-      ),
-    );
+  const requiredGatesPassed = selectedTask
+    ? taskRequiredQualityGatesPassed(configuredGates, selectedTask)
+    : false;
   const latestReview = selectedTask?.reviews?.at(-1) ?? null;
   const currentApprovedReview =
     selectedTask?.reviews?.findLast(
@@ -1812,7 +1814,7 @@ export function CommandDeck({
                                 activeInstanceId={reviewerSelection.instanceId}
                                 model={reviewerSelection.model}
                                 lockedProvider={null}
-                                instanceEntries={instanceEntries}
+                                instanceEntries={reviewerInstanceEntries}
                                 modelOptionsByInstance={modelOptionsByInstance}
                                 triggerVariant="outline"
                                 triggerClassName="max-w-full"

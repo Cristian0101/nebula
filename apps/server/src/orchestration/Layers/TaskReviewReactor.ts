@@ -29,11 +29,18 @@ import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { TaskReviewReactor, type TaskReviewReactorShape } from "../Services/TaskReviewReactor.ts";
 import { TaskChangeSetQuery } from "../TaskChangeSetQuery.ts";
-import { parseGeneratedTaskHandoff } from "../taskHandoff.ts";
+import {
+  buildStructuredTaskHandoffPrompt,
+  parseGeneratedTaskHandoff,
+  parseStructuredTaskHandoffValue,
+  StructuredTaskHandoffGenerationOutput,
+} from "../taskHandoff.ts";
 import {
   buildIndependentReviewPrompt,
   parseStructuredReviewOutput,
+  parseStructuredReviewValue,
   resolveReviewDiversity,
+  StructuredReviewGenerationOutput,
 } from "../taskIndependentReview.ts";
 
 type ReviewEvent = Extract<
@@ -46,6 +53,7 @@ type ReviewEvent = Extract<
       | "task.restore.undo-requested"
       | "task.independent-review.requested"
       | "task.review.findings-sent"
+      | "task.ownership-validated"
       | "thread.turn-diff-completed";
   }
 >;
@@ -57,6 +65,19 @@ class IndependentReviewParseError extends Data.TaggedError("IndependentReviewPar
 
 export const taskRestoreCheckpointRef = (taskId: string, restoreId: TaskRestoreId) =>
   CheckpointRef.make(`refs/t3/checkpoints/tasks/${taskId}/restore/${restoreId}`);
+
+export function shouldRecoverReviewPreparation(
+  task: {
+    readonly status: string;
+    readonly ownership?: { readonly status?: string } | null | undefined;
+  },
+  thread: { readonly latestTurn: { readonly state: string } | null } | undefined,
+  snapshotIsCurrent: boolean,
+): boolean {
+  return (
+    task.status === "active" && thread?.latestTurn?.state === "completed" && !snapshotIsCurrent
+  );
+}
 
 export function taskBranchIsPublished(remoteRefs: string, branch: string): boolean {
   return remoteRefs.split("\n").some((ref) => ref.trim().endsWith(`/${branch}`));
@@ -209,27 +230,22 @@ const make = Effect.gen(function* () {
         generationError = "The Task thread was unavailable for provider handoff generation.";
         resolvedGeneration = "manual";
       } else {
-        const generated = yield* textGeneration
-          .generatePrContent({
-            cwd: captured.changeSet.workspace,
-            baseBranch: captured.changeSet.baseCommit,
-            headBranch: captured.changeSet.branch,
-            commitSummary: `Task: ${task.title}\nObjective: ${task.objective}`,
-            diffSummary: captured.changeSet.files
-              .map((file) => `${file.changeType}: ${file.path}`)
-              .join("\n"),
-            diffPatch:
-              "The immutable Task snapshot is the factual source. Do not invent tests or outcomes.",
-            changeRequestTemplate:
-              "Write a structured engineering handoff with sections: Summary, Tests run, Assumptions, Interface changes, Migrations, Known risks, Follow-ups. Clearly label unverified claims as reported. Do not invent commands or results.",
-            modelSelection: thread.modelSelection,
-          })
-          .pipe(Effect.result);
-        if (generated._tag === "Success") {
-          const narrative = parseGeneratedTaskHandoff(
-            generated.success.title,
-            generated.success.body,
-          );
+        const generated = textGeneration.generateStructured
+          ? yield* textGeneration
+              .generateStructured({
+                cwd: captured.changeSet.workspace,
+                prompt: buildStructuredTaskHandoffPrompt({
+                  title: task.title,
+                  objective: task.objective,
+                  files: captured.changeSet.files,
+                }),
+                outputSchema: StructuredTaskHandoffGenerationOutput,
+                modelSelection: thread.modelSelection,
+              })
+              .pipe(Effect.result)
+          : null;
+        if (generated?._tag === "Success") {
+          const narrative = parseStructuredTaskHandoffValue(generated.success);
           summary = narrative.summary;
           testsRun = narrative.testsRun;
           assumptions = narrative.assumptions;
@@ -238,8 +254,36 @@ const make = Effect.gen(function* () {
           knownRisks = narrative.knownRisks;
           followUps = narrative.followUps;
         } else {
-          generationError = generated.failure.detail;
-          resolvedGeneration = "manual";
+          const legacy = yield* textGeneration
+            .generatePrContent({
+              cwd: captured.changeSet.workspace,
+              baseBranch: captured.changeSet.baseCommit,
+              headBranch: captured.changeSet.branch,
+              commitSummary: `Task: ${task.title}\nObjective: ${task.objective}`,
+              diffSummary: captured.changeSet.files
+                .map((file) => `${file.changeType}: ${file.path}`)
+                .join("\n"),
+              diffPatch:
+                "The immutable Task snapshot is the factual source. Do not invent tests or outcomes.",
+              changeRequestTemplate:
+                "Write a structured engineering handoff with sections: Summary, Tests run, Assumptions, Interface changes, Migrations, Known risks, Follow-ups. Clearly label unverified claims as reported. Do not invent commands or results.",
+              modelSelection: thread.modelSelection,
+            })
+            .pipe(Effect.result);
+          if (legacy._tag === "Success") {
+            const narrative = parseGeneratedTaskHandoff(legacy.success.title, legacy.success.body);
+            summary = narrative.summary;
+            testsRun = narrative.testsRun;
+            assumptions = narrative.assumptions;
+            interfaceChanges = narrative.interfaceChanges;
+            migrations = narrative.migrations;
+            knownRisks = narrative.knownRisks;
+            followUps = narrative.followUps;
+          } else {
+            generationError =
+              generated?._tag === "Failure" ? generated.failure.detail : legacy.failure.detail;
+            resolvedGeneration = "manual";
+          }
         }
       }
     }
@@ -363,9 +407,14 @@ const make = Effect.gen(function* () {
       reportedTests: task.handoff.testsRun,
       quality: (task.qualityGateRuns ?? [])
         .filter((run) => run.snapshotId === task.reviewSnapshot!.id)
-        .map((run) => ({ label: run.label, status: run.status, exitCode: run.exitCode })),
+        .map((run) => ({
+          label: run.label,
+          command: run.command,
+          status: run.status,
+          exitCode: run.exitCode,
+        })),
     });
-    const generated = yield* Effect.scoped(
+    const result = yield* Effect.scoped(
       Effect.gen(function* () {
         // The reviewer receives only the bounded prompt. Its provider process
         // starts in an empty disposable directory, not the source checkout or
@@ -373,7 +422,24 @@ const make = Effect.gen(function* () {
         const reviewCwd = yield* fileSystem.makeTempDirectoryScoped({
           prefix: "t3-task-review-",
         });
-        return yield* textGeneration.generatePrContent({
+        if (textGeneration.generateStructured) {
+          const generated = yield* textGeneration.generateStructured({
+            cwd: reviewCwd,
+            prompt,
+            outputSchema: StructuredReviewGenerationOutput,
+            modelSelection: review.reviewerModelSelection,
+          });
+          return yield* Effect.try({
+            try: () => parseStructuredReviewValue(generated),
+            catch: (cause) =>
+              new IndependentReviewParseError({
+                message:
+                  cause instanceof Error ? cause.message : "Independent review output was invalid.",
+                cause,
+              }),
+          });
+        }
+        const generated = yield* textGeneration.generatePrContent({
           cwd: reviewCwd,
           baseBranch: reviewSnapshot.baseCommit,
           headBranch: reviewSnapshot.branchHead,
@@ -384,17 +450,17 @@ const make = Effect.gen(function* () {
             "Return the requested JSON object verbatim in the body. The title may be 'Task review'.",
           modelSelection: review.reviewerModelSelection,
         });
+        return yield* Effect.try({
+          try: () => parseStructuredReviewOutput(generated.body),
+          catch: (cause) =>
+            new IndependentReviewParseError({
+              message:
+                cause instanceof Error ? cause.message : "Independent review output was invalid.",
+              cause,
+            }),
+        });
       }),
     );
-    const result = yield* Effect.try({
-      try: () => parseStructuredReviewOutput(generated.body),
-      catch: (cause) =>
-        new IndependentReviewParseError({
-          message:
-            cause instanceof Error ? cause.message : "Independent review output was invalid.",
-          cause,
-        }),
-    });
     const completedAt = yield* now;
     yield* engine.dispatch({
       type: "task.independent-review.completed",
@@ -608,7 +674,30 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const interruptedReviewPreparations = new Set<string>();
+
   const process = Effect.fn("TaskReviewReactor.process")(function* (event: ReviewEvent) {
+    if (event.type === "task.ownership-validated") {
+      if (!interruptedReviewPreparations.delete(event.payload.taskId)) return;
+      if (event.payload.status !== "valid") return;
+      yield* prepare(event.payload.taskId, "provider").pipe(
+        Effect.catch((error) =>
+          engine.dispatch({
+            type: "task.review.prepare-failed",
+            commandId: CommandId.make(
+              `server:task-review-recovery-prepare-failed:${event.eventId}`,
+            ),
+            taskId: event.payload.taskId,
+            failureReason:
+              typeof error === "object" && error !== null && "message" in error
+                ? String(error.message)
+                : "Task review snapshot recovery failed.",
+            createdAt: event.occurredAt,
+          }),
+        ),
+      );
+      return;
+    }
     if (event.type === "task.review.prepare-requested") {
       yield* prepare(event.payload.taskId, event.payload.generation).pipe(
         Effect.catch((error) =>
@@ -681,11 +770,35 @@ const make = Effect.gen(function* () {
     const model = yield* snapshots.getCommandReadModel();
     for (const task of model.tasks ?? []) {
       if (task.status !== "active") continue;
-      if (
+      const snapshotIsCurrent =
         task.reviewSnapshot?.status === "current" &&
-        !(yield* taskChanges.isCurrent(task).pipe(Effect.orElseSucceed(() => false)))
-      ) {
+        (yield* taskChanges.isCurrent(task).pipe(Effect.orElseSucceed(() => false)));
+      if (task.reviewSnapshot?.status === "current" && !snapshotIsCurrent) {
         yield* markStale(task);
+      }
+      const thread = model.threads.find((candidate) => candidate.id === task.threadId);
+      if (shouldRecoverReviewPreparation(task, thread, snapshotIsCurrent)) {
+        if (task.ownership?.status === "pending") {
+          interruptedReviewPreparations.add(task.id);
+        } else if (task.ownership?.status === "valid") {
+          const recoveredAt = thread?.latestTurn?.completedAt ?? (yield* now);
+          yield* prepare(task.id, "provider").pipe(
+            Effect.catch((error) =>
+              engine.dispatch({
+                type: "task.review.prepare-failed",
+                commandId: CommandId.make(
+                  `server:task-review-startup-prepare-failed:${task.id}:${thread?.latestTurn?.turnId ?? "no-turn"}`,
+                ),
+                taskId: task.id,
+                failureReason:
+                  typeof error === "object" && error !== null && "message" in error
+                    ? String(error.message)
+                    : "Task review snapshot recovery failed.",
+                createdAt: recoveredAt,
+              }),
+            ),
+          );
+        }
       }
       if (task.restore?.status === "requested") {
         yield* restore(task.id, task.restore.id).pipe(
@@ -730,6 +843,7 @@ const make = Effect.gen(function* () {
           event.type === "task.restore.undo-requested" ||
           event.type === "task.independent-review.requested" ||
           event.type === "task.review.findings-sent" ||
+          event.type === "task.ownership-validated" ||
           event.type === "thread.turn-diff-completed"
         ) {
           return worker.enqueue(event as ReviewEvent);

@@ -19,6 +19,7 @@ import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -29,6 +30,8 @@ import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
+import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
+import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -300,8 +303,10 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
 
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
+  const fileSystem = yield* FileSystem.FileSystem;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const projectionTurnRepository = yield* ProjectionTurnRepository;
   const providerService = yield* ProviderService;
   const providerRegistry = yield* ProviderRegistry;
   const gitWorkflow = yield* GitWorkflowService;
@@ -600,10 +605,13 @@ const make = Effect.gen(function* () {
       }
     }
     const project = yield* resolveProject(thread.projectId);
-    const effectiveCwd = resolveThreadWorkspaceCwd({
+    const recordedCwd = resolveThreadWorkspaceCwd({
       thread,
       projects: project ? [project] : [],
     });
+    const effectiveCwd = recordedCwd
+      ? yield* fileSystem.realPath(recordedCwd).pipe(Effect.orElseSucceed(() => recordedCwd))
+      : undefined;
 
     const startProviderSession = (input?: {
       readonly resumeCursor?: unknown;
@@ -1053,6 +1061,53 @@ const make = Effect.gen(function* () {
         }),
       ),
   );
+
+  const findInterruptedTurnStarts = Effect.fn("findInterruptedTurnStarts")(function* () {
+    const readModel = yield* projectionSnapshotQuery.getCommandReadModel();
+    return yield* Effect.forEach(
+      readModel.threads,
+      (thread) =>
+        projectionTurnRepository.getPendingTurnStartByThreadId({ threadId: thread.id }).pipe(
+          Effect.map(
+            Option.map(
+              (pending) =>
+                ({
+                  sequence: 0,
+                  eventId: EventId.make(
+                    `startup:turn-start:${pending.threadId}:${pending.messageId}`,
+                  ),
+                  aggregateKind: "thread",
+                  aggregateId: pending.threadId,
+                  occurredAt: pending.requestedAt,
+                  commandId: null,
+                  causationEventId: null,
+                  correlationId: null,
+                  metadata: {},
+                  type: "thread.turn-start-requested",
+                  payload: {
+                    threadId: pending.threadId,
+                    messageId: pending.messageId,
+                    modelSelection: thread.modelSelection,
+                    runtimeMode: thread.runtimeMode,
+                    interactionMode: thread.interactionMode,
+                    ...(pending.sourceProposedPlanThreadId !== null &&
+                    pending.sourceProposedPlanId !== null
+                      ? {
+                          sourceProposedPlan: {
+                            threadId: pending.sourceProposedPlanThreadId,
+                            planId: pending.sourceProposedPlanId,
+                          },
+                        }
+                      : {}),
+                    createdAt: pending.requestedAt,
+                  },
+                }) satisfies ProviderIntentEvent,
+            ),
+          ),
+        ),
+      { concurrency: "unbounded" },
+    ).pipe(Effect.map((entries) => entries.flatMap(Option.toArray)));
+  });
   const threadTitleRegenerationWorker = yield* makeDrainableWorker(
     processThreadTitleRegenerationSafely,
   );
@@ -1404,6 +1459,23 @@ const make = Effect.gen(function* () {
 
     yield* forkParked(Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent));
 
+    const resumeInterruptedTurnStarts = findInterruptedTurnStarts().pipe(
+      Effect.flatMap((events) =>
+        Effect.forEach(events, (event) => worker.enqueue(event), { discard: true }),
+      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.interrupt;
+        }
+        return Effect.logWarning(
+          "provider command reactor failed to resume interrupted turn starts",
+          {
+            cause: Cause.pretty(cause),
+          },
+        );
+      }),
+    );
+
     // The domain event stream is hot, so work pending before this reactor
     // starts cannot be resumed. Correlated completions only clear the request
     // captured here, leaving any newer request untouched.
@@ -1424,8 +1496,10 @@ const make = Effect.gen(function* () {
     );
     const activation = yield* ServerActivation;
     if (activation === undefined) {
+      yield* resumeInterruptedTurnStarts;
       yield* clearInterrupted;
     } else {
+      yield* forkParked(resumeInterruptedTurnStarts);
       yield* forkParked(clearInterrupted);
     }
   });
@@ -1439,4 +1513,6 @@ const make = Effect.gen(function* () {
   } satisfies ProviderCommandReactorShape;
 });
 
-export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make);
+export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make).pipe(
+  Layer.provide(ProjectionTurnRepositoryLive),
+);

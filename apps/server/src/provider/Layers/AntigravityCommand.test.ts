@@ -36,6 +36,11 @@ describe("Antigravity headless commands", () => {
     expect(args).not.toContain("--dangerously-skip-permissions");
   });
 
+  it("allows non-interactive tools only for an explicitly full-access turn", () => {
+    const args = buildAntigravityTurnArgs({ prompt: "implement", fullAccess: true });
+    expect(args).toContain("--dangerously-skip-permissions");
+  });
+
   it("builds structured text generation without a second API path", () => {
     const args = buildAntigravityStructuredArgs({
       prompt: "title",

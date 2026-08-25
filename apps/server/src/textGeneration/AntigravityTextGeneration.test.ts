@@ -52,4 +52,38 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
       }),
     ),
   );
+
+  it.effect("falls back to the fenced response when structured_output is incomplete", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "nebula-agy-fallback-" });
+        const binary = path.join(dir, "agy");
+        const response = JSON.stringify({
+          structured_output: { toolAction: "Completing task" },
+          response:
+            '```json\n{"verdict":"approve","summary":"Reviewed"}\n```\n{"toolAction":"Completing task"}',
+        });
+        yield* fs.writeFileString(
+          binary,
+          ["#!/bin/sh", `printf '%s' '${response}'`, ""].join("\n"),
+        );
+        yield* fs.chmod(binary, 0o755);
+        const service = yield* makeAntigravityTextGeneration(
+          decodeSettings({ enabled: true, binaryPath: binary }),
+        );
+        const generated = yield* service.generateStructured({
+          cwd: dir,
+          prompt: "Review the change",
+          outputSchema: Schema.Struct({
+            verdict: Schema.Literal("approve"),
+            summary: Schema.String,
+          }),
+          modelSelection: createModelSelection(ProviderInstanceId.make("antigravity"), "auto"),
+        });
+        expect(generated).toEqual({ verdict: "approve", summary: "Reviewed" });
+      }),
+    ),
+  );
 });

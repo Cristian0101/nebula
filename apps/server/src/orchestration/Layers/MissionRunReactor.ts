@@ -162,14 +162,16 @@ const sameAttention = (
     ),
   );
 
+export function isRequiredGateFailureStatus(status: string): boolean {
+  return status !== "queued" && status !== "running" && status !== "passed" && status !== "stale";
+}
+
 const requiredGateFailure = (task: OrchestrationTask) =>
   (task.qualityGateRuns ?? []).find(
     (run) =>
       run.snapshotId === task.reviewSnapshot?.id &&
       run.required &&
-      run.status !== "queued" &&
-      run.status !== "running" &&
-      run.status !== "passed",
+      isRequiredGateFailureStatus(run.status),
   ) ?? null;
 
 const currentReview = (task: OrchestrationTask) =>
@@ -180,6 +182,46 @@ const currentReview = (task: OrchestrationTask) =>
         left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
     )
     .at(-1) ?? null;
+
+export function missionProviderTurnInFlight(thread: {
+  readonly session: { readonly status: string } | null;
+  readonly latestTurn: { readonly state: string } | null;
+}): boolean {
+  return (
+    thread.session?.status === "starting" ||
+    thread.session?.status === "running" ||
+    thread.latestTurn?.state === "running"
+  );
+}
+
+export function activeReplacementOwnsProviderTurn(
+  state: {
+    readonly attempts: ReadonlyArray<{
+      readonly kind: string;
+      readonly status: string;
+    }>;
+  },
+  thread:
+    | {
+        readonly session: { readonly status: string } | null;
+        readonly latestTurn: { readonly state: string } | null;
+      }
+    | undefined,
+): boolean {
+  return (
+    thread !== undefined &&
+    state.attempts.some(
+      (attempt) => attempt.kind === "replacement" && attempt.status === "active",
+    ) &&
+    missionProviderTurnInFlight(thread)
+  );
+}
+
+export function providerSupportsStructuredReview(instance: {
+  readonly textGeneration: { readonly generateStructured?: unknown };
+}): boolean {
+  return typeof instance.textGeneration.generateStructured === "function";
+}
 
 const activeTaskAttention = (
   task: OrchestrationTask,
@@ -324,6 +366,7 @@ const make = Effect.gen(function* () {
 
   const reviewerSelection = Effect.fn("MissionRunReactor.reviewerSelection")(function* (
     task: OrchestrationTask,
+    excludedInstanceIds: ReadonlySet<string> = new Set(),
   ) {
     const builder = task.modelSelection
       ? yield* providers.getInstance(task.modelSelection.instanceId)
@@ -331,7 +374,12 @@ const make = Effect.gen(function* () {
     const instances = yield* providers.listInstances;
     const ready: Array<{ instance: (typeof instances)[number]; model: string }> = [];
     for (const instance of instances) {
-      if (!instance.enabled) continue;
+      if (
+        !instance.enabled ||
+        excludedInstanceIds.has(instance.instanceId) ||
+        !providerSupportsStructuredReview(instance)
+      )
+        continue;
       const snapshot = yield* instance.snapshot.getSnapshot.pipe(Effect.orElseSucceed(() => null));
       if (
         snapshot?.enabled &&
@@ -587,10 +635,10 @@ const make = Effect.gen(function* () {
     });
     yield* engine.dispatch({
       type: "thread.activity.append",
-      commandId: commandId(run, task.id, "context-provenance"),
+      commandId: commandId(run, task.id, `context-provenance:${thread.id}`),
       threadId: thread.id,
       activity: {
-        id: EventId.make(`mission-run:${run.id}:task:${task.id}:context`),
+        id: EventId.make(`mission-run:${run.id}:task:${task.id}:context:${thread.id}`),
         tone: "info",
         kind: "mission.context.injected",
         summary: "Mission context injected by Nebula",
@@ -608,10 +656,10 @@ const make = Effect.gen(function* () {
     });
     yield* engine.dispatch({
       type: "thread.turn.start",
-      commandId: commandId(run, task.id, "builder-turn"),
+      commandId: commandId(run, task.id, `builder-turn:${thread.id}`),
       threadId: thread.id,
       message: {
-        messageId: MessageId.make(`mission-run:${run.id}:task:${task.id}:message`),
+        messageId: MessageId.make(`mission-run:${run.id}:task:${task.id}:message:${thread.id}`),
         role: "user",
         text: [context.text, ownershipContext(task), resourceContext(project, task)].join("\n\n"),
         attachments: [],
@@ -657,6 +705,16 @@ const make = Effect.gen(function* () {
     readonly state: TaskRecoveryState;
     readonly detail: string;
   }) {
+    const nudgeAfterProjectionStep = () =>
+      updateRun({
+        runId: input.run.id,
+        status: "running",
+        currentReadyTaskIds: input.run.currentReadyTaskIds,
+        scheduledTaskIds: input.run.scheduledTaskIds,
+        attention: [],
+        ...(input.run.taskRecovery ? { taskRecovery: input.run.taskRecovery } : {}),
+        ...(input.run.routingDecisions ? { routingDecisions: input.run.routingDecisions } : {}),
+      });
     const attempt = input.state.attempts.findLast(
       (candidate) => candidate.kind === "replacement" && candidate.status === "active",
     );
@@ -686,6 +744,7 @@ const make = Effect.gen(function* () {
         worktreePath: input.task.workspace.path,
         createdAt: attempt.startedAt,
       });
+      yield* nudgeAfterProjectionStep();
       return true;
     }
     if (input.task.threadId !== thread.id) {
@@ -697,6 +756,41 @@ const make = Effect.gen(function* () {
         replaceProviderExecution: true,
         modelSelection,
         createdAt: attempt.startedAt,
+      });
+      yield* nudgeAfterProjectionStep();
+      return true;
+    }
+    if (
+      thread.latestTurn?.state === "error" &&
+      /did not survive (?:a )?server restart/i.test(thread.session?.lastError ?? "")
+    ) {
+      yield* engine.dispatch({
+        type: "thread.turn.start",
+        commandId: commandId(
+          input.run,
+          input.task.id,
+          `replacement-resume:${attempt.number}:${thread.latestTurn.turnId}`,
+        ),
+        threadId: thread.id,
+        message: {
+          messageId: MessageId.make(
+            `mission-run:${input.run.id}:task:${input.task.id}:replacement-resume:${attempt.number}:${thread.latestTurn.turnId}`,
+          ),
+          role: "user",
+          text: recoveryMessage({
+            task: input.task,
+            failureClass: "transport_transient",
+            detail: thread.session?.lastError ?? input.detail,
+            replacement: true,
+            previousProvider: attempt.providerInstanceId,
+          }),
+          attachments: [],
+        },
+        modelSelection,
+        titleSeed: input.task.title,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdAt: yield* now,
       });
       return true;
     }
@@ -737,7 +831,39 @@ const make = Effect.gen(function* () {
   }) {
     const { run, model, task, thread } = input;
     const state = (run.taskRecovery ?? []).find((candidate) => candidate.taskId === task.id);
-    if (!state || !thread) return false;
+    if (!state) return false;
+    const activeReplacement = state.attempts.findLast(
+      (attempt) => attempt.kind === "replacement" && attempt.status === "active",
+    );
+    if (activeReplacementOwnsProviderTurn(state, thread)) return true;
+    if (thread && missionProviderTurnInFlight(thread)) return false;
+    const replacementNeedsContinuation =
+      activeReplacement !== undefined &&
+      (!thread ||
+        (thread.latestTurn === null && thread.messages.length === 0) ||
+        (thread.latestTurn?.state === "error" &&
+          /did not survive (?:a )?server restart/i.test(thread.session?.lastError ?? "")));
+    if (activeReplacement && replacementNeedsContinuation) {
+      yield* Effect.logInfo("continuing active provider replacement", {
+        taskId: task.id,
+        attempt: activeReplacement.number,
+        providerInstanceId: activeReplacement.providerInstanceId,
+        replacementThreadId: activeReplacement.threadId,
+        boundThreadId: task.threadId,
+        workspacePath: task.workspace?.path ?? null,
+      });
+      return yield* continueReplacement({
+        run,
+        model,
+        task,
+        state,
+        detail:
+          activeReplacement.summary ||
+          state.latestFailureClass ||
+          "Continue the active provider replacement.",
+      });
+    }
+    if (!thread) return false;
     const gate = requiredGateFailure(task);
     const review = currentReview(task);
     const providerError =
@@ -886,18 +1012,20 @@ const make = Effect.gen(function* () {
       action === "replace"
         ? `${thread.modelSelection.instanceId} → ${providerInstanceId}. Reason: ${failureClass} after ${state.transientRetries} retries.`
         : `${action} ${attemptNumber} for ${failureClass}: ${detail}`;
+    const nextTaskRecovery = (run.taskRecovery ?? []).map((candidate) =>
+      candidate.taskId === task.id ? nextState : candidate,
+    );
+    const nextRoutingDecisions = replacementDecision
+      ? [...(run.routingDecisions ?? []), replacementDecision]
+      : run.routingDecisions;
     yield* updateRun({
       runId: run.id,
       status: "running",
       currentReadyTaskIds: run.currentReadyTaskIds,
       scheduledTaskIds: run.scheduledTaskIds,
       attention: [],
-      taskRecovery: (run.taskRecovery ?? []).map((candidate) =>
-        candidate.taskId === task.id ? nextState : candidate,
-      ),
-      ...(replacementDecision
-        ? { routingDecisions: [...(run.routingDecisions ?? []), replacementDecision] }
-        : {}),
+      taskRecovery: nextTaskRecovery,
+      ...(nextRoutingDecisions ? { routingDecisions: nextRoutingDecisions } : {}),
       decision: {
         id: EventId.make(`mission-run:${run.id}:${action}:${task.id}:${attemptNumber}`),
         kind: attemptKind,
@@ -911,8 +1039,8 @@ const make = Effect.gen(function* () {
       yield* continueReplacement({
         run: {
           ...run,
-          taskRecovery: [nextState],
-          routingDecisions: [...(run.routingDecisions ?? []), replacementDecision!],
+          taskRecovery: nextTaskRecovery,
+          routingDecisions: nextRoutingDecisions!,
         },
         model,
         task,
@@ -1248,8 +1376,22 @@ const make = Effect.gen(function* () {
       if (requiredGateFailure(task)) return;
       if (task.reviewRequired === true || run.swarmPolicy?.independentReviewRequired === true) {
         const review = currentReview(task);
-        if (!review) {
-          const selection = yield* reviewerSelection(task);
+        if (!review || review.status === "failed") {
+          const failedReviews = (task.reviews ?? []).filter(
+            (candidate) =>
+              candidate.snapshotId === task.reviewSnapshot!.id && candidate.status === "failed",
+          );
+          if (failedReviews.length >= 2)
+            return {
+              taskId: task.id,
+              code: "review_failed",
+              detail: "Independent review failed after two eligible provider attempts.",
+              blocksMission: false,
+            } satisfies MissionRunAttention;
+          const selection = yield* reviewerSelection(
+            task,
+            new Set(failedReviews.map((candidate) => candidate.reviewerModelSelection.instanceId)),
+          );
           if (!selection)
             return {
               taskId: task.id,
@@ -1257,13 +1399,18 @@ const make = Effect.gen(function* () {
               detail: "No configured independent Reviewer is currently ready.",
               blocksMission: false,
             } satisfies MissionRunAttention;
+          const attempt = failedReviews.length + 1;
           yield* engine.dispatch({
             type: "task.independent-review.request",
-            commandId: commandId(run, task.id, `independent-review:${task.reviewSnapshot.id}`),
+            commandId: commandId(
+              run,
+              task.id,
+              `independent-review:${task.reviewSnapshot.id}:${attempt}`,
+            ),
             taskId: task.id,
             snapshotId: task.reviewSnapshot.id,
             reviewId: TaskReviewId.make(
-              `mission-run:${run.id}:task:${task.id}:review:${task.reviewSnapshot.id}`,
+              `mission-run:${run.id}:task:${task.id}:review:${task.reviewSnapshot.id}:attempt:${attempt}`,
             ),
             reviewerModelSelection: selection,
             createdAt: task.reviewSnapshot.capturedAt,
@@ -1620,6 +1767,7 @@ const make = Effect.gen(function* () {
         (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
         (order.get(right) ?? Number.MAX_SAFE_INTEGER),
     )) {
+      if (recoveryHandled.has(taskId)) continue;
       const task = (model.tasks ?? []).find((candidate) => candidate.id === taskId);
       if (!task) continue;
       yield* advanceScheduledTask(run, model, latestProject, task).pipe(
@@ -1642,8 +1790,27 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const worker = yield* makeDrainableWorker((_event: OrchestrationEvent | null) =>
+  const nudgeAfterTurnDiff = Effect.fn("MissionRunReactor.nudgeAfterTurnDiff")(function* () {
+    const model = yield* read();
+    for (const run of model.missionRuns ?? []) {
+      if (run.status !== "running" && run.status !== "attention") continue;
+      yield* updateRun({
+        runId: run.id,
+        status: run.status,
+        currentReadyTaskIds: run.currentReadyTaskIds,
+        scheduledTaskIds: run.scheduledTaskIds,
+        attention: run.attention,
+        ...(run.taskRecovery ? { taskRecovery: run.taskRecovery } : {}),
+        ...(run.routingDecisions ? { routingDecisions: run.routingDecisions } : {}),
+      });
+    }
+  });
+
+  const worker = yield* makeDrainableWorker((event: OrchestrationEvent | null) =>
     reconcileAll().pipe(
+      Effect.andThen(
+        event?.type === "thread.turn-diff-completed" ? nudgeAfterTurnDiff() : Effect.void,
+      ),
       Effect.catchCause((cause) =>
         Effect.logError("Supervised Mission reconciliation failed", { cause: Cause.pretty(cause) }),
       ),

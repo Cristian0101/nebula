@@ -4,6 +4,7 @@ import type {
   OrchestrationThreadShell,
   ProviderInstanceId,
   ProjectId,
+  QualityGateDefinition,
 } from "@t3tools/contracts";
 
 import type { ProviderInstanceEntry } from "../../providerInstances";
@@ -36,6 +37,26 @@ export interface CommandDeckSummary {
   readonly attention: number;
   readonly reviewReady: number;
   readonly changedFiles: number;
+}
+
+export function providerSupportsStructuredReview(entry: ProviderInstanceEntry): boolean {
+  return entry.driverKind === "codex" || entry.driverKind === "antigravity";
+}
+
+export function taskRequiredQualityGatesPassed(
+  gates: ReadonlyArray<QualityGateDefinition>,
+  task: OrchestrationTask,
+): boolean {
+  const currentRuns = (task.qualityGateRuns ?? []).filter(
+    (run) => run.snapshotId === task.reviewSnapshot?.id,
+  );
+  return gates
+    .filter((gate) => gate.enabled && gate.required && gate.scope !== "integration")
+    .every((gate) =>
+      currentRuns.some(
+        (run) => run.gateId === gate.id && run.command === gate.command && run.status === "passed",
+      ),
+    );
 }
 
 export function selectProjectTasks(

@@ -47,7 +47,7 @@ export function integrationEligibility(
   }
 
   for (const gate of (project.qualityPolicy?.gates ?? []).filter(
-    (candidate) => candidate.enabled && candidate.required,
+    (candidate) => candidate.enabled && candidate.required && candidate.scope !== "integration",
   )) {
     const passed = (task.qualityGateRuns ?? []).some(
       (run) =>

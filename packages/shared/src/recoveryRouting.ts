@@ -50,9 +50,17 @@ export function classifyRuntimeFailure(evidence: RuntimeFailureEvidence): Failur
   if (transientCodes.has(code)) return "transport_transient";
   if (authCodes.has(code)) return "provider_unavailable_auth";
   const message = evidence.message?.toLowerCase() ?? "";
-  if (/auth|credential|token expired|unauthorized/.test(message))
+  if (
+    /auth|credential|token expired|unauthorized|provider instance .+ (?:is )?disabled|provider unavailable/.test(
+      message,
+    )
+  )
     return "provider_unavailable_auth";
-  if (/timeout|timed out|connection reset|network|transport|broken pipe/.test(message))
+  if (
+    /timeout|timed out|connection reset|network|transport|broken pipe|did not survive (?:a )?server restart/.test(
+      message,
+    )
+  )
     return "transport_transient";
   return "provider_execution_error";
 }
