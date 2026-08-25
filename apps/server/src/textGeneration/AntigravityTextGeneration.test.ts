@@ -47,7 +47,7 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
         expect(args).toContain("--output-format json");
         expect(args).toContain("--json-schema");
         expect(args).toContain("--model manual-model");
-        expect(args).toContain("--effort high");
+        expect(args).not.toContain("--effort");
         expect(args).not.toContain("--dangerously-skip-permissions");
       }),
     ),

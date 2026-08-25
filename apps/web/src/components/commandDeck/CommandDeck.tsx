@@ -28,7 +28,6 @@ import {
   CircleSlash2Icon,
   Clock3Icon,
   ExternalLinkIcon,
-  FolderGit2Icon,
   LayoutDashboardIcon,
   PlayIcon,
   PlusIcon,
@@ -39,6 +38,7 @@ import {
   Trash2Icon,
   TriangleAlertIcon,
   Undo2Icon,
+  WorkflowIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -222,15 +222,17 @@ function CommandDeckHeader({
           <Button
             size="xs"
             variant="ghost"
-            aria-label="Back to workspace"
-            onClick={() => void navigate({ to: "/" })}
+            aria-label="Back to Project Home"
+            onClick={() => void navigate({ to: "/projects/$projectKey", params: { projectKey } })}
           >
-            <ArrowLeftIcon /> Workspace
+            <ArrowLeftIcon /> Project Home
           </Button>
           <Button
             size="xs"
             variant="outline"
-            onClick={() => void navigate({ to: "/projects/$projectKey", params: { projectKey } })}
+            onClick={() =>
+              void navigate({ to: "/projects/$projectKey/settings", params: { projectKey } })
+            }
           >
             <Settings2Icon /> Project settings
           </Button>
@@ -240,7 +242,13 @@ function CommandDeckHeader({
   );
 }
 
-export function CommandDeckPage({ projectKey }: { readonly projectKey: string }) {
+export function CommandDeckPage({
+  projectKey,
+  initialSection = "tasks",
+}: {
+  readonly projectKey: string;
+  readonly initialSection?: CommandDeckSection;
+}) {
   const groups = useSettingsProjectGroups();
   const group = groups.find((candidate) => candidate.projectKey === projectKey) ?? null;
   if (!group) {
@@ -262,6 +270,7 @@ export function CommandDeckPage({ projectKey }: { readonly projectKey: string })
           project={representative}
           projectKey={projectKey}
           displayName={group.displayName}
+          initialSection={initialSection}
         />
       </div>
     </SidebarInset>
@@ -272,10 +281,12 @@ export function CommandDeck({
   project,
   projectKey,
   displayName,
+  initialSection = "tasks",
 }: {
   readonly project: CommandDeckProject;
   readonly projectKey: string;
   readonly displayName: string;
+  readonly initialSection?: CommandDeckSection;
 }) {
   const navigate = useNavigate();
   const snapshot = useAtomValue(environmentSnapshotAtom(project.environmentId));
@@ -450,7 +461,7 @@ export function CommandDeck({
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createMissionId, setCreateMissionId] = useState<MissionId | null>(null);
-  const [deckSection, setDeckSection] = useState<CommandDeckSection>("tasks");
+  const [deckSection, setDeckSection] = useState<CommandDeckSection>(initialSection);
   const [createTitle, setCreateTitle] = useState("");
   const [createObjective, setCreateObjective] = useState("");
   const [createCriteria, setCreateCriteria] = useState<string[]>([]);
@@ -1074,17 +1085,20 @@ export function CommandDeck({
           (tasks.length === 0 ? (
             <section className="flex min-h-[26rem] flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-card/75 p-8 text-center">
               <div className="max-w-md">
-                <FolderGit2Icon className="mx-auto size-8 text-primary" aria-hidden />
-                <h2 className="mt-4 text-lg font-semibold">
-                  Run multiple coding agents without sharing one writable workspace.
-                </h2>
+                <WorkflowIcon className="mx-auto size-8 text-primary" aria-hidden />
+                <h2 className="mt-4 text-lg font-semibold">Build with Nebula</h2>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Create a Task, choose a provider, set ownership, then start and review the work
-                  here.
+                  Describe an objective and Architect will propose a Mission plan for you to review
+                  before any agent starts. Or create one tightly scoped Task yourself.
                 </p>
-                <Button className="mt-5" onClick={() => setCreateOpen(true)}>
-                  Create your first Task
-                </Button>
+                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  <Button onClick={() => setDeckSection("missions")}>
+                    <WorkflowIcon /> Plan with Architect
+                  </Button>
+                  <Button variant="outline" onClick={() => setCreateOpen(true)}>
+                    <PlusIcon /> Create a Task manually
+                  </Button>
+                </div>
               </div>
             </section>
           ) : (

@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeFSP from "node:fs/promises";
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 
 import * as Context from "effect/Context";
@@ -18,6 +18,9 @@ import type {
   ProjectSearchContentsResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectDiscoveryInput,
+  ProjectDiscoveryResult,
+  ProjectDiscoverySignal,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
@@ -90,6 +93,9 @@ export class WorkspaceEntries extends Context.Service<
     readonly browse: (
       input: FilesystemBrowseInput,
     ) => Effect.Effect<FilesystemBrowseResult, WorkspaceEntriesBrowseError>;
+    readonly discoverProjects: (
+      input: ProjectDiscoveryInput,
+    ) => Effect.Effect<ProjectDiscoveryResult>;
     readonly list: (
       input: ProjectListEntriesInput,
     ) => Effect.Effect<ProjectListEntriesResult, WorkspaceEntriesError>;
@@ -140,6 +146,7 @@ const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(fu
 
 export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
+  const platform = yield* HostProcessPlatform;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const workspaceSearchIndexes = yield* WorkspaceSearchIndex.WorkspaceSearchIndexMap;
 
@@ -196,7 +203,7 @@ export const make = Effect.gen(function* () {
       const prefix = endsWithSeparator ? "" : path.basename(resolvedInputPath);
 
       const dirents = yield* Effect.tryPromise({
-        try: () => NodeFSP.readdir(parentPath, { withFileTypes: true }),
+        try: () => NodeFS.promises.readdir(parentPath, { withFileTypes: true }),
         catch: (cause) =>
           new WorkspaceEntriesReadDirectoryError({
             cwd: input.cwd,
@@ -236,6 +243,120 @@ export const make = Effect.gen(function* () {
       };
     },
   );
+
+  const discoverProjects: WorkspaceEntries["Service"]["discoverProjects"] = Effect.fn(
+    "WorkspaceEntries.discoverProjects",
+  )(function* (input) {
+    return yield* Effect.promise(async () => {
+      const ignoredDirectoryNames = new Set([
+        ".cache",
+        ".git",
+        ".next",
+        ".turbo",
+        ".vite",
+        "build",
+        "coverage",
+        "dist",
+        "node_modules",
+        "target",
+        "vendor",
+      ]);
+      const markerNames = [
+        "package.json",
+        "Cargo.toml",
+        "Package.swift",
+        "pyproject.toml",
+        "go.mod",
+      ] as const;
+      const queue: Array<{ path: string; depth: number }> = [];
+      const queued = new Set<string>();
+      const found = new Map<string, ProjectDiscoveryResult["entries"][number]>();
+      const startedAt = Date.now();
+      const scanLimit = 5_000;
+      let scannedDirectories = 0;
+      let truncated = false;
+
+      const identity = (value: string) =>
+        platform === "win32" || platform === "darwin" ? value.toLocaleLowerCase() : value;
+      for (const rawRoot of input.roots) {
+        try {
+          const expanded = expandHomePath(rawRoot, path);
+          const canonical = await NodeFS.promises.realpath(path.resolve(expanded));
+          const key = identity(canonical);
+          if (queued.has(key)) continue;
+          queued.add(key);
+          queue.push({ path: canonical, depth: 0 });
+        } catch {
+          // Approved roots can disappear or become unreadable. Return partial discovery instead
+          // of turning one stale folder into a global-search failure.
+        }
+      }
+
+      while (queue.length > 0 && found.size < input.limit) {
+        if (scannedDirectories >= scanLimit || Date.now() - startedAt > 2_000) {
+          truncated = true;
+          break;
+        }
+        const current = queue.shift();
+        if (!current) break;
+        let dirents: NodeFS.Dirent<string>[];
+        try {
+          dirents = await NodeFS.promises.readdir(current.path, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        scannedDirectories += 1;
+        const names = new Set(dirents.map((entry) => entry.name));
+        const signals: ProjectDiscoverySignal[] = [];
+        if (names.has(".git")) signals.push("git");
+        for (const marker of markerNames) {
+          if (names.has(marker)) signals.push(marker);
+        }
+        if (signals.length > 0) {
+          let canonicalPath = current.path;
+          try {
+            canonicalPath = await NodeFS.promises.realpath(current.path);
+          } catch {
+            // The directory was readable above; retain the resolved approved-root path.
+          }
+          const key = identity(canonicalPath);
+          if (!found.has(key)) {
+            found.set(key, {
+              title: path.basename(canonicalPath),
+              path: current.path,
+              canonicalPath,
+              signals,
+            });
+          }
+          // A Project root is a discovery boundary. This avoids crawling monorepo dependencies
+          // and nested caches on every refresh.
+          continue;
+        }
+        if (current.depth >= input.maxDepth) continue;
+        for (const dirent of dirents) {
+          if (
+            !dirent.isDirectory() ||
+            dirent.name.startsWith(".") ||
+            ignoredDirectoryNames.has(dirent.name)
+          )
+            continue;
+          const child = path.join(current.path, dirent.name);
+          const key = identity(child);
+          if (queued.has(key)) continue;
+          queued.add(key);
+          queue.push({ path: child, depth: current.depth + 1 });
+        }
+      }
+      if (queue.length > 0 || found.size >= input.limit) truncated = true;
+      return {
+        entries: [...found.values()].toSorted((left, right) =>
+          left.title.localeCompare(right.title),
+        ),
+        scannedDirectories,
+        truncated,
+      };
+    });
+  });
 
   const search: WorkspaceEntries["Service"]["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
@@ -288,7 +409,14 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  return WorkspaceEntries.of({ browse, list, refresh, search, searchContents });
+  return WorkspaceEntries.of({
+    browse,
+    discoverProjects,
+    list,
+    refresh,
+    search,
+    searchContents,
+  });
 });
 
 export const layer = Layer.effect(WorkspaceEntries, make).pipe(

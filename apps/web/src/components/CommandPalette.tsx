@@ -27,6 +27,7 @@ import {
   type EnvironmentId,
   type FilesystemBrowseResult,
   type ProjectId,
+  type ProjectDiscoveryEntry,
   type SourceControlDiscoveryResult,
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
@@ -586,6 +587,18 @@ function OpenCommandPaletteDialog(props: {
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const discoveredProjectsQuery = useEnvironmentQuery(
+    primaryEnvironmentId && clientSettings.projectDiscoveryRoots.length > 0
+      ? filesystemEnvironment.discoverProjects({
+          environmentId: primaryEnvironmentId,
+          input: {
+            roots: clientSettings.projectDiscoveryRoots,
+            maxDepth: 4,
+            limit: 200,
+          },
+        })
+      : null,
+  );
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const projects = useProjects();
@@ -1005,22 +1018,101 @@ function OpenCommandPaletteDialog(props: {
     ],
   );
 
-  const projectSearchItems = useMemo(
-    () =>
-      buildProjectActionItems({
-        projects: pickerProjects,
-        valuePrefix: "project",
-        searchTerms: (project) => {
-          const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-          return (
-            group?.memberProjects.flatMap((member) => [member.title, member.workspaceRoot]) ?? []
-          );
+  const addDiscoveredProject = useCallback(
+    async (entry: ProjectDiscoveryEntry) => {
+      if (!primaryEnvironmentId) return;
+      const existing = findProjectByPath(
+        projects.filter((project) => project.environmentId === primaryEnvironmentId),
+        entry.canonicalPath,
+      );
+      if (existing) {
+        await openProjectFromSearch(existing);
+        return;
+      }
+      const projectId = newProjectId();
+      const createResult = await createProject({
+        environmentId: primaryEnvironmentId,
+        input: {
+          projectId,
+          title: entry.title,
+          workspaceRoot: entry.canonicalPath,
+          createWorkspaceRootIfMissing: false,
+          defaultModelSelection: resolveDefaultProviderModelSelection(providers, null),
         },
-        icon: projectFavicon,
-        runProject: openProjectFromSearch,
-      }),
-    [openProjectFromSearch, pickerProjects, projectGroupByTargetKey],
+      });
+      if (createResult._tag === "Failure") {
+        if (!isAtomCommandInterrupted(createResult)) {
+          const error = squashAtomCommandFailure(createResult);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to add discovered Project",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+        return;
+      }
+      await handleNewThread(scopeProjectRef(primaryEnvironmentId, projectId));
+      setOpen(false);
+    },
+    [
+      createProject,
+      handleNewThread,
+      openProjectFromSearch,
+      primaryEnvironmentId,
+      projects,
+      providers,
+      setOpen,
+    ],
   );
+
+  const projectSearchItems = useMemo(() => {
+    const registered = buildProjectActionItems({
+      projects: pickerProjects,
+      valuePrefix: "project",
+      searchTerms: (project) => {
+        const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
+        return (
+          group?.memberProjects.flatMap((member) => [member.title, member.workspaceRoot]) ?? []
+        );
+      },
+      icon: projectFavicon,
+      runProject: openProjectFromSearch,
+    });
+    const discovered: CommandPaletteActionItem[] = (discoveredProjectsQuery.data?.entries ?? [])
+      .filter(
+        (entry) =>
+          !findProjectByPath(
+            projects.filter((project) => project.environmentId === primaryEnvironmentId),
+            entry.canonicalPath,
+          ),
+      )
+      .map((entry) => ({
+        kind: "action",
+        value: `discovered-project:${entry.canonicalPath}`,
+        searchTerms: [entry.title, entry.path, entry.canonicalPath, ...entry.signals],
+        title: entry.title,
+        description: (
+          <span className="flex min-w-0 items-center gap-1">
+            <span className="truncate">{entry.canonicalPath}</span>
+            <CommandPaletteMetaDot />
+            <span className="shrink-0">Add &amp; Open</span>
+          </span>
+        ),
+        icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+        run: async () => addDiscoveredProject(entry),
+      }));
+    return [...registered, ...discovered];
+  }, [
+    addDiscoveredProject,
+    discoveredProjectsQuery.data?.entries,
+    openProjectFromSearch,
+    pickerProjects,
+    primaryEnvironmentId,
+    projectGroupByTargetKey,
+    projects,
+  ]);
 
   const projectThreadItems = useMemo(
     () =>
@@ -1528,6 +1620,24 @@ function OpenCommandPaletteDialog(props: {
 
   actionItems.push({
     kind: "action",
+    value: "action:global-terminal-center",
+    searchTerms: [
+      "global terminal center",
+      "multi project",
+      "agent canvas",
+      "all sessions",
+      "providers",
+    ],
+    title: "Open Global Terminal Center",
+    description: "All projects and provider sessions",
+    icon: <TerminalIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/terminal-center" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
     value: "action:open-file-picker",
     searchTerms: ["go to file", "open file", "file picker", "find file", "quick open"],
     title: "Go to file",
@@ -1668,7 +1778,7 @@ function OpenCommandPaletteDialog(props: {
       icon: <FolderIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         await navigate({
-          to: "/projects/$projectKey",
+          to: "/projects/$projectKey/settings",
           params: { projectKey: contextualProjectGroup.projectKey },
         });
       },

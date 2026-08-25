@@ -5,7 +5,7 @@ import {
 } from "../antigravity/AntigravityCommand.ts";
 
 describe("Antigravity headless commands", () => {
-  it("builds continuation and model arguments without unsafe approval flags", () => {
+  it("builds continuation and explicit-model arguments without conflicting effort flags", () => {
     const args = buildAntigravityTurnArgs({
       prompt: "again",
       conversationId: "conv-1",
@@ -15,11 +15,22 @@ describe("Antigravity headless commands", () => {
     });
     expect(args).toContain("--conversation");
     expect(args).toContain("--model");
-    expect(args).toContain("--effort");
+    expect(args).not.toContain("--effort");
     expect(args).toContain("plan");
     expect(args).not.toContain("--new-project");
     expect(args).not.toContain("--dangerously-skip-permissions");
     expect(args).not.toContain("--acp");
+  });
+
+  it("passes provider-aware effort when Auto selects the model", () => {
+    const args = buildAntigravityTurnArgs({
+      prompt: "reason",
+      model: "auto",
+      effort: "high",
+    });
+    expect(args).toContain("--effort");
+    expect(args).toContain("high");
+    expect(args).not.toContain("--model");
   });
 
   it("creates a task-local project and only auto-accepts workspace edits on a first turn", () => {

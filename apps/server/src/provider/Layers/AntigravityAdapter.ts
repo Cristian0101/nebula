@@ -73,6 +73,16 @@ export interface AntigravityAdapterOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
 
+export function describeAntigravityFailure(value: unknown): string | undefined {
+  const summary = safeAntigravitySummary(value);
+  if (!summary) return undefined;
+  return /invalid model selection|model(?: id)? .*?(?:not found|unknown|unsupported)|unknown model/iu.test(
+    summary,
+  )
+    ? "Antigravity rejected this model ID."
+    : summary;
+}
+
 function parseResumeCursor(value: unknown): ResumeCursor | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
@@ -241,7 +251,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
           : "failed";
     const errorMessage =
       state === "failed"
-        ? safeAntigravitySummary(
+        ? describeAntigravityFailure(
             active.validationError ||
               result?.error ||
               result?.response ||

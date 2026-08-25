@@ -95,6 +95,65 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
     vi.restoreAllMocks();
   });
 
+  describe("project discovery", () => {
+    it.effect("finds bounded Project roots and skips dependency caches", () =>
+      Effect.gen(function* () {
+        const root = yield* makeTempDir({ prefix: "t3code-project-discovery-" });
+        yield* writeTextFile(root, "apps/nebula/.git/HEAD", "ref: refs/heads/main");
+        yield* writeTextFile(root, "apps/nebula/package.json", "{}");
+        yield* writeTextFile(root, "services/api/Cargo.toml", "[package]");
+        yield* writeTextFile(root, "node_modules/hidden/package.json", "{}");
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const result = yield* workspaceEntries.discoverProjects({
+          roots: [root],
+          maxDepth: 4,
+          limit: 20,
+        });
+
+        expect(result.entries.map((entry) => entry.title)).toEqual(["api", "nebula"]);
+        expect(result.entries.find((entry) => entry.title === "nebula")?.signals).toContain("git");
+        expect(result.entries.some((entry) => entry.path.includes("node_modules"))).toBe(false);
+        expect(result.truncated).toBe(false);
+      }),
+    );
+
+    it.effect("deduplicates repeated approved roots by canonical identity", () =>
+      Effect.gen(function* () {
+        const root = yield* makeTempDir({ prefix: "t3code-project-discovery-dedupe-" });
+        yield* writeTextFile(root, "project/go.mod", "module example.com/project");
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const result = yield* workspaceEntries.discoverProjects({
+          roots: [root, `${root}/`],
+          maxDepth: 2,
+          limit: 20,
+        });
+
+        expect(result.entries).toHaveLength(1);
+        expect(result.entries[0]?.signals).toEqual(["go.mod"]);
+      }),
+    );
+
+    it.effect("scans only approved roots and tolerates an inaccessible or missing root", () =>
+      Effect.gen(function* () {
+        const approved = yield* makeTempDir({ prefix: "t3code-project-approved-" });
+        const outside = yield* makeTempDir({ prefix: "t3code-project-outside-" });
+        yield* writeTextFile(approved, "inside/package.json", "{}");
+        yield* writeTextFile(outside, "outside/package.json", "{}");
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const result = yield* workspaceEntries.discoverProjects({
+          roots: [approved, `${approved}/missing`],
+          maxDepth: 3,
+          limit: 20,
+        });
+
+        expect(result.entries.map((entry) => entry.title)).toEqual(["inside"]);
+        expect(result.entries.some((entry) => entry.path.startsWith(outside))).toBe(false);
+      }),
+    );
+  });
+
   describe("list", () => {
     it.effect("returns the complete cached workspace index", () =>
       Effect.gen(function* () {

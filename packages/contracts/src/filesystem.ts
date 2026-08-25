@@ -21,6 +21,40 @@ export const FilesystemBrowseResult = Schema.Struct({
 });
 export type FilesystemBrowseResult = typeof FilesystemBrowseResult.Type;
 
+export const ProjectDiscoverySignal = Schema.Literals([
+  "git",
+  "package.json",
+  "Cargo.toml",
+  "Package.swift",
+  "pyproject.toml",
+  "go.mod",
+]);
+export type ProjectDiscoverySignal = typeof ProjectDiscoverySignal.Type;
+
+export const ProjectDiscoveryInput = Schema.Struct({
+  roots: Schema.Array(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(FILESYSTEM_PATH_MAX_LENGTH)),
+  ).check(Schema.isMaxLength(16)),
+  maxDepth: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 5 })),
+  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
+});
+export type ProjectDiscoveryInput = typeof ProjectDiscoveryInput.Type;
+
+export const ProjectDiscoveryEntry = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  canonicalPath: TrimmedNonEmptyString,
+  signals: Schema.Array(ProjectDiscoverySignal),
+});
+export type ProjectDiscoveryEntry = typeof ProjectDiscoveryEntry.Type;
+
+export const ProjectDiscoveryResult = Schema.Struct({
+  entries: Schema.Array(ProjectDiscoveryEntry),
+  scannedDirectories: Schema.Int,
+  truncated: Schema.Boolean,
+});
+export type ProjectDiscoveryResult = typeof ProjectDiscoveryResult.Type;
+
 export const FilesystemBrowseFailure = Schema.Literals([
   "windows_path_unsupported",
   "current_project_required",

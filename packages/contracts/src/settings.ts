@@ -123,6 +123,26 @@ export const DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE: EnvironmentIdentificationM
 export const FontFamilyPreference = Schema.String.check(Schema.isMaxLength(200));
 export type FontFamilyPreference = typeof FontFamilyPreference.Type;
 
+const DevServerProfileId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
+const DevServerProfileName = TrimmedNonEmptyString.check(Schema.isMaxLength(80));
+const DevServerCommand = TrimmedNonEmptyString.check(Schema.isMaxLength(4_096)).check(
+  Schema.isPattern(/^[^\r\n]+$/),
+);
+const DevServerWorkingDirectory = TrimmedNonEmptyString.check(Schema.isMaxLength(1_024));
+const DevServerPort = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 }));
+
+/** A local, human-approved command. Discovery may suggest values but never writes this record. */
+export const DevServerProfile = Schema.Struct({
+  id: DevServerProfileId,
+  name: DevServerProfileName,
+  command: DevServerCommand,
+  workingDirectory: DevServerWorkingDirectory,
+  preferredPort: Schema.NullOr(DevServerPort),
+  previewUrl: TrimmedString.check(Schema.isMaxLength(2_048)),
+  approvedAt: TrimmedNonEmptyString,
+});
+export type DevServerProfile = typeof DevServerProfile.Type;
+
 /**
  * Defaults for the in-app preview browser, applied whenever a tab is opened
  * without an explicit viewport/zoom/appearance — by the user opening a browser
@@ -210,6 +230,13 @@ export const ClientSettingsSchema = Schema.Struct({
       modelOrder: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
     }),
   ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  devServerProfilesByProject: Schema.Record(
+    TrimmedNonEmptyString,
+    Schema.Array(DevServerProfile),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  projectDiscoveryRoots: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   // Legacy plan mode. The composer's Build/Plan toggle was removed from the
   // default UI; this beta flag restores it (plus the /plan and /default slash
   // commands) for users who still rely on the old workflow.
@@ -930,6 +957,10 @@ export const ClientSettingsPatch = Schema.Struct({
       }),
     ),
   ),
+  devServerProfilesByProject: Schema.optionalKey(
+    Schema.Record(TrimmedNonEmptyString, Schema.Array(DevServerProfile)),
+  ),
+  projectDiscoveryRoots: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
   planModeEnabled: Schema.optionalKey(Schema.Boolean),
   legacySidebarEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),

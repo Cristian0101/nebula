@@ -14,11 +14,18 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { makeAntigravityAdapter } from "./AntigravityAdapter.ts";
+import { describeAntigravityFailure, makeAntigravityAdapter } from "./AntigravityAdapter.ts";
 
 const decodeSettings = Schema.decodeSync(AntigravitySettings);
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const instanceId = ProviderInstanceId.make("antigravity");
+
+it("surfaces rejected custom model ids without leaking CLI detail", () => {
+  expect(describeAntigravityFailure('invalid model selection (--model "invented-model")')).toBe(
+    "Antigravity rejected this model ID.",
+  );
+  expect(describeAntigravityFailure("network unavailable")).toBe("network unavailable");
+});
 
 it.layer(NodeServices.layer)("AntigravityAdapter", (it) => {
   it.effect("streams normalized events, validates cwd, and resumes by conversation id", () =>

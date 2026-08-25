@@ -19,6 +19,8 @@ import {
   providerLaunchBlockReason,
   removeTerminalFromCanvas,
   terminalThreadCreateFields,
+  FOCUSED_TERMINAL_SHELL_CLASS,
+  terminalCenterKeyboardAction,
   terminalWorkspaceLabel,
   type TerminalCanvasNode,
 } from "./terminalCenterLogic";
@@ -28,6 +30,7 @@ const threadId = (value: string) => ThreadId.make(value);
 function node(index: number, providerId = `provider-${index % 6}`): TerminalCanvasNode {
   return {
     threadId: threadId(`thread-${index}`),
+    projectId: `project-${index % 5}`,
     providerId,
     status: index % 3 === 0 ? "working" : index % 3 === 1 ? "ready" : "attention",
     taskId: null,
@@ -38,20 +41,22 @@ function node(index: number, providerId = `provider-${index % 6}`): TerminalCanv
 describe("Terminal Center layouts", () => {
   const nodes = Array.from({ length: 20 }, (_, index) => node(index));
 
-  it.each(["grid", "provider-columns", "status-lanes", "radial", "compact"] as const)(
-    "places all 20 nodes in %s without collisions",
-    (layout) => {
-      const positions = arrangeTerminalNodes({
-        nodes,
-        layout,
-        selectedThreadId: nodes[4]!.threadId,
-      });
-      expect(Object.keys(positions)).toHaveLength(20);
-      expect(new Set(Object.values(positions).map((point) => `${point.x}:${point.y}`)).size).toBe(
-        20,
-      );
-    },
-  );
+  it.each([
+    "grid",
+    "project-columns",
+    "provider-columns",
+    "status-lanes",
+    "radial",
+    "compact",
+  ] as const)("places all 20 nodes in %s without collisions", (layout) => {
+    const positions = arrangeTerminalNodes({
+      nodes,
+      layout,
+      selectedThreadId: nodes[4]!.threadId,
+    });
+    expect(Object.keys(positions)).toHaveLength(20);
+    expect(new Set(Object.values(positions).map((point) => `${point.x}:${point.y}`)).size).toBe(20);
+  });
 
   it("preserves manual positions in freeform mode", () => {
     const positions = { [nodes[0]!.threadId]: { x: 117, y: 203 } };
@@ -121,6 +126,39 @@ describe("Terminal Center layouts", () => {
 });
 
 describe("Terminal Center composition", () => {
+  it("keeps the focused terminal viewport full-height without a stacked shell header", () => {
+    expect(FOCUSED_TERMINAL_SHELL_CLASS).toContain("h-dvh");
+    expect(FOCUSED_TERMINAL_SHELL_CLASS).toContain("min-h-0");
+    expect(FOCUSED_TERMINAL_SHELL_CLASS).toContain("overflow-hidden");
+  });
+
+  it("focuses with Enter and exits with Escape without hijacking form controls", () => {
+    expect(
+      terminalCenterKeyboardAction({
+        key: "Enter",
+        selectedThreadId: "thread-1",
+        focused: false,
+        targetIsFormControl: false,
+      }),
+    ).toBe("focus");
+    expect(
+      terminalCenterKeyboardAction({
+        key: "Enter",
+        selectedThreadId: "thread-1",
+        focused: false,
+        targetIsFormControl: true,
+      }),
+    ).toBeNull();
+    expect(
+      terminalCenterKeyboardAction({
+        key: "Escape",
+        selectedThreadId: "thread-1",
+        focused: true,
+        targetIsFormControl: false,
+      }),
+    ).toBe("exit");
+  });
+
   it("keeps provider availability registry-driven and explains disabled entries", () => {
     expect(
       providerLaunchBlockReason({

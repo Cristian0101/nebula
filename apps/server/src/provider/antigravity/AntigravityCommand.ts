@@ -17,7 +17,7 @@ export function buildAntigravityTurnArgs(input: {
     "stream-json",
     ...(input.conversationId ? ["--conversation", input.conversationId] : []),
     ...(input.model && input.model !== "auto" ? ["--model", input.model] : []),
-    ...(input.effort ? ["--effort", input.effort] : []),
+    ...(input.effort && (!input.model || input.model === "auto") ? ["--effort", input.effort] : []),
   ];
 }
 
@@ -37,6 +37,6 @@ export function buildAntigravityStructuredArgs(input: {
     "--json-schema",
     input.jsonSchema,
     ...(input.model && input.model !== "auto" ? ["--model", input.model] : []),
-    ...(input.effort ? ["--effort", input.effort] : []),
+    ...(input.effort && (!input.model || input.model === "auto") ? ["--effort", input.effort] : []),
   ];
 }

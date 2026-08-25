@@ -11,6 +11,7 @@ import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-ro
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
+import nebulaMarkUrl from "../../assets/nebula-mark.png";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -84,7 +85,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
     <Link
       aria-label="Go to threads"
       className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center gap-2 overflow-hidden rounded-md px-0.5 outline-hidden ring-ring focus-visible:ring-2 md:flex",
+        "relative z-10 ml-2 flex h-7 w-fit min-w-0 shrink-0 items-center gap-2 overflow-hidden rounded-md px-0.5 outline-hidden ring-ring focus-visible:ring-2 md:ml-[var(--workspace-titlebar-content-left)]",
         onBackdrop ? "text-white" : "text-foreground",
       )}
       to="/"
@@ -104,41 +105,14 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
 
 function NebulaMark() {
   return (
-    <svg
-      aria-label="Nebula"
-      className="size-5 shrink-0"
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <ellipse
-        cx="12"
-        cy="12"
-        fill="none"
-        opacity="0.48"
-        rx="9"
-        ry="3.8"
-        stroke="currentColor"
-        strokeWidth="1.15"
-        transform="rotate(-18 12 12)"
-      />
-      <ellipse
-        cx="12"
-        cy="12"
-        fill="none"
-        opacity="0.3"
-        rx="8"
-        ry="3.2"
-        stroke="currentColor"
-        strokeWidth="1"
-        transform="rotate(48 12 12)"
-      />
-      <path
-        d="M12 6.4c.45 3.28 2.32 5.15 5.6 5.6-3.28.45-5.15 2.32-5.6 5.6-.45-3.28-2.32-5.15-5.6-5.6 3.28-.45 5.15-2.32 5.6-5.6Z"
-        fill="var(--primary)"
-      />
-      <circle cx="19.3" cy="8.2" fill="var(--update)" r="1.1" />
-      <circle cx="5" cy="14.8" fill="currentColor" opacity="0.7" r="0.85" />
-    </svg>
+    <img
+      alt=""
+      aria-hidden="true"
+      className="size-5 shrink-0 object-contain"
+      height={20}
+      src={nebulaMarkUrl}
+      width={20}
+    />
   );
 }
 

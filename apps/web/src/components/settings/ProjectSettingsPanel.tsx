@@ -208,7 +208,7 @@ function ProjectSettingsBreadcrumb({ projectKey }: { projectKey: string }) {
     ).then((clicked) => {
       if (clicked._tag === "Failure" || clicked.value === null) return;
       void navigate({
-        to: "/projects/$projectKey",
+        to: "/projects/$projectKey/settings",
         params: { projectKey: clicked.value },
         replace: true,
         hashScrollIntoView: false,
@@ -271,7 +271,7 @@ export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
     );
     if (successor) {
       void navigate({
-        to: "/projects/$projectKey",
+        to: "/projects/$projectKey/settings",
         params: { projectKey: successor.projectKey },
         replace: true,
         hashScrollIntoView: false,
@@ -817,6 +817,72 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   const selectedCheckout =
     group.memberProjects.find((member) => member.physicalProjectKey === selectedCheckoutKey) ??
     representative;
+  const devServerProfiles = settings.devServerProfilesByProject[group.projectKey] ?? [];
+  const [devServerName, setDevServerName] = useState("");
+  const [devServerCommand, setDevServerCommand] = useState("");
+  const [devServerWorkingDirectory, setDevServerWorkingDirectory] = useState(".");
+  const [devServerPort, setDevServerPort] = useState("");
+  const [devServerPreviewUrl, setDevServerPreviewUrl] = useState("");
+  const saveDevServerProfiles = useCallback(
+    (profiles: typeof devServerProfiles) =>
+      updateClientSettings({
+        devServerProfilesByProject: {
+          ...settings.devServerProfilesByProject,
+          [group.projectKey]: profiles,
+        },
+      }),
+    [group.projectKey, settings.devServerProfilesByProject, updateClientSettings],
+  );
+  const approveDevServerProfile = useCallback(() => {
+    const name = devServerName.trim();
+    const command = devServerCommand.trim();
+    const workingDirectory = devServerWorkingDirectory.trim() || ".";
+    const preferredPort = devServerPort.trim() ? Number(devServerPort) : null;
+    if (!name || !command) {
+      toastManager.add({
+        type: "warning",
+        title: "Name and command are required",
+        description: "Nebula only runs commands you explicitly review and approve here.",
+      });
+      return;
+    }
+    if (/\r|\n/.test(command)) {
+      toastManager.add({ type: "warning", title: "Use one command per profile" });
+      return;
+    }
+    if (
+      preferredPort !== null &&
+      (!Number.isInteger(preferredPort) || preferredPort < 1 || preferredPort > 65_535)
+    ) {
+      toastManager.add({ type: "warning", title: "Preferred port must be between 1 and 65535" });
+      return;
+    }
+    saveDevServerProfiles([
+      ...devServerProfiles,
+      {
+        id: randomUUID(),
+        name,
+        command,
+        workingDirectory,
+        preferredPort,
+        previewUrl: devServerPreviewUrl.trim(),
+        approvedAt: new Date().toISOString(),
+      },
+    ]);
+    setDevServerName("");
+    setDevServerCommand("");
+    setDevServerWorkingDirectory(".");
+    setDevServerPort("");
+    setDevServerPreviewUrl("");
+  }, [
+    devServerCommand,
+    devServerName,
+    devServerPort,
+    devServerPreviewUrl,
+    devServerProfiles,
+    devServerWorkingDirectory,
+    saveDevServerProfiles,
+  ]);
   const selectedServerConfig = useAtomValue(
     serverEnvironment.configValueAtom(selectedCheckout.environmentId),
   );
@@ -1147,6 +1213,91 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
               </Button>
             }
           />
+        </SettingsSection>
+        <SettingsSection title="Dev Servers">
+          <SettingsRow
+            title="Approved development commands"
+            description="Nebula never runs a discovered repository command automatically. Add the exact command only after you have reviewed it."
+            control={
+              <span className="text-sm text-muted-foreground">
+                {devServerProfiles.length} approved
+              </span>
+            }
+          />
+          <div className="space-y-3 border-t border-border/70 px-4 py-4 sm:px-6">
+            {devServerProfiles.map((profile) => (
+              <div
+                key={profile.id}
+                className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/20 p-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">{profile.name}</p>
+                  <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                    {profile.command}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {profile.workingDirectory}
+                    {profile.preferredPort ? ` · :${profile.preferredPort}` : ""}
+                    {profile.previewUrl ? ` · ${profile.previewUrl}` : ""}
+                  </p>
+                </div>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`Delete ${profile.name} Dev Server profile`}
+                  onClick={() =>
+                    saveDevServerProfiles(
+                      devServerProfiles.filter((candidate) => candidate.id !== profile.id),
+                    )
+                  }
+                >
+                  <Trash2Icon />
+                </Button>
+              </div>
+            ))}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input
+                aria-label="Dev Server profile name"
+                placeholder="Web"
+                value={devServerName}
+                onChange={(event) => setDevServerName(event.currentTarget.value)}
+              />
+              <Input
+                aria-label="Dev Server command"
+                placeholder="npm run dev"
+                value={devServerCommand}
+                onChange={(event) => setDevServerCommand(event.currentTarget.value)}
+              />
+              <Input
+                aria-label="Dev Server working directory"
+                placeholder="."
+                value={devServerWorkingDirectory}
+                onChange={(event) => setDevServerWorkingDirectory(event.currentTarget.value)}
+              />
+              <Input
+                aria-label="Dev Server preferred port"
+                inputMode="numeric"
+                placeholder="3000"
+                value={devServerPort}
+                onChange={(event) => setDevServerPort(event.currentTarget.value)}
+              />
+              <Input
+                aria-label="Dev Server preview URL"
+                placeholder="http://localhost:3000"
+                value={devServerPreviewUrl}
+                onChange={(event) => setDevServerPreviewUrl(event.currentTarget.value)}
+                className="sm:col-span-2"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                Saving records this exact command as human-approved for this Project.
+              </p>
+              <Button size="sm" onClick={approveDevServerProfile}>
+                <PlusIcon /> Approve profile
+              </Button>
+            </div>
+          </div>
         </SettingsSection>
         <ProjectQualityAndReviewSettings project={representative} />
         <ProjectSharedResourcesSettings project={representative} />

@@ -39,6 +39,7 @@ import { useServerConfigs } from "../../state/entities";
 import { environmentSnapshotAtom } from "../../state/shell";
 import { taskEnvironment } from "../../state/tasks";
 import { threadEnvironment } from "../../state/threads";
+import { useKnownTerminalSessions } from "../../state/terminalSessions";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useUiStateStore } from "../../uiStateStore";
 import { deriveCurrentAction } from "../commandDeck/commandDeckLogic";
@@ -65,6 +66,7 @@ import { useSettingsProjectGroups } from "../settings/ProjectSettingsPanel";
 import {
   arrangeTerminalNodes,
   DEFAULT_TERMINAL_CENTER_STATE,
+  FOCUSED_TERMINAL_SHELL_CLASS,
   deriveTerminalNodeStatus,
   hasSharedCheckoutWarning,
   hydrateTerminalCanvasThreads,
@@ -76,13 +78,16 @@ import {
   type TerminalCenterLayout,
   type TerminalCenterWorkspaceMode,
   terminalThreadCreateFields,
+  terminalCenterKeyboardAction,
   terminalWorkspaceLabel,
 } from "./terminalCenterLogic";
+import { DevServerControls, devServerTerminalId } from "./DevServerControls";
 
 const ChatView = lazy(() => import("../ChatView"));
 
 const layoutLabels: Record<TerminalCenterLayout, string> = {
   grid: "Grid",
+  "project-columns": "Project columns",
   "provider-columns": "Provider columns",
   "status-lanes": "Status lanes",
   "mission-flow": "Mission flow",
@@ -133,6 +138,11 @@ function TerminalCenter({
   const snapshot = useAtomValue(environmentSnapshotAtom(project.environmentId));
   const serverConfig = useServerConfigs().get(project.environmentId) ?? null;
   const settings = usePrimarySettings();
+  const devServerProfiles = settings.devServerProfilesByProject[projectKey] ?? [];
+  const terminalSessions = useKnownTerminalSessions({
+    environmentId: project.environmentId,
+    threadId: null,
+  });
   const entries = useMemo(
     () =>
       sortProviderInstanceEntries(
@@ -279,6 +289,7 @@ function TerminalCenter({
         const mission = task ? missionByTask.get(task.id) : null;
         return {
           threadId: thread.id,
+          projectId: project.id,
           providerId: thread.modelSelection.instanceId,
           status: deriveTerminalNodeStatus(thread),
           taskId: task?.id ?? null,
@@ -537,7 +548,17 @@ function TerminalCenter({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && focusThreadId) {
+      const targetIsFormControl =
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLSelectElement ||
+        event.target instanceof HTMLTextAreaElement;
+      const action = terminalCenterKeyboardAction({
+        key: event.key,
+        selectedThreadId: selectedThread?.id ?? null,
+        focused: focusThreadId !== null,
+        targetIsFormControl,
+      });
+      if (action === "exit") {
         event.preventDefault();
         setFocusThreadId(null);
       }
@@ -545,14 +566,13 @@ function TerminalCenter({
         event.preventDefault();
         fitAll();
       }
-      if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && selectedThread) {
+      if (action === "focus" && selectedThread) {
         event.preventDefault();
         setFocusThreadId(selectedThread.id);
       }
       if (
         (event.key === "ArrowRight" || event.key === "ArrowLeft") &&
-        !(event.target instanceof HTMLInputElement) &&
-        !(event.target instanceof HTMLSelectElement) &&
+        !targetIsFormControl &&
         visibleThreads.length > 0
       ) {
         const currentIndex = Math.max(
@@ -589,40 +609,38 @@ function TerminalCenter({
 
   if (focusThreadId)
     return (
-      <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background">
-        <div className="flex h-full flex-col">
-          <div className="flex h-11 shrink-0 items-center gap-2 border-b border-black/[0.08] bg-card px-3">
-            <Button size="xs" variant="ghost" onClick={() => setFocusThreadId(null)}>
-              <ArrowLeftIcon /> Canvas
-            </Button>
-            <span className="text-xs text-muted-foreground">
-              Focused terminal · Escape to return
-            </span>
-          </div>
-          <div className="min-h-0 flex-1">
-            <Suspense
-              fallback={
-                <div className="grid h-full place-items-center text-sm text-muted-foreground">
-                  Loading terminal…
-                </div>
-              }
-            >
-              <ChatView
-                environmentId={project.environmentId}
-                threadId={focusThreadId}
-                routeKind="server"
-                reserveTitleBarControlInset={false}
-              />
-            </Suspense>
-          </div>
+      <SidebarInset className={FOCUSED_TERMINAL_SHELL_CLASS}>
+        <div className="absolute left-2 top-2 z-50">
+          <Button
+            size="xs"
+            variant="secondary"
+            className="shadow-sm"
+            onClick={() => setFocusThreadId(null)}
+          >
+            <ArrowLeftIcon /> Canvas · Esc
+          </Button>
         </div>
+        <Suspense
+          fallback={
+            <div className="grid h-full place-items-center text-sm text-muted-foreground">
+              Loading terminal…
+            </div>
+          }
+        >
+          <ChatView
+            environmentId={project.environmentId}
+            threadId={focusThreadId}
+            routeKind="server"
+            reserveTitleBarControlInset={false}
+          />
+        </Suspense>
       </SidebarInset>
     );
 
   return (
-    <SidebarInset className="h-dvh min-h-0 w-auto overflow-hidden bg-[#070d1b] text-slate-100 isolate">
+    <SidebarInset className="h-dvh min-h-0 w-auto overflow-hidden bg-background text-foreground isolate">
       <div className="flex h-full min-h-0 flex-col">
-        <WorkspacePageHeader electron={isElectron} className="border-white/8 bg-[#0a1224]">
+        <WorkspacePageHeader electron={isElectron} className="border-border/70 bg-card/80">
           <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
             <WorkspaceBreadcrumb ariaLabel="Terminal Center breadcrumb">
               <WorkspaceBreadcrumbItem>Projects</WorkspaceBreadcrumbItem>
@@ -632,8 +650,14 @@ function TerminalCenter({
               <WorkspaceBreadcrumbItem current>Terminal Center</WorkspaceBreadcrumbItem>
             </WorkspaceBreadcrumb>
             <div className="flex items-center gap-1">
-              <Button size="xs" variant="ghost" onClick={() => void navigate({ to: "/" })}>
-                <ArrowLeftIcon /> Workspace
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() =>
+                  void navigate({ to: "/projects/$projectKey", params: { projectKey } })
+                }
+              >
+                <ArrowLeftIcon /> Project Home
               </Button>
               <Button
                 size="xs"
@@ -652,7 +676,7 @@ function TerminalCenter({
                 variant="ghost"
                 aria-label="Project settings"
                 onClick={() =>
-                  void navigate({ to: "/projects/$projectKey", params: { projectKey } })
+                  void navigate({ to: "/projects/$projectKey/settings", params: { projectKey } })
                 }
               >
                 <Settings2Icon />
@@ -661,11 +685,11 @@ function TerminalCenter({
           </div>
         </WorkspacePageHeader>
         <section
-          className="shrink-0 border-b border-white/8 bg-[#0a1224] px-4 py-3"
+          className="shrink-0 border-b border-border/70 bg-card/60 px-4 py-3"
           aria-label="Quick provider launcher"
         >
           <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-1 text-xs text-slate-400">Launch provider</span>
+            <span className="mr-1 text-xs text-muted-foreground">Launch provider</span>
             {entries.map((entry) => {
               const blockReason = providerLaunchBlockReason(entry);
               const ready = blockReason === null;
@@ -676,9 +700,9 @@ function TerminalCenter({
                   type="button"
                   disabled={!ready || busyProviderId === entry.instanceId}
                   onClick={() => requestLaunch(entry)}
-                  className="group flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.045] px-3 py-2 text-sm text-slate-200 transition hover:border-[#ff7f6a]/45 hover:bg-white/[0.075] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="group flex items-center gap-2 rounded-lg border border-border bg-background/70 px-3 py-2 text-sm transition hover:border-primary/45 hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-45"
                 >
-                  <PlusIcon className="size-3.5 text-[#ff7f6a]" />
+                  <PlusIcon className="size-3.5 text-primary" />
                   <ProviderInstanceIcon
                     driverKind={entry.driverKind}
                     displayName={entry.displayName}
@@ -687,7 +711,9 @@ function TerminalCenter({
                   />
                   <span>{entry.displayName}</span>
                   {!ready ? (
-                    <span className="max-w-28 truncate text-[10px] text-slate-500">{reason}</span>
+                    <span className="max-w-28 truncate text-[10px] text-muted-foreground">
+                      {reason}
+                    </span>
                   ) : null}
                 </button>
               );
@@ -719,7 +745,7 @@ function TerminalCenter({
           </div>
         </section>
         {activeMissionRuns.length > 0 ? (
-          <div className="flex shrink-0 items-center justify-between gap-4 border-b border-[#ff7f6a]/20 bg-[#ff7f6a]/8 px-4 py-2 text-xs text-slate-200">
+          <div className="flex shrink-0 items-center justify-between gap-4 border-b border-primary/20 bg-primary/[0.06] px-4 py-2 text-xs">
             <span>
               {activeMissionRuns.length} supervised Mission{" "}
               {activeMissionRuns.length === 1 ? "Run" : "Runs"} active ·{" "}
@@ -819,27 +845,27 @@ function TerminalCenter({
               aria-hidden
               style={{
                 backgroundImage:
-                  "radial-gradient(circle at 1px 1px, rgba(148,163,184,.32) 1px, transparent 0)",
+                  "radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--muted-foreground) 32%, transparent) 1px, transparent 0)",
                 backgroundSize: `${24 * state.viewport.zoom}px ${24 * state.viewport.zoom}px`,
                 backgroundPosition: `${state.viewport.x}px ${state.viewport.y}px`,
               }}
             />
-            <div className="absolute left-3 top-3 z-20 flex flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-[#0a1224]/95 p-1.5 shadow-xl backdrop-blur">
+            <div className="absolute left-3 top-3 z-20 flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-card/95 p-1.5 shadow-xl backdrop-blur">
               <div className="relative">
-                <SearchIcon className="absolute left-2 top-2 size-3.5 text-slate-500" />
+                <SearchIcon className="absolute left-2 top-2 size-3.5 text-muted-foreground" />
                 <input
                   aria-label="Search terminal nodes"
                   value={search}
                   onChange={(event) => setSearch(event.currentTarget.value)}
                   placeholder="Search nodes"
-                  className="h-8 w-40 rounded-md border border-white/10 bg-black/20 pl-7 pr-2 text-xs outline-none focus:border-[#ff7f6a]/50"
+                  className="h-8 w-40 rounded-md border border-border bg-background pl-7 pr-2 text-xs outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
               <select
                 aria-label="Arrange canvas"
                 value={state.layout}
                 onChange={(event) => applyLayout(event.currentTarget.value as TerminalCenterLayout)}
-                className="h-8 rounded-md border border-white/10 bg-[#0d172b] px-2 text-xs"
+                className="h-8 rounded-md border border-border bg-background px-2 text-xs"
               >
                 <option disabled>Arrange</option>
                 {TERMINAL_CENTER_LAYOUTS.map((layout) => (
@@ -857,12 +883,12 @@ function TerminalCenter({
             </div>
             {visibleThreads.length === 0 ? (
               <div className="absolute inset-0 grid place-items-center">
-                <div className="max-w-sm rounded-2xl border border-white/10 bg-[#0a1224]/80 p-8 text-center shadow-2xl">
-                  <div className="mx-auto mb-4 grid size-12 place-items-center rounded-xl border border-[#ff7f6a]/25 bg-[#ff7f6a]/10">
-                    <BotIcon className="size-5 text-[#ff9a86]" />
+                <div className="max-w-sm rounded-2xl border border-border bg-card/85 p-8 text-center shadow-xl">
+                  <div className="mx-auto mb-4 grid size-12 place-items-center rounded-xl border border-primary/25 bg-primary/10">
+                    <BotIcon className="size-5 text-primary" />
                   </div>
                   <h1 className="text-lg font-medium">Terminal Center</h1>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     Launch a configured provider above. A canonical Thread appears here ready for
                     its first prompt—no Mission or Task required.
                   </p>
@@ -893,7 +919,7 @@ function TerminalCenter({
                           key={`${mission.id}:${dependency.prerequisiteTaskId}:${dependency.dependentTaskId}`}
                           d={`M ${from.x + 272} ${from.y + 82} C ${from.x + 302} ${from.y + 82}, ${to.x - 30} ${to.y + 82}, ${to.x} ${to.y + 82}`}
                           fill="none"
-                          stroke="rgba(148,163,184,.5)"
+                          stroke="color-mix(in srgb, var(--muted-foreground) 50%, transparent)"
                           strokeWidth="1.5"
                         />,
                       ];
@@ -911,19 +937,33 @@ function TerminalCenter({
                 const task = taskByThread.get(thread.id);
                 const mission = task ? missionByTask.get(task.id) : null;
                 const attempt = attemptByThread.get(thread.id);
+                const devServerProfile = devServerProfiles[0] ?? null;
+                const devServerSession = devServerProfile
+                  ? terminalSessions.find(
+                      (session) =>
+                        session.target.threadId === thread.id &&
+                        session.target.terminalId === devServerTerminalId(devServerProfile.id),
+                    )
+                  : null;
                 const selected = state.selectedThreadId === thread.id;
                 return (
                   <article
                     key={thread.id}
                     data-terminal-node
-                    className={`absolute w-[272px] select-none rounded-xl border bg-[#0c1629]/95 shadow-xl backdrop-blur ${selected ? "border-[#ff7f6a]/65 ring-1 ring-[#ff7f6a]/25" : "border-white/10"}`}
+                    className={`absolute w-[272px] select-none rounded-xl border bg-card/95 shadow-lg backdrop-blur ${selected ? "border-primary ring-2 ring-primary/20" : "border-border"}`}
                     style={{ left: point.x, top: point.y }}
                     onClick={() => setSelection(project.id, thread.id)}
+                    onDoubleClick={() => setFocusThreadId(thread.id)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      setFocusThreadId(thread.id);
+                    }}
                     tabIndex={0}
                     aria-label={`${thread.title}, ${statusLabel(thread)}, ${terminalWorkspaceLabel({ worktreePath: thread.worktreePath, taskBacked: Boolean(task) })}`}
                   >
                     <div
-                      className="flex cursor-grab items-center gap-2 border-b border-white/8 px-3 py-2.5 active:cursor-grabbing"
+                      className="flex cursor-grab items-center gap-2 border-b border-border px-3 py-2.5 active:cursor-grabbing"
                       onPointerDown={(event) => {
                         event.stopPropagation();
                         event.currentTarget.setPointerCapture(event.pointerId);
@@ -944,7 +984,7 @@ function TerminalCenter({
                       />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{thread.title}</p>
-                        <p className="truncate text-[11px] text-slate-400">
+                        <p className="truncate text-[11px] text-muted-foreground">
                           {entry?.displayName ?? thread.modelSelection.instanceId} ·{" "}
                           {thread.modelSelection.model}
                           {attempt ? ` · Attempt ${attempt.number}` : ""}
@@ -957,8 +997,8 @@ function TerminalCenter({
                     </div>
                     <div className="space-y-2 px-3 py-2.5 text-xs">
                       <div className="flex justify-between gap-3">
-                        <span className="text-slate-500">Workspace</span>
-                        <span className="truncate text-slate-300">
+                        <span className="text-muted-foreground">Workspace</span>
+                        <span className="truncate">
                           {terminalWorkspaceLabel({
                             worktreePath: thread.worktreePath,
                             taskBacked: Boolean(task),
@@ -966,27 +1006,37 @@ function TerminalCenter({
                         </span>
                       </div>
                       <div className="flex justify-between gap-3">
-                        <span className="text-slate-500">Current action</span>
-                        <span className="truncate text-slate-300">
-                          {deriveCurrentAction(thread)}
-                        </span>
+                        <span className="text-muted-foreground">Current action</span>
+                        <span className="truncate">{deriveCurrentAction(thread)}</span>
                       </div>
                       {task ? (
                         <div className="flex justify-between gap-3">
-                          <span className="text-slate-500">Task</span>
-                          <span className="truncate text-slate-300">
+                          <span className="text-muted-foreground">Task</span>
+                          <span className="truncate">
                             {task.title}
                             {mission ? ` · ${mission.title}` : ""}
                           </span>
                         </div>
                       ) : null}
+                      {devServerProfile ? (
+                        <div className="flex justify-between gap-3">
+                          <span className="text-muted-foreground">Dev</span>
+                          <span className="truncate">
+                            {devServerSession?.state.hasRunningSubprocess ? "●" : "○"}{" "}
+                            {devServerSession?.state.hasRunningSubprocess ? "Running" : "Stopped"}
+                            {devServerProfile.preferredPort
+                              ? ` · :${devServerProfile.preferredPort}`
+                              : ""}
+                          </span>
+                        </div>
+                      ) : null}
                       {!entry || !entry.isAvailable ? (
-                        <p className="rounded-md bg-amber-400/10 px-2 py-1.5 text-amber-200">
+                        <p className="rounded-md bg-amber-500/10 px-2 py-1.5 text-foreground">
                           Provider unavailable. Thread preserved.
                         </p>
                       ) : null}
                     </div>
-                    <div className="flex items-center justify-between border-t border-white/8 px-2 py-1.5">
+                    <div className="flex items-center justify-between border-t border-border px-2 py-1.5">
                       <Button
                         size="xs"
                         variant="ghost"
@@ -1013,9 +1063,11 @@ function TerminalCenter({
                 );
               })}
             </div>
-            <div className="absolute bottom-3 left-3 z-20 flex items-center gap-1 rounded-lg border border-white/10 bg-[#0a1224]/95 p-1 text-xs text-slate-400">
+            <div className="absolute bottom-3 left-3 z-20 flex items-center gap-1 rounded-lg border border-border bg-card/95 p-1 text-xs text-muted-foreground shadow-sm">
               <button
-                className="px-2 py-1 hover:text-white"
+                type="button"
+                className="px-2 py-1 hover:text-foreground"
+                aria-label="Zoom out"
                 onClick={() =>
                   setViewport(project.id, {
                     ...state.viewport,
@@ -1027,7 +1079,9 @@ function TerminalCenter({
               </button>
               <span className="w-10 text-center">{Math.round(state.viewport.zoom * 100)}%</span>
               <button
-                className="px-2 py-1 hover:text-white"
+                type="button"
+                className="px-2 py-1 hover:text-foreground"
+                aria-label="Zoom in"
                 onClick={() =>
                   setViewport(project.id, {
                     ...state.viewport,
@@ -1039,13 +1093,13 @@ function TerminalCenter({
               </button>
             </div>
           </div>
-          <aside className="hidden w-72 shrink-0 border-l border-white/8 bg-[#0a1224] p-4 xl:block">
-            <p className="text-xs text-slate-500">Selected terminal</p>
+          <aside className="hidden w-72 shrink-0 border-l border-border bg-card/75 p-4 lg:block">
+            <p className="text-xs text-muted-foreground">Selected terminal</p>
             {selectedThread ? (
               <div className="mt-3 space-y-4">
                 <div>
                   <h2 className="text-sm font-medium">{selectedThread.title}</h2>
-                  <p className="mt-1 text-xs text-slate-400">Thread {selectedThread.id}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Thread {selectedThread.id}</p>
                 </div>
                 <Button className="w-full" onClick={() => setFocusThreadId(selectedThread.id)}>
                   <CrosshairIcon /> Focus selected terminal
@@ -1062,8 +1116,17 @@ function TerminalCenter({
                 >
                   Open full workspace
                 </Button>
-                <div className="rounded-lg border border-white/8 bg-white/[0.03] p-3 text-xs text-slate-400">
-                  <p className="text-slate-200">Canonical Thread</p>
+                <div className="border-t border-border pt-3">
+                  <p className="mb-2 text-xs font-medium">Dev Servers</p>
+                  <DevServerControls
+                    environmentId={project.environmentId}
+                    projectKey={projectKey}
+                    projectWorkspaceRoot={project.workspaceRoot}
+                    thread={selectedThread}
+                  />
+                </div>
+                <div className="rounded-lg border border-border bg-muted/25 p-3 text-xs text-muted-foreground">
+                  <p className="text-foreground">Canonical Thread</p>
                   <p className="mt-1">
                     Messages, composer, provider stream, tools, terminal, and model controls are the
                     existing Thread workspace—not canvas copies.
@@ -1071,7 +1134,9 @@ function TerminalCenter({
                 </div>
               </div>
             ) : (
-              <p className="mt-3 text-sm text-slate-400">Select a node to inspect or focus it.</p>
+              <p className="mt-3 text-sm text-muted-foreground">
+                Select a node to inspect or focus it.
+              </p>
             )}
           </aside>
         </div>
@@ -1097,7 +1162,7 @@ function TerminalCenter({
               <label className="block text-sm">
                 <span className="mb-1 block text-muted-foreground">Default workspace</span>
                 <select
-                  className="w-full rounded-md border border-black/[0.08] bg-background p-2"
+                  className="w-full rounded-md border border-border bg-background p-2"
                   value={workspaceMode}
                   onChange={(event) =>
                     setWorkspaceMode(event.currentTarget.value as TerminalCenterWorkspaceMode)
@@ -1110,7 +1175,7 @@ function TerminalCenter({
               <label className="block text-sm">
                 <span className="mb-1 block text-muted-foreground">Default model</span>
                 <select
-                  className="w-full rounded-md border border-black/[0.08] bg-background p-2"
+                  className="w-full rounded-md border border-border bg-background p-2"
                   value={model}
                   onChange={(event) => setModel(event.currentTarget.value)}
                 >
@@ -1125,7 +1190,7 @@ function TerminalCenter({
                 <label className="block text-sm">
                   <span className="mb-1 block text-muted-foreground">Task write scope</span>
                   <input
-                    className="w-full rounded-md border border-black/[0.08] bg-background p-2"
+                    className="w-full rounded-md border border-border bg-background p-2"
                     value={writePattern}
                     onChange={(event) => setWritePattern(event.currentTarget.value)}
                     placeholder="apps/web/**"
@@ -1135,7 +1200,7 @@ function TerminalCenter({
                   </span>
                 </label>
               ) : (
-                <div className="rounded-md border border-amber-500/20 bg-amber-500/8 p-3 text-xs text-amber-800 dark:text-amber-200">
+                <div className="rounded-md border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-foreground">
                   Current checkout is writable and shared with other current-checkout terminals.
                 </div>
               )}
@@ -1172,7 +1237,7 @@ function TerminalCenter({
                   return (
                     <button
                       key={thread.id}
-                      className="flex w-full items-center justify-between rounded-lg border border-black/[0.08] p-3 text-left hover:bg-muted/40"
+                      className="flex w-full items-center justify-between rounded-lg border border-border p-3 text-left hover:bg-muted/40"
                       onClick={() => {
                         addThreadToCanvas(thread.id);
                         setAddExistingOpen(false);
