@@ -269,7 +269,11 @@ describe("DesktopLifecycle", () => {
           const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
           yield* lifecycle.register;
 
-          appListeners.get("window-all-closed")?.();
+          const windowAllClosed = appListeners.get("window-all-closed");
+          if (windowAllClosed === undefined) {
+            throw new Error("window-all-closed listener was not registered");
+          }
+          windowAllClosed();
           yield* Effect.promise(() => Promise.resolve());
 
           const state = yield* DesktopState.DesktopState;
