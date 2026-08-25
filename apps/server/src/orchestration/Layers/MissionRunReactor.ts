@@ -162,14 +162,16 @@ const sameAttention = (
     ),
   );
 
+export function isRequiredGateFailureStatus(status: string): boolean {
+  return status !== "queued" && status !== "running" && status !== "passed" && status !== "stale";
+}
+
 const requiredGateFailure = (task: OrchestrationTask) =>
   (task.qualityGateRuns ?? []).find(
     (run) =>
       run.snapshotId === task.reviewSnapshot?.id &&
       run.required &&
-      run.status !== "queued" &&
-      run.status !== "running" &&
-      run.status !== "passed",
+      isRequiredGateFailureStatus(run.status),
   ) ?? null;
 
 const currentReview = (task: OrchestrationTask) =>

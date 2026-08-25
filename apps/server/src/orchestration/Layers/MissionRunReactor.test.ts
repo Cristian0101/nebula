@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   activeReplacementOwnsProviderTurn,
+  isRequiredGateFailureStatus,
   missionProviderTurnInFlight,
   providerSupportsStructuredReview,
 } from "./MissionRunReactor.ts";
@@ -51,5 +52,11 @@ describe("MissionRunReactor recovery", () => {
         textGeneration: { generateStructured: () => undefined },
       }),
     ).toBe(true);
+  });
+
+  it("does not treat historical stale gates as fresh failures", () => {
+    expect(isRequiredGateFailureStatus("stale")).toBe(false);
+    expect(isRequiredGateFailureStatus("failed")).toBe(true);
+    expect(isRequiredGateFailureStatus("timed_out")).toBe(true);
   });
 });
