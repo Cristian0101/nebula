@@ -226,5 +226,12 @@ describe("Terminal Center composition", () => {
     expect(
       deriveTerminalNodeStatus({ ...base, hasPendingApprovals: true } as OrchestrationThreadShell),
     ).toBe("attention");
+    expect(
+      deriveTerminalNodeStatus({
+        ...base,
+        latestTurn: { state: "completed" },
+        session: { status: "stopped" },
+      } as OrchestrationThreadShell),
+    ).toBe("ready");
   });
 });

@@ -242,4 +242,45 @@ describe("DesktopLifecycle", () => {
       ).pipe(Effect.provide(layer));
     }),
   );
+
+  it.effect("keeps the macOS app alive when all windows close", () =>
+    Effect.gen(function* () {
+      const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
+      let quitCount = 0;
+      const quit = Effect.sync(() => {
+        quitCount += 1;
+      });
+      const environmentLayer = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
+        platform: "darwin",
+        isDevelopment: false,
+      } as DesktopEnvironment.DesktopEnvironment["Service"]);
+      const layer = DesktopLifecycle.layer.pipe(
+        Layer.provideMerge(makeElectronAppLayer(appListeners, quit)),
+        Layer.provideMerge(electronThemeLayer),
+        Layer.provideMerge(makeElectronWindowLayer()),
+        Layer.provideMerge(makeDesktopWindowLayer()),
+        Layer.provideMerge(environmentLayer),
+        Layer.provideMerge(DesktopShutdown.layer),
+        Layer.provideMerge(DesktopState.layer),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+          yield* lifecycle.register;
+
+          const windowAllClosed = appListeners.get("window-all-closed");
+          if (windowAllClosed === undefined) {
+            throw new Error("window-all-closed listener was not registered");
+          }
+          windowAllClosed();
+          yield* Effect.promise(() => Promise.resolve());
+
+          const state = yield* DesktopState.DesktopState;
+          assert.equal(quitCount, 0);
+          assert.isFalse(yield* Ref.get(state.quitting));
+        }),
+      ).pipe(Effect.provide(layer));
+    }),
+  );
 });
