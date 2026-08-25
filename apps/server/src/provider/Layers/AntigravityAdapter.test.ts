@@ -116,7 +116,7 @@ it.layer(NodeServices.layer)("AntigravityAdapter", (it) => {
         const args = yield* fs.readFileString(argsLog);
         expect(args).toContain("--new-project --mode accept-edits");
         expect(args).toContain("--conversation conv-test");
-        expect(args).not.toContain("--dangerously-skip-permissions");
+        expect(args).toContain("--dangerously-skip-permissions");
         expect(events.some((event) => event.type === "content.delta")).toBe(true);
         expect(
           events.filter((event) => event.type === "turn.completed").map((event) => event.payload),

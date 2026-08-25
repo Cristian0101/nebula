@@ -86,6 +86,15 @@ function extractStructuredCandidates(value: unknown): ReadonlyArray<unknown> {
   return candidates;
 }
 
+function summarizeInvalidStructuredOutput(value: unknown): string {
+  try {
+    const encoded = JSON.stringify(extractStructuredCandidates(value).slice(0, 3));
+    return encoded.length > 1_500 ? `${encoded.slice(0, 1_500)}…` : encoded;
+  } catch {
+    return "[unserializable output]";
+  }
+}
+
 export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGeneration")(function* (
   settings: AntigravitySettings,
   environment: NodeJS.ProcessEnv = process.env,
@@ -191,7 +200,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       }
       return yield* new TextGenerationError({
         operation: input.operation,
-        detail: "Antigravity returned invalid structured output.",
+        detail: `Antigravity returned invalid structured output: ${summarizeInvalidStructuredOutput(envelope)}`,
         cause: lastCause,
       });
     }).pipe(

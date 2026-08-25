@@ -150,6 +150,7 @@ describe("ProviderCommandReactor", () => {
     readonly requiresNewThreadForModelChange?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
+    readonly turnStartBeforeStart?: boolean;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -414,6 +415,7 @@ describe("ProviderCommandReactor", () => {
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
+      Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(NodeServices.layer),
     );
     runtime = ManagedRuntime.make(layer);
@@ -484,6 +486,25 @@ describe("ProviderCommandReactor", () => {
         }),
       );
     }
+    if (input?.turnStartBeforeStart) {
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-start-before-reactor-start"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("user-message-before-reactor-start"),
+            role: "user",
+            text: "resume this persisted provider turn",
+            attachments: [],
+          },
+          modelSelection,
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          createdAt: now,
+        }),
+      );
+    }
 
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
@@ -511,6 +532,20 @@ describe("ProviderCommandReactor", () => {
       },
     };
   }
+
+  it("replays a persisted turn start that predates the hot event stream", async () => {
+    const harness = await createHarness({ turnStartBeforeStart: true });
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: ThreadId.make("thread-1"),
+        input: "resume this persisted provider turn",
+      }),
+    );
+  });
 
   it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
     const harness = await createHarness();

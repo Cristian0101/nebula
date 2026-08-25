@@ -402,6 +402,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
         ...(modelSelection ? { model: modelSelection.model } : {}),
         ...(effort ? { effort } : {}),
         ...(input.interactionMode === "plan" ? { plan: true } : {}),
+        ...(ctx.session.runtimeMode === "full-access" ? { fullAccess: true } : {}),
       });
       const spawnCommand = yield* resolveSpawnCommand(settings.binaryPath || "agy", args, {
         env: environment,

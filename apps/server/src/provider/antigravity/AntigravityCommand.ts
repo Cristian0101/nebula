@@ -4,11 +4,13 @@ export function buildAntigravityTurnArgs(input: {
   readonly model?: string;
   readonly effort?: string;
   readonly plan?: boolean;
+  readonly fullAccess?: boolean;
 }): ReadonlyArray<string> {
   return [
     ...(!input.conversationId ? ["--new-project"] : []),
     "--mode",
     input.plan ? "plan" : "accept-edits",
+    ...(input.fullAccess ? ["--dangerously-skip-permissions"] : []),
     "-p",
     input.prompt,
     "--output-format",
