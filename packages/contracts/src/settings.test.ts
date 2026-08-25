@@ -69,6 +69,51 @@ describe("ClientSettings environment identification", () => {
   });
 });
 
+describe("ClientSettings local Projects and Dev Servers", () => {
+  const profile = {
+    id: "web-dev",
+    name: "Web",
+    command: "vp run dev:web",
+    workingDirectory: ".",
+    preferredPort: 5173,
+    previewUrl: "http://localhost:5173",
+    approvedAt: "2026-08-25T20:00:00.000Z",
+  };
+
+  it("defaults approved discovery roots and Dev Server profiles to empty", () => {
+    const settings = decodeClientSettings({});
+    expect(settings.projectDiscoveryRoots).toEqual([]);
+    expect(settings.devServerProfilesByProject).toEqual({});
+  });
+
+  it("persists an explicitly approved one-line Dev Server command", () => {
+    expect(
+      decodeClientSettingsPatch({
+        projectDiscoveryRoots: ["/Users/example/Developer"],
+        devServerProfilesByProject: { nebula: [profile] },
+      }),
+    ).toMatchObject({
+      projectDiscoveryRoots: ["/Users/example/Developer"],
+      devServerProfilesByProject: { nebula: [profile] },
+    });
+  });
+
+  it("rejects multiline commands and invalid ports", () => {
+    expect(() =>
+      decodeClientSettingsPatch({
+        devServerProfilesByProject: {
+          nebula: [{ ...profile, command: "vp run dev:web\nopen /tmp" }],
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeClientSettingsPatch({
+        devServerProfilesByProject: { nebula: [{ ...profile, preferredPort: 70_000 }] },
+      }),
+    ).toThrow();
+  });
+});
+
 describe("ClientSettings sidebar", () => {
   it("defaults to the current sidebar with automatic merge and inactivity settling", () => {
     const settings = decodeClientSettings({});

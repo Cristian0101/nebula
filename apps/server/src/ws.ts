@@ -2009,6 +2009,12 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "workspace" },
           ),
+        [WS_METHODS.filesystemDiscoverProjects]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.filesystemDiscoverProjects,
+            workspaceEntries.discoverProjects(input),
+            { "rpc.aggregate": "workspace" },
+          ),
         [WS_METHODS.assetsCreateUrl]: (input) =>
           observeRpcEffect(
             WS_METHODS.assetsCreateUrl,
