@@ -65,6 +65,22 @@ class IndependentReviewParseError extends Data.TaggedError("IndependentReviewPar
 export const taskRestoreCheckpointRef = (taskId: string, restoreId: TaskRestoreId) =>
   CheckpointRef.make(`refs/t3/checkpoints/tasks/${taskId}/restore/${restoreId}`);
 
+export function shouldRecoverReviewPreparation(
+  task: {
+    readonly status: string;
+    readonly ownership?: { readonly status?: string } | null | undefined;
+  },
+  thread: { readonly latestTurn: { readonly state: string } | null } | undefined,
+  snapshotIsCurrent: boolean,
+): boolean {
+  return (
+    task.status === "active" &&
+    task.ownership?.status === "valid" &&
+    thread?.latestTurn?.state === "completed" &&
+    !snapshotIsCurrent
+  );
+}
+
 export function taskBranchIsPublished(remoteRefs: string, branch: string): boolean {
   return remoteRefs.split("\n").some((ref) => ref.trim().endsWith(`/${branch}`));
 }
@@ -733,11 +749,31 @@ const make = Effect.gen(function* () {
     const model = yield* snapshots.getCommandReadModel();
     for (const task of model.tasks ?? []) {
       if (task.status !== "active") continue;
-      if (
+      const snapshotIsCurrent =
         task.reviewSnapshot?.status === "current" &&
-        !(yield* taskChanges.isCurrent(task).pipe(Effect.orElseSucceed(() => false)))
-      ) {
+        (yield* taskChanges.isCurrent(task).pipe(Effect.orElseSucceed(() => false)));
+      if (task.reviewSnapshot?.status === "current" && !snapshotIsCurrent) {
         yield* markStale(task);
+      }
+      const thread = model.threads.find((candidate) => candidate.id === task.threadId);
+      if (shouldRecoverReviewPreparation(task, thread, snapshotIsCurrent)) {
+        const recoveredAt = thread?.latestTurn?.completedAt ?? (yield* now);
+        yield* prepare(task.id, "provider").pipe(
+          Effect.catch((error) =>
+            engine.dispatch({
+              type: "task.review.prepare-failed",
+              commandId: CommandId.make(
+                `server:task-review-startup-prepare-failed:${task.id}:${thread?.latestTurn?.turnId ?? "no-turn"}`,
+              ),
+              taskId: task.id,
+              failureReason:
+                typeof error === "object" && error !== null && "message" in error
+                  ? String(error.message)
+                  : "Task review snapshot recovery failed.",
+              createdAt: recoveredAt,
+            }),
+          ),
+        );
       }
       if (task.restore?.status === "requested") {
         yield* restore(task.id, task.restore.id).pipe(
