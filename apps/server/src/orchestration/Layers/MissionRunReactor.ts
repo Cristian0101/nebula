@@ -181,6 +181,17 @@ const currentReview = (task: OrchestrationTask) =>
     )
     .at(-1) ?? null;
 
+export function missionProviderTurnInFlight(thread: {
+  readonly session: { readonly status: string } | null;
+  readonly latestTurn: { readonly state: string } | null;
+}): boolean {
+  return (
+    thread.session?.status === "starting" ||
+    thread.session?.status === "running" ||
+    thread.latestTurn?.state === "running"
+  );
+}
+
 const activeTaskAttention = (
   task: OrchestrationTask,
   thread: OrchestrationThread | undefined,
@@ -738,6 +749,7 @@ const make = Effect.gen(function* () {
     const { run, model, task, thread } = input;
     const state = (run.taskRecovery ?? []).find((candidate) => candidate.taskId === task.id);
     if (!state || !thread) return false;
+    if (missionProviderTurnInFlight(thread)) return false;
     const gate = requiredGateFailure(task);
     const review = currentReview(task);
     const providerError =
