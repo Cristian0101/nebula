@@ -17,11 +17,10 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
 
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import * as ProcessRunner from "../../processRunner.ts";
-import { forkParked } from "../../serverActivation.ts";
+import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -903,19 +902,17 @@ const make = Effect.gen(function* () {
 
   const start: IntegrationReactorShape["start"] = Effect.fn("IntegrationReactor.start")(
     function* () {
-      yield* forkParked(
-        Stream.runForEach(engine.streamDomainEvents, (event) =>
-          event.type === "integration.created" ||
-          event.type === "integration.continue-requested" ||
-          event.type === "integration.abort-requested" ||
-          event.type === "integration.validation-requested" ||
-          event.type === "integration.workspace-remove-requested" ||
-          (event.type === "integration.updated" && event.payload.reason === "validation-started")
-            ? worker.enqueue(event)
-            : Effect.void,
-        ),
+      yield* forkParkedStream(engine.streamDomainEvents, (event) =>
+        event.type === "integration.created" ||
+        event.type === "integration.continue-requested" ||
+        event.type === "integration.abort-requested" ||
+        event.type === "integration.validation-requested" ||
+        event.type === "integration.workspace-remove-requested" ||
+        (event.type === "integration.updated" && event.payload.reason === "validation-started")
+          ? worker.enqueue(event)
+          : Effect.void,
       );
-      yield* reconcile;
+      yield* forkParked(reconcile);
     },
   );
 

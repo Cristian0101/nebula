@@ -43,10 +43,9 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
 
 import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
-import { forkParked } from "../../serverActivation.ts";
+import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { MissionRunReactor, type MissionRunReactorShape } from "../Services/MissionRunReactor.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -1818,12 +1817,10 @@ const make = Effect.gen(function* () {
   );
 
   const start: MissionRunReactorShape["start"] = Effect.fn("MissionRunReactor.start")(function* () {
-    yield* forkParked(
-      Stream.runForEach(engine.streamDomainEvents, (event) =>
-        RELEVANT_EVENTS.has(event.type) ? worker.enqueue(event) : Effect.void,
-      ),
+    yield* forkParkedStream(engine.streamDomainEvents, (event) =>
+      RELEVANT_EVENTS.has(event.type) ? worker.enqueue(event) : Effect.void,
     );
-    yield* worker.enqueue(null);
+    yield* forkParked(worker.enqueue(null));
   });
 
   return { start, drain: worker.drain } satisfies MissionRunReactorShape;

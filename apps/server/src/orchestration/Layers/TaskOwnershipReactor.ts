@@ -13,7 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
-import { forkParked } from "../../serverActivation.ts";
+import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -40,6 +40,45 @@ export function taskNeedsOwnershipReconciliation(task: OrchestrationTask): boole
     task.ownership?.required === true &&
     task.ownership.rules.length > 0 &&
     task.workspace?.status === "ready"
+  );
+}
+
+export function taskNeedsCompletionRecovery(
+  task: OrchestrationTask,
+  missionRuns: ReadonlyArray<{
+    readonly status: string;
+    readonly scheduledTaskIds: ReadonlyArray<string>;
+  }>,
+): boolean {
+  if (!taskNeedsOwnershipReconciliation(task)) return false;
+  if (task.ownership?.status !== "valid") return false;
+  const snapshotId = task.reviewSnapshot?.status === "current" ? task.reviewSnapshot.id : null;
+  if (
+    snapshotId === null ||
+    task.handoff?.status !== "ready" ||
+    task.handoff.snapshotId !== snapshotId
+  ) {
+    return false;
+  }
+  const review = (task.reviews ?? [])
+    .filter((candidate) => candidate.snapshotId === snapshotId)
+    .toSorted(
+      (left, right) =>
+        left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+    )
+    .at(-1);
+  if (
+    review?.status !== "completed" ||
+    (review.verdict !== "approve" && review.verdict !== "approve_with_notes")
+  ) {
+    return false;
+  }
+  return missionRuns.some(
+    (run) =>
+      run.status !== "completed" &&
+      run.status !== "failed" &&
+      run.status !== "stopped" &&
+      run.scheduledTaskIds.includes(task.id),
   );
 }
 
@@ -205,6 +244,15 @@ const make = Effect.gen(function* () {
     }
     for (const task of readModel.tasks ?? []) {
       if (taskNeedsOwnershipReconciliation(task)) {
+        if (taskNeedsCompletionRecovery(task, readModel.missionRuns ?? [])) {
+          yield* engine.dispatch({
+            type: "task.complete",
+            commandId: yield* commandId("task-completion-recovery"),
+            taskId: task.id,
+            createdAt: yield* now,
+          });
+          continue;
+        }
         const receipt = yield* requestValidation(task.id);
         yield* engine
           .readEvents(receipt.sequence - 1, 1)
@@ -227,41 +275,39 @@ const make = Effect.gen(function* () {
 
   const start: TaskOwnershipReactorShape["start"] = Effect.fn("TaskOwnershipReactor.start")(
     function* () {
-      yield* forkParked(
-        Stream.runForEach(engine.streamDomainEvents, (event) => {
-          if (
-            event.type === "project.shared-resource-created" ||
-            event.type === "project.shared-resource-updated" ||
-            event.type === "project.shared-resource-deleted"
-          ) {
-            return snapshots.getCommandReadModel().pipe(
-              Effect.flatMap((readModel) =>
-                Effect.forEach(
-                  (readModel.tasks ?? []).filter(
-                    (task) =>
-                      task.projectId === event.payload.projectId &&
-                      task.status === "active" &&
-                      task.ownership?.required === true &&
-                      task.workspace?.status === "ready",
-                  ),
-                  (task) => requestValidation(task.id),
-                  { discard: true },
+      yield* forkParkedStream(engine.streamDomainEvents, (event) => {
+        if (
+          event.type === "project.shared-resource-created" ||
+          event.type === "project.shared-resource-updated" ||
+          event.type === "project.shared-resource-deleted"
+        ) {
+          return snapshots.getCommandReadModel().pipe(
+            Effect.flatMap((readModel) =>
+              Effect.forEach(
+                (readModel.tasks ?? []).filter(
+                  (task) =>
+                    task.projectId === event.payload.projectId &&
+                    task.status === "active" &&
+                    task.ownership?.required === true &&
+                    task.workspace?.status === "ready",
                 ),
+                (task) => requestValidation(task.id),
+                { discard: true },
               ),
-            );
-          }
-          if (
-            event.type === "task.ownership-updated" ||
-            event.type === "task.ownership-validation-requested" ||
-            event.type === "task.workspace.ready" ||
-            event.type === "thread.turn-diff-completed"
-          ) {
-            return worker.enqueue(event as OwnershipEvent);
-          }
-          return Effect.void;
-        }),
-      );
-      yield* reconcile;
+            ),
+          );
+        }
+        if (
+          event.type === "task.ownership-updated" ||
+          event.type === "task.ownership-validation-requested" ||
+          event.type === "task.workspace.ready" ||
+          event.type === "thread.turn-diff-completed"
+        ) {
+          return worker.enqueue(event as OwnershipEvent);
+        }
+        return Effect.void;
+      });
+      yield* forkParked(reconcile);
     },
   );
 

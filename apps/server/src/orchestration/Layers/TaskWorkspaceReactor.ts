@@ -12,10 +12,9 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
 
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
-import { forkParked } from "../../serverActivation.ts";
+import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -342,8 +341,8 @@ const make = Effect.gen(function* () {
         }
         return Effect.void;
       };
-      yield* forkParked(Stream.runForEach(engine.streamDomainEvents, processEvent));
-      yield* reconcile;
+      yield* forkParkedStream(engine.streamDomainEvents, processEvent);
+      yield* forkParked(reconcile);
     },
   );
 

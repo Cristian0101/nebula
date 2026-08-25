@@ -4,8 +4,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
-import { forkParked } from "../../serverActivation.ts";
+import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import { generateArchitectPlan } from "../ArchitectPlanGeneration.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -79,26 +78,28 @@ const make = Effect.gen(function* () {
   );
   const start: ArchitectPlanReactorShape["start"] = Effect.fn("ArchitectPlanReactor.start")(
     function* () {
-      yield* forkParked(
-        Stream.runForEach(engine.streamDomainEvents, (event: OrchestrationEvent) =>
-          event.type === "architect.plan-saved" && event.payload.plan.status === "generating"
-            ? worker.enqueue(event.payload.plan)
-            : Effect.void,
-        ),
+      yield* forkParkedStream(engine.streamDomainEvents, (event: OrchestrationEvent) =>
+        event.type === "architect.plan-saved" && event.payload.plan.status === "generating"
+          ? worker.enqueue(event.payload.plan)
+          : Effect.void,
       );
-      const readModel = yield* snapshots
-        .getCommandReadModel()
-        .pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Architect Plan reconciliation failed", { cause }).pipe(
-              Effect.as(null),
-            ),
-          ),
-        );
-      if (readModel)
-        for (const project of readModel.projects)
-          for (const plan of project.architectPlans ?? [])
-            if (plan.status === "generating") yield* worker.enqueue(plan);
+      yield* forkParked(
+        Effect.gen(function* () {
+          const readModel = yield* snapshots
+            .getCommandReadModel()
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Architect Plan reconciliation failed", { cause }).pipe(
+                  Effect.as(null),
+                ),
+              ),
+            );
+          if (readModel)
+            for (const project of readModel.projects)
+              for (const plan of project.architectPlans ?? [])
+                if (plan.status === "generating") yield* worker.enqueue(plan);
+        }),
+      );
     },
   );
   return { start, drain: worker.drain } satisfies ArchitectPlanReactorShape;

@@ -26,7 +26,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -42,7 +41,7 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
-import { forkParked } from "../../serverActivation.ts";
+import { forkParkedStream } from "../../serverActivation.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { canReplaceThreadTitle } from "../threadTitles.ts";
 
@@ -2061,19 +2060,15 @@ const make = Effect.gen(function* () {
 
   const start: ProviderRuntimeIngestionShape["start"] = () =>
     Effect.gen(function* () {
-      yield* forkParked(
-        Stream.runForEach(providerService.streamEvents, (event) =>
-          worker.enqueue({ source: "runtime", event }),
-        ),
+      yield* forkParkedStream(providerService.streamEvents, (event) =>
+        worker.enqueue({ source: "runtime", event }),
       );
-      yield* forkParked(
-        Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-          if (event.type !== "thread.turn-start-requested") {
-            return Effect.void;
-          }
-          return worker.enqueue({ source: "domain", event });
-        }),
-      );
+      yield* forkParkedStream(orchestrationEngine.streamDomainEvents, (event) => {
+        if (event.type !== "thread.turn-start-requested") {
+          return Effect.void;
+        }
+        return worker.enqueue({ source: "domain", event });
+      });
     });
 
   return {

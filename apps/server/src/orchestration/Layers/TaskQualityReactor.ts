@@ -12,10 +12,9 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
-import * as Stream from "effect/Stream";
 
 import * as ProcessRunner from "../../processRunner.ts";
-import { forkParked } from "../../serverActivation.ts";
+import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -271,15 +270,13 @@ const make = Effect.gen(function* () {
 
   const start: TaskQualityReactorShape["start"] = Effect.fn("TaskQualityReactor.start")(
     function* () {
-      yield* forkParked(
-        Stream.runForEach(engine.streamDomainEvents, (event) =>
-          event.type === "task.quality.run-requested" ||
-          event.type === "task.quality.run-cancel-requested"
-            ? process(event as QualityEvent)
-            : Effect.void,
-        ),
+      yield* forkParkedStream(engine.streamDomainEvents, (event) =>
+        event.type === "task.quality.run-requested" ||
+        event.type === "task.quality.run-cancel-requested"
+          ? process(event as QualityEvent)
+          : Effect.void,
       );
-      yield* reconcile;
+      yield* forkParked(reconcile);
     },
   );
 
