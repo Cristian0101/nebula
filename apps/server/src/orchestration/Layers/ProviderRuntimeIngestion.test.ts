@@ -732,11 +732,13 @@ describe("ProviderRuntimeIngestion", () => {
       status: "completed",
     });
 
-    await waitForThread(
+    const completedThread = await waitForThread(
       harness.readModel,
       (thread) => thread.session?.status === "ready" && thread.session?.activeTurnId === null,
       10_000,
     );
+    expect(completedThread.deletedAt).toBeNull();
+    expect(completedThread.latestTurn?.state).toBe("completed");
   });
 
   it("accepts claude turn lifecycle when seeded thread id is a synthetic placeholder", async () => {

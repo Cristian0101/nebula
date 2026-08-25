@@ -1,8 +1,20 @@
-# Nebula Alpha quick start
+# Run Nebula Alpha
 
 This path gets a developer with an installed, authenticated provider CLI to a useful Nebula action in about five minutes.
 
-## 1. Start Nebula
+For persistent local macOS dogfood:
+
+1. Install `Nebula (Alpha).app` in Applications.
+2. Open **Nebula (Alpha)** from Applications or Finder.
+3. Or launch it through macOS LaunchServices:
+
+   ```bash
+   open -a "Nebula (Alpha)"
+   ```
+
+Do not rely on a Nebula dev process launched inside a Codex implementation session as your persistent daily app; the coding harness may clean up its child processes after the session completes.
+
+## 1. Start Nebula from source
 
 For a source checkout, install the pinned dependencies once and start the local runtime:
 
