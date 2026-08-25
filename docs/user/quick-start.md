@@ -35,9 +35,11 @@ Open **Settings → Providers**. Each provider reports whether it is enabled, in
 
 ## 4. Launch a provider session
 
-From the project menu, open **Terminal Center**, choose **Provider +**, select the provider and workspace, then launch. A shared checkout is convenient but can collide with other writers; an isolated Task workspace is the safe default for implementation.
+From the project menu, open **Terminal Center**, choose a provider in the quick launcher, select the provider and workspace defaults when prompted, then launch. A shared checkout is convenient but can collide with other writers; an isolated Task workspace is the safe default for implementation.
 
 The node is the canonical Thread. Focusing the node opens that same conversation—Nebula does not create a second chat surface.
+
+Terminal Center supports Grid, Provider columns, Status lanes, Mission flow, Radial, Compact, and Freeform layouts. Freeform positions and canvas membership persist across layout changes and restarts. Only the selected node mounts the full Thread workspace.
 
 ## 5. Create structured work
 
@@ -73,5 +75,13 @@ Choose **Run Swarm** only after the frozen policy is correct. Nebula schedules r
 An attention card should explain what stopped, why, and the available action. Typical boundaries are an ownership request, unavailable provider, requested review changes, failed gate, overlap acknowledgement, or Git conflict.
 
 When Automatic Integration is enabled, successful Tasks seed a deterministic Integration Batch. **Ready** means the isolated Integration worktree passed its approved final gates. It does not mean `main` was merged or a PR was opened.
+
+If Nebula or the server restarts during a provider turn, gate, review, remediation, or Integration step, reopen the same Project instead of recreating the work. Canonical Tasks, Threads, worktrees, attempts, and review history are durable. Interrupted gates never count as passing; rerun the affected gate through the visible recovery action.
+
+## 9. Use the desktop Alpha
+
+Mount the arm64 DMG and launch **Nebula (Alpha)**. The desktop app uses the same Projects, Terminal Center, Command Deck, provider readiness, and recovery model as the web client. Provider authentication remains owned by the provider CLI installed on the host.
+
+For acceptance or support work, use a disposable `T3CODE_HOME` so test Projects and Threads cannot touch normal user state. A restart should preserve the Project, canvas nodes, and canonical Threads in that isolated home.
 
 For current release evidence and known blockers, see [Alpha acceptance](../release/ALPHA_ACCEPTANCE.md).
