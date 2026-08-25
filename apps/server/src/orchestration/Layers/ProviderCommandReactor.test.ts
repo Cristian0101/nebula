@@ -487,7 +487,7 @@ describe("ProviderCommandReactor", () => {
       );
     }
     if (input?.turnStartBeforeStart) {
-      await Effect.runPromise(
+      await runEffect(
         engine.dispatch({
           type: "thread.turn.start",
           commandId: CommandId.make("cmd-turn-start-before-reactor-start"),
