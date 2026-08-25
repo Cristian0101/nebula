@@ -5,6 +5,7 @@ import {
   isRequiredGateFailureStatus,
   missionProviderTurnInFlight,
   providerSupportsStructuredReview,
+  reviewSnapshotCoversLatestTurn,
 } from "./MissionRunReactor.ts";
 
 describe("MissionRunReactor recovery", () => {
@@ -58,5 +59,20 @@ describe("MissionRunReactor recovery", () => {
     expect(isRequiredGateFailureStatus("stale")).toBe(false);
     expect(isRequiredGateFailureStatus("failed")).toBe(true);
     expect(isRequiredGateFailureStatus("timed_out")).toBe(true);
+  });
+
+  it("does not reuse a review snapshot that predates the latest remediation turn", () => {
+    expect(
+      reviewSnapshotCoversLatestTurn(
+        { reviewSnapshot: { capturedAt: "2026-08-25T13:52:48.638Z" } },
+        { latestTurn: { requestedAt: "2026-08-25T13:53:26.551Z" } },
+      ),
+    ).toBe(false);
+    expect(
+      reviewSnapshotCoversLatestTurn(
+        { reviewSnapshot: { capturedAt: "2026-08-25T13:54:37.900Z" } },
+        { latestTurn: { requestedAt: "2026-08-25T13:53:26.551Z" } },
+      ),
+    ).toBe(true);
   });
 });

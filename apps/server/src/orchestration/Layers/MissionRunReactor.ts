@@ -193,6 +193,20 @@ export function missionProviderTurnInFlight(thread: {
   );
 }
 
+export function reviewSnapshotCoversLatestTurn(
+  task: { readonly reviewSnapshot?: { readonly capturedAt: string } | null },
+  thread: { readonly latestTurn?: { readonly requestedAt: string } | null },
+): boolean {
+  const snapshot = task.reviewSnapshot;
+  const latestTurn = thread.latestTurn;
+  return snapshot !== null &&
+    snapshot !== undefined &&
+    latestTurn !== null &&
+    latestTurn !== undefined
+    ? snapshot.capturedAt.localeCompare(latestTurn.requestedAt) >= 0
+    : snapshot !== null && snapshot !== undefined;
+}
+
 export function activeReplacementOwnsProviderTurn(
   state: {
     readonly attempts: ReadonlyArray<{
@@ -864,7 +878,7 @@ const make = Effect.gen(function* () {
     }
     if (!thread) return false;
     const gate = requiredGateFailure(task);
-    const review = currentReview(task);
+    const review = reviewSnapshotCoversLatestTurn(task, thread) ? currentReview(task) : null;
     const providerError =
       thread.latestTurn?.state === "error" || thread.session?.status === "error"
         ? (thread.session?.lastError ?? "Provider execution failed.")
