@@ -39,6 +39,10 @@ export interface CommandDeckSummary {
   readonly changedFiles: number;
 }
 
+export function providerSupportsStructuredReview(entry: ProviderInstanceEntry): boolean {
+  return entry.driverKind === "codex" || entry.driverKind === "antigravity";
+}
+
 export function taskRequiredQualityGatesPassed(
   gates: ReadonlyArray<QualityGateDefinition>,
   task: OrchestrationTask,

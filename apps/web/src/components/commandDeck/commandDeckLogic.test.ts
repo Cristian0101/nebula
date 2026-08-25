@@ -16,6 +16,7 @@ import {
   deriveTaskAttention,
   deriveTaskPresentationStatus,
   resolveTaskModelSelection,
+  providerSupportsStructuredReview,
   selectProjectTasks,
   summarizeCommandDeck,
   taskRequiredQualityGatesPassed,
@@ -65,6 +66,24 @@ const readyProvider = {
 } as unknown as ProviderInstanceEntry;
 
 describe("Command Deck presentation", () => {
+  it("offers only structured-generation providers for independent review", () => {
+    expect(providerSupportsStructuredReview(readyProvider)).toBe(true);
+    expect(
+      providerSupportsStructuredReview({
+        ...readyProvider,
+        instanceId: ProviderInstanceId.make("antigravity"),
+        driverKind: "antigravity",
+      } as ProviderInstanceEntry),
+    ).toBe(true);
+    expect(
+      providerSupportsStructuredReview({
+        ...readyProvider,
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        driverKind: "claudeAgent",
+      } as ProviderInstanceEntry),
+    ).toBe(false);
+  });
+
   it("persists draft assignment before a Thread and prefers the Thread after start", () => {
     const task = makeTask();
     expect(resolveTaskModelSelection(task, null, null)).toEqual(task.modelSelection);
