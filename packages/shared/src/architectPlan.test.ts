@@ -121,6 +121,23 @@ describe("validateArchitectPlan", () => {
       validate({ ...base, tasks }).errors.some((issue) => issue.code === "ownership-invalid"),
     ).toBe(true);
   });
+  it("rejects prose appended to Architect ownership patterns", () => {
+    const tasks = [
+      {
+        ...base.tasks[0]!,
+        ownership: {
+          ...base.tasks[0]!.ownership,
+          write: ["tests/contract.test.ts ** — explicit note: required coverage"],
+        },
+      },
+      base.tasks[1]!,
+    ];
+    const result = validate({ ...base, tasks });
+    expect(result.status).toBe("invalid");
+    expect(result.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "ownership-invalid" })]),
+    );
+  });
   it("rejects unknown resources", () => {
     const tasks = [
       { ...base.tasks[0]!, requiredResourceIds: [SharedResourceId.make("missing")] },
