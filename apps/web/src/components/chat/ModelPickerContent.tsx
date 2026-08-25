@@ -57,6 +57,24 @@ type ModelPickerItem = {
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
 
+export function resolveInitialModelPickerInstanceId(input: {
+  readonly activeInstanceId: ProviderInstanceId;
+  readonly lockedProvider: ProviderDriverKind | null;
+  readonly hasFavorites: boolean;
+  readonly instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
+}): ProviderInstanceId | "favorites" {
+  if (input.lockedProvider !== null) return input.activeInstanceId;
+  if (input.hasFavorites) return "favorites";
+  const active = input.instanceEntries.find(
+    (entry) => entry.instanceId === input.activeInstanceId && isProviderInstancePickerReady(entry),
+  );
+  return (
+    active?.instanceId ??
+    input.instanceEntries.find(isProviderInstancePickerReady)?.instanceId ??
+    input.activeInstanceId
+  );
+}
+
 function ModelListSeparator() {
   return <div className="h-0.5" />;
 }
@@ -108,14 +126,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const highlightedModelKeyRef = useRef<string | null>(null);
   const favorites = useClientSettings((s) => s.favorites ?? []);
   const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | "favorites">(
-    () => {
-      if (props.lockedProvider !== null) {
-        // When locked, prime the sidebar to the currently-active instance
-        // so jumping into the picker keeps the focused instance visible.
-        return props.activeInstanceId;
-      }
-      return favorites.length > 0 ? "favorites" : props.activeInstanceId;
-    },
+    () =>
+      resolveInitialModelPickerInstanceId({
+        activeInstanceId: props.activeInstanceId,
+        lockedProvider: props.lockedProvider,
+        hasFavorites: favorites.length > 0,
+        instanceEntries,
+      }),
   );
   const [expandedLegacyInstances, setExpandedLegacyInstances] = useState(
     () =>
