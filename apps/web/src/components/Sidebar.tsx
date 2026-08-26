@@ -1723,49 +1723,48 @@ function SidebarSwarmModeButton({
 }) {
   const router = useRouter();
   const snapshot = useAtomValue(environmentSnapshotAtom(projectGroup.environmentId));
-  const projectIds = useMemo(
-    () =>
-      new Set(
-        projectGroup.memberProjectRefs.flatMap((projectRef) =>
-          projectRef.environmentId === projectGroup.environmentId ? [projectRef.projectId] : [],
-        ),
-      ),
-    [projectGroup.environmentId, projectGroup.memberProjectRefs],
+  const project = useMemo(
+    () => (snapshot?.projects ?? []).find((candidate) => candidate.id === projectGroup.id) ?? null,
+    [projectGroup.id, snapshot?.projects],
   );
   const latestPlan = useMemo(
     () =>
-      (snapshot?.projects ?? [])
-        .filter((project) => projectIds.has(project.id))
-        .flatMap((project) => project.architectPlans ?? [])
-        .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null,
-    [projectIds, snapshot?.projects],
+      (project?.architectPlans ?? []).toSorted((a, b) =>
+        b.updatedAt.localeCompare(a.updatedAt),
+      )[0] ?? null,
+    [project?.architectPlans],
   );
   const activeRun = useMemo(
     () =>
       (snapshot?.missionRuns ?? [])
         .filter(
           (run) =>
-            projectIds.has(run.projectId) &&
+            run.projectId === projectGroup.id &&
             (run.status === "running" || run.status === "paused" || run.status === "attention"),
         )
         .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null,
-    [projectIds, snapshot?.missionRuns],
+    [projectGroup.id, snapshot?.missionRuns],
   );
   const latestMission = useMemo(
     () =>
       (snapshot?.missions ?? [])
-        .filter((mission) => projectIds.has(mission.projectId))
+        .filter((mission) => mission.projectId === projectGroup.id)
         .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null,
-    [projectIds, snapshot?.missions],
+    [projectGroup.id, snapshot?.missions],
   );
   const mission = activeRun
-    ? ((snapshot?.missions ?? []).find((candidate) => candidate.id === activeRun.missionId) ?? null)
+    ? ((snapshot?.missions ?? []).find(
+        (candidate) =>
+          candidate.projectId === projectGroup.id && candidate.id === activeRun.missionId,
+      ) ?? null)
     : latestMission;
   const missionTasks = useMemo(() => {
     if (!mission) return [];
     const taskIds = new Set(mission.taskIds);
-    return (snapshot?.tasks ?? []).filter((task) => taskIds.has(task.id));
-  }, [mission, snapshot?.tasks]);
+    return (snapshot?.tasks ?? []).filter(
+      (task) => task.projectId === projectGroup.id && taskIds.has(task.id),
+    );
+  }, [mission, projectGroup.id, snapshot?.tasks]);
   const activeTaskCount = activeRun
     ? activeRun.scheduledTaskIds.filter(
         (taskId) => missionTasks.find((task) => task.id === taskId)?.status !== "completed",

@@ -316,6 +316,17 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
       );
       expect(duplicate.message).toContain("already belongs");
 
+      const createDuplicate = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            ...createMission(MissionId.make("mission-3")),
+            taskIds: [taskA],
+          },
+        }),
+      );
+      expect(createDuplicate.message).toContain("already belongs");
+
       model = yield* apply(model, createTask(TaskId.make("foreign-task"), otherProjectId));
       const foreign = yield* Effect.flip(
         decideOrchestrationCommand({

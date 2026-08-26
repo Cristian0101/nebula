@@ -1047,6 +1047,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           commandType: command.type,
           detail: `Mission Task '${outOfProjectTaskId}' must already exist in this Project.`,
         });
+      const conflictingMembership = taskIds
+        .map((taskId) => ({ taskId, mission: missionContainingTask(readModel, taskId) }))
+        .find(({ mission }) => mission !== undefined && mission.id !== command.missionId);
+      if (conflictingMembership?.mission) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${conflictingMembership.taskId}' already belongs to Mission '${conflictingMembership.mission.id}'.`,
+        });
+      }
       const checkpointKeys = (command.checkpoints ?? []).map((checkpoint) => checkpoint.key);
       if (new Set(checkpointKeys).size !== checkpointKeys.length)
         return yield* new OrchestrationCommandInvariantError({

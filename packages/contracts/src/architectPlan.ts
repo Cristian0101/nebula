@@ -113,7 +113,22 @@ export const ArchitectTeamConfiguration = Schema.Struct({
     Schema.isLessThanOrEqualTo(ARCHITECT_PLAN_MAX_TEAM_AGENTS),
   ),
   startingSeats: Schema.Array(ArchitectTeamSeat),
-});
+})
+  .check(
+    Schema.makeFilter(
+      (input) =>
+        input.startingSeats.length === input.executionAgentCount ||
+        "startingSeats must contain exactly executionAgentCount seats",
+    ),
+  )
+  .check(
+    Schema.makeFilter(
+      (input) =>
+        input.maxWritableConcurrency <=
+          input.startingSeats.filter((seat) => seat.access === "write").length ||
+        "maxWritableConcurrency cannot exceed the number of writable starting seats",
+    ),
+  );
 export type ArchitectTeamConfiguration = typeof ArchitectTeamConfiguration.Type;
 
 export const ArchitectOwnershipDraft = Schema.Struct({
