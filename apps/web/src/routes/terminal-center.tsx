@@ -2,8 +2,8 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 
 const GlobalTerminalCenterPage = lazy(() =>
-  import("../components/terminalCenter/GlobalTerminalCenter").then((module) => ({
-    default: module.GlobalTerminalCenterPage,
+  import("../components/terminalCenter/GlobalTerminalWorkspaceOverview").then((module) => ({
+    default: module.GlobalTerminalWorkspaceOverview,
   })),
 );
 

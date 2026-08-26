@@ -535,6 +535,7 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
+      embeddedTerminalPane?: boolean;
       threadSyncPhase?: ThreadSyncPhase | null;
       routeKind: "server";
       draftId?: never;
@@ -545,6 +546,7 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
+      embeddedTerminalPane?: boolean;
       threadSyncPhase?: never;
       routeKind: "draft";
       draftId: DraftId;
@@ -1235,6 +1237,7 @@ function ChatViewContent(props: ChatViewProps) {
     onDiffPanelOpen,
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
+    embeddedTerminalPane = false,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
   const threadSyncPhase = routeKind === "server" ? (props.threadSyncPhase ?? null) : null;
@@ -6416,7 +6419,9 @@ function ChatViewContent(props: ChatViewProps) {
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      {rightPanelOpen && !shouldUseRightPanelSheet ? panelLayoutControls : null}
+      {rightPanelOpen && !shouldUseRightPanelSheet && !embeddedTerminalPane
+        ? panelLayoutControls
+        : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
@@ -6425,42 +6430,44 @@ function ChatViewContent(props: ChatViewProps) {
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
         {/* Top bar */}
-        <WorkspacePageHeader
-          data-chat-header
-          electron={isElectron}
-          reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
-          className="relative bg-background"
-        >
-          {!rightPanelOpen ? panelLayoutControls : null}
-          <ChatHeader
-            {...(!supportsPullRequests || threadRepository === null
-              ? {}
-              : { onOpenPullRequest: openThreadPullRequest })}
-            activeThreadEnvironmentId={activeThread.environmentId}
-            activeThreadId={activeThread.id}
-            {...(routeKind === "draft" && draftId ? { draftId } : {})}
-            activeThreadTitle={activeThread.title}
-            isServerThread={isServerThread}
-            changeRequest={activeThreadChangeRequest}
-            activeProjectName={activeProject?.title}
-            activeProjectCwd={activeProject?.workspaceRoot ?? null}
-            activeProjectFaviconPath={activeProject?.faviconPath ?? null}
-            openInCwd={gitCwd}
-            activeProjectScripts={activeProject?.scripts}
-            preferredScriptId={
-              activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-            }
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            rightPanelOpen={rightPanelOpen}
-            gitCwd={gitCwd}
-            onNewThreadInProject={handleNewThreadInActiveProject}
-            onRunProjectScript={runProjectScript}
-            onAddProjectScript={saveProjectScript}
-            onUpdateProjectScript={updateProjectScript}
-            onDeleteProjectScript={deleteProjectScript}
-          />
-        </WorkspacePageHeader>
+        {!embeddedTerminalPane ? (
+          <WorkspacePageHeader
+            data-chat-header
+            electron={isElectron}
+            reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
+            className="relative bg-background"
+          >
+            {!rightPanelOpen ? panelLayoutControls : null}
+            <ChatHeader
+              {...(!supportsPullRequests || threadRepository === null
+                ? {}
+                : { onOpenPullRequest: openThreadPullRequest })}
+              activeThreadEnvironmentId={activeThread.environmentId}
+              activeThreadId={activeThread.id}
+              {...(routeKind === "draft" && draftId ? { draftId } : {})}
+              activeThreadTitle={activeThread.title}
+              isServerThread={isServerThread}
+              changeRequest={activeThreadChangeRequest}
+              activeProjectName={activeProject?.title}
+              activeProjectCwd={activeProject?.workspaceRoot ?? null}
+              activeProjectFaviconPath={activeProject?.faviconPath ?? null}
+              openInCwd={gitCwd}
+              activeProjectScripts={activeProject?.scripts}
+              preferredScriptId={
+                activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+              }
+              keybindings={keybindings}
+              availableEditors={availableEditors}
+              rightPanelOpen={rightPanelOpen}
+              gitCwd={gitCwd}
+              onNewThreadInProject={handleNewThreadInActiveProject}
+              onRunProjectScript={runProjectScript}
+              onAddProjectScript={saveProjectScript}
+              onUpdateProjectScript={updateProjectScript}
+              onDeleteProjectScript={deleteProjectScript}
+            />
+          </WorkspacePageHeader>
+        ) : null}
 
         <ThreadErrorBanner
           error={visibleThreadError}
@@ -6861,7 +6868,7 @@ function ChatViewContent(props: ChatViewProps) {
           {rightPanelContent}
         </RightPanelTabs>
       ) : null}
-      {shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
+      {shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef && !embeddedTerminalPane ? (
         <RightPanelSheet open onClose={closePreviewPanel}>
           <RightPanelTabs
             mode="sheet"
