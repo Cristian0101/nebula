@@ -1,7 +1,7 @@
 import type { DevServerProfile, EnvironmentId, OrchestrationThreadShell } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ExternalLinkIcon, FileTextIcon, PlayIcon, RotateCcwIcon, SquareIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { previewEnvironment } from "../../state/preview";
@@ -60,6 +60,7 @@ export function DevServerControls({
   const closeTerminal = useAtomCommand(terminalEnvironment.close, { reportFailure: false });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
+  const [pendingRestart, setPendingRestart] = useState<DevServerProfile | null>(null);
   const workspaceRoot = thread.worktreePath ?? projectWorkspaceRoot;
 
   const profileByTerminalId = useMemo(
@@ -104,34 +105,39 @@ export function DevServerControls({
       (session) =>
         session.target.threadId === thread.id && session.target.terminalId === terminalId,
     );
-    if (restart && existing) {
-      const closeResult = await closeTerminal({
+    if (restart && existing?.state.hasRunningSubprocess) {
+      const interruptResult = await writeTerminal({
         environmentId,
-        input: { threadId: thread.id, terminalId, deleteHistory: false },
+        input: { threadId: thread.id, terminalId, data: "\x03" },
       });
-      if (closeResult._tag === "Failure") {
+      if (interruptResult._tag === "Failure") {
         setBusyProfileId(null);
         notifyFailure(
           "Could not restart Dev Server",
-          "Nebula could not stop the project terminal.",
+          "Nebula could not interrupt the approved process.",
         );
         return;
       }
+      setPendingRestart(profile);
+      return;
     }
-    const lifecycleResult = await openTerminal({
-      environmentId,
-      input: {
-        threadId: thread.id,
-        terminalId,
-        cwd,
-        ...(thread.worktreePath ? { worktreePath: thread.worktreePath } : {}),
-        cols: 120,
-        rows: 30,
-      },
-    });
+    const lifecycleInput = {
+      threadId: thread.id,
+      terminalId,
+      cwd,
+      ...(thread.worktreePath ? { worktreePath: thread.worktreePath } : {}),
+      cols: 120,
+      rows: 30,
+    };
+    const lifecycleResult = await openTerminal({ environmentId, input: lifecycleInput });
     if (lifecycleResult._tag === "Failure") {
       setBusyProfileId(null);
-      notifyFailure("Could not start Dev Server", "Nebula could not open the project terminal.");
+      notifyFailure(
+        restart ? "Could not restart Dev Server" : "Could not start Dev Server",
+        restart
+          ? "Nebula could not restart the project terminal."
+          : "Nebula could not open the project terminal.",
+      );
       return;
     }
     const writeResult = await writeTerminal({
@@ -143,6 +149,19 @@ export function DevServerControls({
       notifyFailure("Could not start Dev Server", "The approved command could not be written.");
     }
   };
+
+  useEffect(() => {
+    if (!pendingRestart) return;
+    const terminalId = devServerTerminalId(pendingRestart.id);
+    const session = sessions.find(
+      (candidate) =>
+        candidate.target.threadId === thread.id && candidate.target.terminalId === terminalId,
+    );
+    if (session?.state.hasRunningSubprocess) return;
+    const profile = pendingRestart;
+    setPendingRestart(null);
+    void run(profile, false);
+  }, [pendingRestart, sessions]);
 
   const stop = async (profile: DevServerProfile) => {
     setBusyProfileId(profile.id);

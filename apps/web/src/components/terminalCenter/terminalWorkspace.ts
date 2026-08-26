@@ -4,6 +4,22 @@ export const TERMINAL_WORKSPACE_GRID_SIZE = 4;
 export const TERMINAL_WORKSPACE_LAYOUTS = ["grid", "freeform", "split"] as const;
 export type TerminalWorkspaceLayout = (typeof TERMINAL_WORKSPACE_LAYOUTS)[number];
 
+export const TERMINAL_WORKSPACE_GRID_PRESETS = [
+  "auto",
+  "1x1",
+  "2x1",
+  "2x2",
+  "3x2",
+  "3x3",
+  "4x3",
+] as const;
+export type TerminalWorkspaceGridPreset = (typeof TERMINAL_WORKSPACE_GRID_PRESETS)[number];
+
+export interface TerminalWorkspaceGridDimensions {
+  readonly columns: number;
+  readonly rows: number;
+}
+
 export const TERMINAL_WORKSPACE_PANE_TYPES = [
   "shell",
   "provider",
@@ -31,6 +47,15 @@ export interface TerminalWorkspaceFreeformPlacement {
   readonly z: number;
 }
 
+export interface TerminalWorkspaceExternalServer {
+  readonly host: string;
+  readonly port: number;
+  readonly url: string;
+  readonly pid: number | null;
+  readonly processName: string | null;
+  readonly attachedAt: string;
+}
+
 export interface TerminalWorkspacePane {
   readonly id: string;
   readonly type: TerminalWorkspacePaneType;
@@ -42,6 +67,7 @@ export interface TerminalWorkspacePane {
   readonly attachedPaneId: string | null;
   readonly command: string | null;
   readonly previewUrl: string | null;
+  readonly externalServer: TerminalWorkspaceExternalServer | null;
   readonly workspacePath: string;
   readonly grid: TerminalWorkspaceGridPlacement;
   readonly freeform: TerminalWorkspaceFreeformPlacement;
@@ -54,6 +80,7 @@ export interface TerminalWorkspace {
   readonly id: string;
   readonly name: string;
   readonly layout: TerminalWorkspaceLayout;
+  readonly gridPreset: TerminalWorkspaceGridPreset;
   readonly splitDirection: "horizontal" | "vertical";
   readonly panes: ReadonlyArray<TerminalWorkspacePane>;
   readonly selectedPaneId: string | null;
@@ -81,6 +108,7 @@ export interface CreateTerminalWorkspacePaneInput {
   readonly attachedPaneId?: string | null;
   readonly command?: string | null;
   readonly previewUrl?: string | null;
+  readonly externalServer?: TerminalWorkspaceExternalServer | null;
   readonly grid?: Partial<TerminalWorkspaceGridPlacement>;
   readonly now?: string;
 }
@@ -154,6 +182,7 @@ export function createTerminalWorkspacePane(
     attachedPaneId: input.attachedPaneId ?? null,
     command: input.command ?? null,
     previewUrl: input.previewUrl ?? null,
+    externalServer: input.externalServer ?? null,
     workspacePath: input.workspacePath,
     grid: normalizeGridPlacement(input.grid),
     freeform: DEFAULT_FREEFORM_PLACEMENT,
@@ -187,6 +216,7 @@ export function createDefaultTerminalWorkspaceProjectState(input: {
         id: workspaceId,
         name: "Default",
         layout: "grid",
+        gridPreset: "auto",
         splitDirection: "horizontal",
         panes: [shellPane],
         selectedPaneId: shellPane.id,
@@ -210,22 +240,25 @@ export function migrateTerminalCanvasToWorkspace(input: {
   const threadIds = input.legacy?.visibleThreadIds ?? [];
   if (threadIds.length === 0) return base;
   const timestamp = nowIso(input.now);
-  const providerPanes = threadIds.map((threadId, index) =>
-    createTerminalWorkspacePane({
+  const providerPanes: TerminalWorkspacePane[] = [];
+  for (const threadId of threadIds) {
+    const placement = firstAvailableGridPlacement(providerPanes);
+    const pane = createTerminalWorkspacePane({
       id: `${workspace.id}:thread:${threadId}`,
       type: "thread",
       title: "Existing Thread",
       workspacePath: input.workspacePath,
       threadId,
-      grid: {
-        column: (index % TERMINAL_WORKSPACE_GRID_SIZE) + 1,
-        row: Math.min(TERMINAL_WORKSPACE_GRID_SIZE, Math.floor(index / 4) + 1),
+      grid: placement ?? {
+        column: 1,
+        row: TERMINAL_WORKSPACE_GRID_SIZE,
         columnSpan: 1,
         rowSpan: 1,
       },
       now: timestamp,
-    }),
-  );
+    });
+    providerPanes.push(placement ? pane : { ...pane, visible: false });
+  }
   return {
     ...base,
     workspaces: [
@@ -259,16 +292,101 @@ function occupiedCells(
   return occupied;
 }
 
+const GRID_PRESET_DIMENSIONS: Record<
+  Exclude<TerminalWorkspaceGridPreset, "auto">,
+  TerminalWorkspaceGridDimensions
+> = {
+  "1x1": { columns: 1, rows: 1 },
+  "2x1": { columns: 2, rows: 1 },
+  "2x2": { columns: 2, rows: 2 },
+  "3x2": { columns: 3, rows: 2 },
+  "3x3": { columns: 3, rows: 3 },
+  "4x3": { columns: 4, rows: 3 },
+};
+
+function automaticGridDimensions(
+  panes: ReadonlyArray<TerminalWorkspacePane>,
+): TerminalWorkspaceGridDimensions {
+  const visible = panes.filter((pane) => pane.visible);
+  const count = visible.length;
+  const base =
+    count <= 1
+      ? { columns: 1, rows: 1 }
+      : count <= 2
+        ? { columns: 2, rows: 1 }
+        : count <= 4
+          ? { columns: 2, rows: 2 }
+          : count <= 6
+            ? { columns: 3, rows: 2 }
+            : count <= 9
+              ? { columns: 3, rows: 3 }
+              : count <= 12
+                ? { columns: 4, rows: 3 }
+                : { columns: 4, rows: 4 };
+  return {
+    columns: Math.min(
+      TERMINAL_WORKSPACE_GRID_SIZE,
+      Math.max(base.columns, ...visible.map((pane) => pane.grid.column + pane.grid.columnSpan - 1)),
+    ),
+    rows: Math.min(
+      TERMINAL_WORKSPACE_GRID_SIZE,
+      Math.max(base.rows, ...visible.map((pane) => pane.grid.row + pane.grid.rowSpan - 1)),
+    ),
+  };
+}
+
+export function terminalWorkspaceGridDimensions(
+  workspace: Pick<TerminalWorkspace, "gridPreset" | "panes">,
+): TerminalWorkspaceGridDimensions {
+  return workspace.gridPreset === "auto"
+    ? automaticGridDimensions(workspace.panes)
+    : GRID_PRESET_DIMENSIONS[workspace.gridPreset];
+}
+
+function placementFitsDimensions(
+  placement: TerminalWorkspaceGridPlacement,
+  dimensions: TerminalWorkspaceGridDimensions,
+): boolean {
+  return (
+    placement.column >= 1 &&
+    placement.row >= 1 &&
+    placement.column + placement.columnSpan - 1 <= dimensions.columns &&
+    placement.row + placement.rowSpan - 1 <= dimensions.rows
+  );
+}
+
+function placementIsAvailable(
+  panes: ReadonlyArray<TerminalWorkspacePane>,
+  placement: TerminalWorkspaceGridPlacement,
+  ignorePaneId?: string,
+): boolean {
+  const occupied = occupiedCells(panes, ignorePaneId);
+  for (let row = placement.row; row < placement.row + placement.rowSpan; row += 1) {
+    for (
+      let column = placement.column;
+      column < placement.column + placement.columnSpan;
+      column += 1
+    ) {
+      if (occupied.has(`${column}:${row}`)) return false;
+    }
+  }
+  return true;
+}
+
 export function firstAvailableGridPlacement(
   panes: ReadonlyArray<TerminalWorkspacePane>,
   preferred?: { readonly column: number; readonly row: number },
+  dimensions: TerminalWorkspaceGridDimensions = {
+    columns: TERMINAL_WORKSPACE_GRID_SIZE,
+    rows: TERMINAL_WORKSPACE_GRID_SIZE,
+  },
 ): TerminalWorkspaceGridPlacement | null {
   const occupied = occupiedCells(panes);
   const candidates = preferred
     ? [preferred]
-    : Array.from({ length: TERMINAL_WORKSPACE_GRID_SIZE ** 2 }, (_, index) => ({
-        column: (index % TERMINAL_WORKSPACE_GRID_SIZE) + 1,
-        row: Math.floor(index / TERMINAL_WORKSPACE_GRID_SIZE) + 1,
+    : Array.from({ length: dimensions.columns * dimensions.rows }, (_, index) => ({
+        column: (index % dimensions.columns) + 1,
+        row: Math.floor(index / dimensions.columns) + 1,
       }));
   for (const candidate of candidates) {
     if (!occupied.has(`${candidate.column}:${candidate.row}`)) {
@@ -285,16 +403,9 @@ export function movePaneToGrid(
   now?: string,
 ): TerminalWorkspace {
   const normalized = normalizeGridPlacement(placement);
-  const occupied = occupiedCells(workspace.panes, paneId);
-  for (let row = normalized.row; row < normalized.row + normalized.rowSpan; row += 1) {
-    for (
-      let column = normalized.column;
-      column < normalized.column + normalized.columnSpan;
-      column += 1
-    ) {
-      if (occupied.has(`${column}:${row}`)) return workspace;
-    }
-  }
+  if (!placementFitsDimensions(normalized, terminalWorkspaceGridDimensions(workspace)))
+    return workspace;
+  if (!placementIsAvailable(workspace.panes, normalized, paneId)) return workspace;
   const timestamp = nowIso(now);
   return {
     ...workspace,
@@ -322,21 +433,120 @@ export function hideWorkspacePane(
   };
 }
 
+export function removeWorkspacePane(
+  workspace: TerminalWorkspace,
+  paneId: string,
+  now?: string,
+): TerminalWorkspace {
+  if (!workspace.panes.some((pane) => pane.id === paneId)) return workspace;
+  const removedPaneIds = new Set([
+    paneId,
+    ...workspace.panes.filter((pane) => pane.attachedPaneId === paneId).map((pane) => pane.id),
+  ]);
+  const timestamp = nowIso(now);
+  return {
+    ...workspace,
+    panes: workspace.panes.filter((pane) => !removedPaneIds.has(pane.id)),
+    selectedPaneId:
+      workspace.selectedPaneId && removedPaneIds.has(workspace.selectedPaneId)
+        ? null
+        : workspace.selectedPaneId,
+    focusedPaneId:
+      workspace.focusedPaneId && removedPaneIds.has(workspace.focusedPaneId)
+        ? null
+        : workspace.focusedPaneId,
+    updatedAt: timestamp,
+  };
+}
+
 export function restoreWorkspacePane(
   workspace: TerminalWorkspace,
   paneId: string,
   now?: string,
 ): TerminalWorkspace {
+  const pane = workspace.panes.find((candidate) => candidate.id === paneId);
+  if (!pane) return workspace;
+  if (pane.visible) {
+    return workspace.selectedPaneId === paneId
+      ? workspace
+      : { ...workspace, selectedPaneId: paneId };
+  }
   const timestamp = nowIso(now);
-  const placement = firstAvailableGridPlacement(workspace.panes);
+  const currentDimensions = terminalWorkspaceGridDimensions(workspace);
+  const dimensions =
+    workspace.gridPreset === "auto"
+      ? {
+          columns: Math.min(
+            TERMINAL_WORKSPACE_GRID_SIZE,
+            Math.max(currentDimensions.columns, pane.grid.column + pane.grid.columnSpan - 1),
+          ),
+          rows: Math.min(
+            TERMINAL_WORKSPACE_GRID_SIZE,
+            Math.max(currentDimensions.rows, pane.grid.row + pane.grid.rowSpan - 1),
+          ),
+        }
+      : currentDimensions;
+  const placement =
+    placementFitsDimensions(pane.grid, dimensions) &&
+    placementIsAvailable(workspace.panes, pane.grid, pane.id)
+      ? pane.grid
+      : firstAvailableGridPlacement(workspace.panes, undefined, dimensions);
+  if (!placement) return workspace;
   return {
     ...workspace,
     panes: workspace.panes.map((pane) =>
-      pane.id === paneId
-        ? { ...pane, visible: true, grid: placement ?? pane.grid, updatedAt: timestamp }
-        : pane,
+      pane.id === paneId ? { ...pane, visible: true, grid: placement, updatedAt: timestamp } : pane,
     ),
     selectedPaneId: paneId,
+    updatedAt: timestamp,
+  };
+}
+
+export function reflowWorkspaceGrid(
+  workspace: TerminalWorkspace,
+  gridPreset: TerminalWorkspaceGridPreset,
+  now?: string,
+): TerminalWorkspace {
+  const visiblePanes = workspace.panes.filter((pane) => pane.visible);
+  const dimensions =
+    gridPreset === "auto"
+      ? automaticGridDimensions(visiblePanes)
+      : GRID_PRESET_DIMENSIONS[gridPreset];
+  if (visiblePanes.length > dimensions.columns * dimensions.rows) return workspace;
+
+  const placed: TerminalWorkspacePane[] = [];
+  const placements = new Map<string, TerminalWorkspaceGridPlacement>();
+  for (const [index, pane] of visiblePanes.entries()) {
+    const preferred = {
+      column: Math.min(dimensions.columns, pane.grid.column),
+      row: Math.min(dimensions.rows, pane.grid.row),
+      columnSpan: Math.min(dimensions.columns, pane.grid.columnSpan),
+      rowSpan: Math.min(dimensions.rows, pane.grid.rowSpan),
+    };
+    const remainingPaneCount = visiblePanes.length - index - 1;
+    const preferredCellCount = preferred.columnSpan * preferred.rowSpan;
+    const hasRoomForRemainingPanes =
+      dimensions.columns * dimensions.rows - occupiedCells(placed).size - preferredCellCount >=
+      remainingPaneCount;
+    const candidate =
+      hasRoomForRemainingPanes &&
+      placementFitsDimensions(preferred, dimensions) &&
+      placementIsAvailable(placed, preferred)
+        ? preferred
+        : firstAvailableGridPlacement(placed, undefined, dimensions);
+    if (!candidate) return workspace;
+    placements.set(pane.id, candidate);
+    placed.push({ ...pane, grid: candidate });
+  }
+
+  const timestamp = nowIso(now);
+  return {
+    ...workspace,
+    gridPreset,
+    panes: workspace.panes.map((pane) => {
+      const grid = placements.get(pane.id);
+      return grid ? { ...pane, grid, updatedAt: timestamp } : pane;
+    }),
     updatedAt: timestamp,
   };
 }

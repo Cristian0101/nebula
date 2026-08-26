@@ -1,4 +1,4 @@
-import type { DevServerProfile, ProjectScript } from "@t3tools/contracts";
+import type { DevServerProfile, DiscoveredLocalServer, ProjectScript } from "@t3tools/contracts";
 
 export interface DevServerSuggestion {
   readonly name: string;
@@ -8,6 +8,21 @@ export interface DevServerSuggestion {
   readonly previewUrl: string;
   readonly source: "package.json" | "project-script";
   readonly framework: "vite" | "next" | "generic";
+}
+
+export function discoveredServerForTerminal<T extends DiscoveredLocalServer>(input: {
+  readonly servers: ReadonlyArray<T>;
+  readonly threadId: string;
+  readonly terminalId: string | null;
+}): T | null {
+  if (!input.terminalId) return null;
+  return (
+    input.servers.find(
+      (server) =>
+        server.terminal?.threadId === input.threadId &&
+        server.terminal.terminalId === input.terminalId,
+    ) ?? null
+  );
 }
 
 interface PackageJsonShape {
@@ -56,9 +71,10 @@ function frameworkForPackage(packageJson: PackageJsonShape): DevServerSuggestion
   return "generic";
 }
 
-function defaultPort(framework: DevServerSuggestion["framework"], script: string): number {
-  if (framework === "vite" || script === "preview") return 5173;
-  return 3000;
+function defaultPort(framework: DevServerSuggestion["framework"]): number | null {
+  if (framework === "vite") return 5173;
+  if (framework === "next") return 3000;
+  return null;
 }
 
 export function discoverDevServerSuggestions(input: {
@@ -74,13 +90,13 @@ export function discoverDevServerSuggestions(input: {
       const framework = frameworkForPackage(packageJson);
       for (const script of ["dev", "start", "preview"]) {
         if (typeof scripts[script] !== "string") continue;
-        const port = defaultPort(framework, script);
+        const port = defaultPort(framework);
         suggestions.push({
           name: titleForScript(script),
           command: scriptCommand(runner, script),
           workingDirectory: ".",
           preferredPort: port,
-          previewUrl: `http://localhost:${port}`,
+          previewUrl: port === null ? "" : `http://localhost:${port}`,
           source: "package.json",
           framework,
         });
@@ -98,7 +114,7 @@ export function discoverDevServerSuggestions(input: {
       command: script.command,
       workingDirectory: ".",
       preferredPort: null,
-      previewUrl: "",
+      previewUrl: script.previewUrl ?? "",
       source: "project-script",
       framework: "generic",
     });
@@ -109,11 +125,11 @@ export function discoverDevServerSuggestions(input: {
 export function commandWithPreferredPort(
   suggestion: Pick<DevServerSuggestion, "command" | "framework">,
   port: number,
-): string {
+): string | null {
   if (/(?:^|\s)(?:--port|-p)(?:\s|=)\d+/u.test(suggestion.command)) return suggestion.command;
   if (suggestion.framework === "next") return `${suggestion.command} -- -p ${port}`;
   if (suggestion.framework === "vite") return `${suggestion.command} -- --port ${port}`;
-  return suggestion.command;
+  return null;
 }
 
 export function nextAvailablePreferredPort(
@@ -121,9 +137,26 @@ export function nextAvailablePreferredPort(
   occupiedPorts: ReadonlySet<number>,
 ): number | null {
   if (preferredPort === null) return null;
+  if (preferredPort < 1 || preferredPort > 65_535) return null;
   let port = preferredPort;
   while (occupiedPorts.has(port) && port < 65_535) port += 1;
-  return port;
+  return occupiedPorts.has(port) ? null : port;
+}
+
+export function replaceRetargetedProfile(input: {
+  readonly profiles: ReadonlyArray<DevServerProfile>;
+  readonly originalProfileId: string;
+  readonly retargetedProfile: DevServerProfile;
+}): ReadonlyArray<DevServerProfile> {
+  const matching = input.profiles.find(
+    (profile) =>
+      profile.id !== input.originalProfileId &&
+      profile.command === input.retargetedProfile.command &&
+      profile.workingDirectory === input.retargetedProfile.workingDirectory &&
+      profile.preferredPort === input.retargetedProfile.preferredPort,
+  );
+  if (matching) return input.profiles;
+  return [...input.profiles, input.retargetedProfile];
 }
 
 export function approvedProfileFromSuggestion(input: {
@@ -132,18 +165,17 @@ export function approvedProfileFromSuggestion(input: {
   readonly port: number | null;
   readonly approvedAt: string;
 }): DevServerProfile {
-  const command =
-    input.port === null
-      ? input.suggestion.command
-      : commandWithPreferredPort(input.suggestion, input.port);
+  const managedCommand =
+    input.port === null ? null : commandWithPreferredPort(input.suggestion, input.port);
+  const preferredPort = managedCommand === null ? null : input.port;
   return {
     id: input.id,
     name: input.suggestion.name,
-    command,
+    command: managedCommand ?? input.suggestion.command,
     workingDirectory: input.suggestion.workingDirectory,
-    preferredPort: input.port,
+    preferredPort,
     previewUrl:
-      input.port === null ? input.suggestion.previewUrl : `http://localhost:${input.port}`,
+      preferredPort === null ? input.suggestion.previewUrl : `http://localhost:${preferredPort}`,
     approvedAt: input.approvedAt,
   };
 }
@@ -160,7 +192,7 @@ export function retargetApprovedProfile(input: {
   return {
     ...input.profile,
     id: input.id,
-    name: `${input.profile.name} (${input.port})`,
+    name: `${input.profile.name.replace(/\s+\(\d+\)$/u, "")} (${input.port})`,
     command,
     preferredPort: input.port,
     previewUrl: `http://localhost:${input.port}`,

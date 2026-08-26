@@ -18,6 +18,10 @@ import {
   useUiStateStore,
 } from "./uiStateStore";
 import { DEFAULT_TERMINAL_CENTER_STATE } from "./components/terminalCenter/terminalCenterLogic";
+import {
+  createDefaultTerminalWorkspaceProjectState,
+  createTerminalWorkspacePane,
+} from "./components/terminalCenter/terminalWorkspace";
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
@@ -33,6 +37,88 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
 }
 
 describe("uiStateStore pure functions", () => {
+  it("reconciles persisted Terminal Workspace collisions and invalid selection", () => {
+    const state = createDefaultTerminalWorkspaceProjectState({
+      projectId: "project-one",
+      workspacePath: "/repo",
+      now: "2026-08-26T12:00:00.000Z",
+    });
+    const workspace = state.workspaces[0]!;
+    const agent = createTerminalWorkspacePane({
+      id: "agent",
+      type: "thread",
+      title: "Codex",
+      workspacePath: "/repo",
+      grid: workspace.panes[0]!.grid,
+      now: "2026-08-26T12:00:00.000Z",
+    });
+    const parsed = parsePersistedState({
+      terminalWorkspacesByProjectId: {
+        "project-one": {
+          ...state,
+          workspaces: [
+            {
+              ...workspace,
+              gridPreset: "2x2",
+              panes: [...workspace.panes, agent],
+              selectedPaneId: "missing",
+              focusedPaneId: "missing",
+            },
+          ],
+        },
+      },
+    });
+    const restored = parsed.terminalWorkspacesByProjectId["project-one"]!.workspaces[0]!;
+
+    expect(restored.selectedPaneId).toBeNull();
+    expect(restored.focusedPaneId).toBeNull();
+    expect(new Set(restored.panes.map((pane) => `${pane.grid.column}:${pane.grid.row}`)).size).toBe(
+      2,
+    );
+  });
+
+  it("persists a validated external server attachment and rejects invalid ports", () => {
+    const state = createDefaultTerminalWorkspaceProjectState({
+      projectId: "project-one",
+      workspacePath: "/repo",
+      now: "2026-08-26T12:00:00.000Z",
+    });
+    const workspace = state.workspaces[0]!;
+    const valid = createTerminalWorkspacePane({
+      id: "external",
+      type: "dev_server",
+      title: "Next · :3002",
+      workspacePath: "/repo",
+      externalServer: {
+        host: "localhost",
+        port: 3002,
+        url: "http://localhost:3002",
+        pid: 42,
+        processName: "next-server",
+        attachedAt: "2026-08-26T12:00:00.000Z",
+      },
+    });
+    const invalid = {
+      ...valid,
+      id: "invalid",
+      externalServer: { ...valid.externalServer!, port: 70_000 },
+    };
+    const parsed = parsePersistedState({
+      terminalWorkspacesByProjectId: {
+        "project-one": {
+          ...state,
+          workspaces: [{ ...workspace, panes: [valid, invalid] }],
+        },
+      },
+    });
+    const panes = parsed.terminalWorkspacesByProjectId["project-one"]!.workspaces[0]!.panes;
+
+    expect(panes.find((pane) => pane.id === valid.id)?.externalServer).toEqual(
+      valid.externalServer,
+    );
+    expect(panes.find((pane) => pane.id === invalid.id)?.externalServer).toBeNull();
+  });
+
   it("keeps global and project Terminal Center canvases independent", () => {
     const globalKey = "nebula:global-terminal-center";
     const projectKey = "project-one";

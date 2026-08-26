@@ -1,18 +1,19 @@
 import { useAtomValue } from "@effect/atom-react";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { useAttachedTerminalSession } from "../../state/terminalSessions";
 import { TerminalViewport } from "../ThreadTerminalDrawer";
 
-export function WorkspaceTerminalViewport({
+export const WorkspaceTerminalViewport = memo(function WorkspaceTerminalViewport({
   environmentId,
   hostThreadId,
   terminalId,
   cwd,
   worktreePath,
   title,
+  statusLabel,
   autoFocus,
   sizeEpoch,
 }: {
@@ -22,6 +23,7 @@ export function WorkspaceTerminalViewport({
   readonly cwd: string;
   readonly worktreePath?: string | null;
   readonly title: string;
+  readonly statusLabel?: string;
   readonly autoFocus: boolean;
   readonly sizeEpoch: number;
 }) {
@@ -36,11 +38,18 @@ export function WorkspaceTerminalViewport({
       ...(worktreePath !== undefined ? { worktreePath } : {}),
     },
   });
+  const resolvedStatusLabel =
+    statusLabel ??
+    (session.hasRunningSubprocess
+      ? "Running"
+      : session.status === "running"
+        ? "Shell ready"
+        : session.status);
 
   return (
     <div className="relative h-full min-h-0 overflow-hidden bg-[var(--terminal-background)]">
       <div className="pointer-events-none absolute right-2 top-1 z-10 rounded bg-background/70 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur-sm">
-        {session.status === "running" ? "Running" : session.status}
+        {resolvedStatusLabel}
       </div>
       <TerminalViewport
         advancedTypography={false}
@@ -60,4 +69,4 @@ export function WorkspaceTerminalViewport({
       />
     </div>
   );
-}
+});

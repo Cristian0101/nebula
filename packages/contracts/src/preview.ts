@@ -298,6 +298,7 @@ export const DiscoveredLocalServer = Schema.Struct({
   url: Url,
   processName: Schema.NullOr(TrimmedNonEmptyString),
   pid: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
+  embeddingPolicy: Schema.optional(Schema.Literals(["allowed", "blocked", "unknown"])),
   terminal: Schema.NullOr(
     Schema.Struct({
       threadId: ThreadId,

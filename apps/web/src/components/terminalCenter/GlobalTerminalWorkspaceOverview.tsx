@@ -22,7 +22,10 @@ import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { useSettingsProjectGroups } from "../settings/ProjectSettingsPanel";
 import {
+  createDefaultTerminalWorkspaceProjectState,
   createTerminalWorkspacePane,
+  firstAvailableGridPlacement,
+  restoreWorkspacePane,
   updateWorkspace,
   type TerminalWorkspacePaneType,
 } from "./terminalWorkspace";
@@ -57,7 +60,7 @@ function ProjectColumn({ group }: { readonly group: ProjectGroup }) {
     null;
   const visible = workspace?.panes.filter((pane) => pane.visible) ?? [];
   const hiddenCount = workspace?.panes.filter((pane) => !pane.visible).length ?? 0;
-  const hasRunningPane = visible.some((pane) =>
+  const hasRunningPane = (workspace?.panes ?? []).some((pane) =>
     sessions.some(
       (session) =>
         pane.terminalId === session.target.terminalId && session.state.hasRunningSubprocess,
@@ -203,39 +206,52 @@ export function GlobalTerminalWorkspaceOverview() {
       ),
     );
     if (!group) return;
-    const state = workspaceStates[group.id];
-    if (state) {
-      const workspace =
-        state.workspaces.find((candidate) => candidate.id === state.activeWorkspaceId) ??
-        state.workspaces[0];
-      if (workspace) {
-        const existing = workspace.panes.find((pane) => pane.threadId === thread.id);
-        const pane =
-          existing ??
-          createTerminalWorkspacePane({
-            id: crypto.randomUUID(),
-            type: "thread",
-            title: thread.title,
-            workspacePath:
-              group.memberProjects.find((project) => project.id === thread.projectId)
-                ?.workspaceRoot ?? "Unavailable",
-            threadId: thread.id,
-            providerInstanceId: thread.modelSelection.instanceId,
-            grid: firstOpenCell(workspace.panes),
+    const project =
+      group.memberProjects.find(
+        (candidate) =>
+          candidate.environmentId === thread.environmentId && candidate.id === thread.projectId,
+      ) ?? group.memberProjects[0]!;
+    const savedState = workspaceStates[group.id];
+    const state =
+      savedState && savedState.workspaces.length > 0
+        ? savedState
+        : createDefaultTerminalWorkspaceProjectState({
+            projectId: group.id,
+            workspacePath: project.workspaceRoot,
           });
-        setWorkspaceState(
-          group.id,
-          updateWorkspace(state, workspace.id, (current) => ({
-            ...current,
-            panes: existing
-              ? current.panes.map((candidate) =>
-                  candidate.id === existing.id ? { ...candidate, visible: true } : candidate,
-                )
-              : [...current.panes, pane],
-            selectedPaneId: pane.id,
-          })),
-        );
-      }
+    const workspace =
+      state.workspaces.find((candidate) => candidate.id === state.activeWorkspaceId) ??
+      state.workspaces[0]!;
+    const existing = workspace.panes.find((pane) => pane.threadId === thread.id);
+    if (existing) {
+      const restored = existing.visible
+        ? { ...workspace, selectedPaneId: existing.id }
+        : restoreWorkspacePane(workspace, existing.id);
+      if (!existing.visible && restored === workspace) return;
+      setWorkspaceState(
+        group.id,
+        updateWorkspace(state, workspace.id, () => restored),
+      );
+    } else {
+      const grid = firstAvailableGridPlacement(workspace.panes);
+      if (!grid) return;
+      const pane = createTerminalWorkspacePane({
+        id: crypto.randomUUID(),
+        type: "thread",
+        title: thread.title,
+        workspacePath: project.workspaceRoot,
+        threadId: thread.id,
+        providerInstanceId: thread.modelSelection.instanceId,
+        grid,
+      });
+      setWorkspaceState(
+        group.id,
+        updateWorkspace(state, workspace.id, (current) => ({
+          ...current,
+          panes: [...current.panes, pane],
+          selectedPaneId: pane.id,
+        })),
+      );
     }
     void navigate({
       to: "/projects/$projectKey/terminal-center",
@@ -365,31 +381,4 @@ export function GlobalTerminalWorkspaceOverview() {
       </div>
     </SidebarInset>
   );
-}
-
-function firstOpenCell(
-  panes: ReadonlyArray<{
-    readonly visible: boolean;
-    readonly grid: {
-      readonly column: number;
-      readonly row: number;
-      readonly columnSpan: number;
-      readonly rowSpan: number;
-    };
-  }>,
-) {
-  for (let row = 1; row <= 4; row += 1) {
-    for (let column = 1; column <= 4; column += 1) {
-      const occupied = panes.some(
-        (pane) =>
-          pane.visible &&
-          column >= pane.grid.column &&
-          column < pane.grid.column + pane.grid.columnSpan &&
-          row >= pane.grid.row &&
-          row < pane.grid.row + pane.grid.rowSpan,
-      );
-      if (!occupied) return { column, row, columnSpan: 1, rowSpan: 1 };
-    }
-  }
-  return { column: 1, row: 1, columnSpan: 1, rowSpan: 1 };
 }
