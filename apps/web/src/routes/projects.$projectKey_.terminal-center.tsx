@@ -24,7 +24,7 @@ function TerminalCenterRoute() {
   return (
     <Suspense
       fallback={
-        <div className="flex h-dvh items-center justify-center bg-[#070d1b] text-sm text-slate-400">
+        <div className="flex h-dvh items-center justify-center bg-background text-sm text-muted-foreground">
           Loading Terminal Center…
         </div>
       }

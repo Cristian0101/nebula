@@ -51,7 +51,7 @@ Open **Settings → Providers**. Each provider reports whether it is enabled, in
 
 Opening a Project now shows **Project Home** instead of immediately creating a Chat. Choose:
 
-- **Open Terminal Center** for direct provider sessions and Dev Servers;
+- **Open Terminal Center** for a persistent live workspace of shells, provider Threads, Dev Servers, tests, logs, Git status, and previews;
 - **Run a Swarm** to start in Command Deck's Mission Architect;
 - **Quick Thread** for the familiar lightweight conversation flow.
 
@@ -59,11 +59,13 @@ Opening a Project now shows **Project Home** instead of immediately creating a C
 
 ## 5. Launch a provider session
 
-From the project menu, open **Terminal Center**, choose a provider in the quick launcher, select the provider and workspace defaults when prompted, then launch. A shared checkout is convenient but can collide with other writers; an isolated Task workspace is the safe default for implementation.
+From the project menu, open **Terminal Center**. The Default Terminal Workspace starts with a live Shell already rooted in the Project. Choose an empty Grid cell or **New Pane** to add Codex, Antigravity, another Shell, an approved Dev Server, Preview, Tests, Logs, Git Status, or an Existing Thread.
 
-The node is the canonical Thread. Focusing the node opens that same conversation—Nebula does not create a second chat surface.
+A provider pane is the canonical Thread. It streams real output and accepts the next turn without creating a duplicate chat surface. A shared checkout is convenient but can collide with other writers; an isolated Task worktree remains the safe default for parallel implementation.
 
-Terminal Center supports Grid, Project columns, Provider columns, Status lanes, Mission flow, Radial, Compact, and Freeform layouts. Freeform positions and canvas membership persist across layout changes and restarts. Only the focused node mounts the full Thread workspace.
+Terminal Workspaces support a 4-by-4 Grid, persistent Freeform geometry, deterministic Split View, and Focus. Hide removes only the pane reference; the Thread and useful processes remain intact and the Hidden panes menu restores them explicitly. Named Workspaces and the last-used state persist across navigation and restart.
+
+Choose **New Pane → Dev Server** for the first run. Nebula suggests supported Project scripts, shows the command and working directory, and waits for **Approve & Start** before executing. A verified URL can open in a Preview pane or the large Preview Stage beside a live agent and server logs.
 
 Antigravity model choices come from the installed `agy models` command. When discovery is unavailable, use Auto or an explicit custom model ID; Nebula does not claim a custom ID is valid until the CLI accepts it.
 

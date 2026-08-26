@@ -34,6 +34,8 @@ export interface TerminalCenterQuickLaunchProfile {
   readonly modelByProvider: Readonly<Record<string, string>>;
 }
 export interface TerminalCenterProjectState {
+  /** Distinguishes a deliberately empty canvas from a canvas never initialized. */
+  readonly membershipInitialized: boolean;
   readonly visibleThreadIds: ReadonlyArray<string>;
   readonly positions: Readonly<Record<string, CanvasPoint>>;
   readonly freeformPositions: Readonly<Record<string, CanvasPoint>>;
@@ -44,6 +46,7 @@ export interface TerminalCenterProjectState {
 }
 
 export const DEFAULT_TERMINAL_CENTER_STATE: TerminalCenterProjectState = {
+  membershipInitialized: false,
   visibleThreadIds: [],
   positions: {},
   freeformPositions: {},
@@ -410,6 +413,7 @@ export function removeTerminalFromCanvas(
   const { [threadId]: _removed, ...positions } = state.positions;
   return {
     ...state,
+    membershipInitialized: true,
     visibleThreadIds: state.visibleThreadIds.filter((id) => id !== threadId),
     positions,
     selectedThreadId: state.selectedThreadId === threadId ? null : state.selectedThreadId,

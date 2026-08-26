@@ -30,9 +30,9 @@ describe("Swarm product surface", () => {
   });
 
   it("uses state-driven Terminal styling with a reduced-motion fallback", () => {
-    const terminal = source("../terminalCenter/TerminalCenter.tsx");
-    expect(terminal).toContain("data-node-status={nodeStatus}");
-    expect(terminal).toContain("motion-reduce:transition-none");
+    const terminal = source("../terminalCenter/ProjectTerminalWorkspace.tsx");
+    expect(terminal).toContain('aria-label={working ? "Working" : selected ? "Selected" : "Idle"}');
+    expect(terminal).toContain("motion-safe:animate-pulse");
     expect(terminal).not.toContain("setInterval");
   });
 
