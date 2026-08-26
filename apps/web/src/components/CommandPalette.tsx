@@ -43,6 +43,7 @@ import {
   FolderPlusIcon,
   LinkIcon,
   MessageSquareIcon,
+  NetworkIcon,
   PaletteIcon,
   ServerIcon,
   SettingsIcon,
@@ -1745,6 +1746,21 @@ function OpenCommandPaletteDialog(props: {
     projectGroups[0] ??
     null;
   if (contextualProjectGroup) {
+    actionItems.push({
+      kind: "action",
+      value: "action:swarm",
+      searchTerms: ["swarm", "team plan", "planner", "war room", "multi agent"],
+      title: "Open Swarm",
+      description: contextualProjectGroup.displayName,
+      icon: <NetworkIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({
+          to: "/projects/$projectKey/command-deck",
+          params: { projectKey: contextualProjectGroup.projectKey },
+          search: { mode: "swarm", stage: "brief" },
+        });
+      },
+    });
     actionItems.push({
       kind: "action",
       value: "action:terminal-center",

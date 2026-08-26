@@ -3,6 +3,7 @@ import {
   TaskId,
   ThreadId,
   type Mission,
+  type MissionRun,
   type ModelSelection,
   type OrchestrationTask,
   type OrchestrationThreadShell,
@@ -12,6 +13,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   arrangeTerminalNodes,
   DEFAULT_TERMINAL_CENTER_STATE,
+  deriveTerminalAgentPresentation,
   deriveTerminalNodeStatus,
   hasSharedCheckoutWarning,
   hydrateTerminalCanvasThreads,
@@ -271,5 +273,187 @@ describe("Terminal Center composition", () => {
         session: { status: "stopped" },
       } as OrchestrationThreadShell),
     ).toBe("ready");
+  });
+
+  it("derives textual live-agent states from canonical runtime evidence", () => {
+    const task = { id: TaskId.make("task-live"), status: "active" } as OrchestrationTask;
+    const thread = {
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      latestTurn: { state: "running" },
+      session: { status: "running" },
+      backgroundLiveness: null,
+      planProgress: { step: "Running focused tests", completedSteps: 1, totalSteps: 2 },
+    } as unknown as OrchestrationThreadShell;
+    const run = {
+      status: "running",
+      startedAt: "2026-08-25T20:00:00.000Z",
+      decisions: [],
+      attention: [],
+    } as unknown as MissionRun;
+
+    expect(
+      deriveTerminalAgentPresentation({
+        thread,
+        task,
+        run,
+        providerAvailable: true,
+        nowMs: Date.parse("2026-08-25T20:00:18.000Z"),
+      }),
+    ).toMatchObject({
+      state: "working",
+      label: "Working",
+      detail: "Running focused tests",
+      elapsed: "18s",
+    });
+    expect(
+      deriveTerminalAgentPresentation({
+        thread: {
+          ...thread,
+          latestTurn: { state: "completed" },
+          session: { status: "stopped" },
+        } as unknown as OrchestrationThreadShell,
+        task: { ...task, status: "completed" },
+        run,
+        providerAvailable: true,
+      }),
+    ).toMatchObject({ state: "complete", label: "Complete", canvasStatus: "ready" });
+  });
+
+  it("derives a 20-node canvas with exactly four active agents from canonical evidence", () => {
+    const presentations = Array.from({ length: 20 }, (_, index) => {
+      const active = index < 4;
+      const task = {
+        id: TaskId.make(`task-load-${index}`),
+        status: active ? "active" : "completed",
+      } as OrchestrationTask;
+      const thread = {
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+        latestTurn: { state: active ? "running" : "completed" },
+        session: { status: active ? "running" : "stopped" },
+        backgroundLiveness: null,
+        planProgress: active ? { step: `Working on Task ${index + 1}` } : null,
+      } as unknown as OrchestrationThreadShell;
+      const run = {
+        status: active ? "running" : "completed",
+        startedAt: "2026-08-25T20:00:00.000Z",
+        decisions: [],
+        attention: [],
+      } as unknown as MissionRun;
+      return deriveTerminalAgentPresentation({
+        thread,
+        task,
+        run,
+        providerAvailable: true,
+        nowMs: Date.parse("2026-08-25T20:00:18.000Z"),
+      });
+    });
+
+    expect(presentations.filter((presentation) => presentation.state === "working")).toHaveLength(
+      4,
+    );
+    expect(presentations.filter((presentation) => presentation.state === "complete")).toHaveLength(
+      16,
+    );
+    expect(presentations.slice(0, 4).every((presentation) => presentation.elapsed === "18s")).toBe(
+      true,
+    );
+
+    const loadNodes = Array.from({ length: 20 }, (_, index) => ({
+      ...node(index),
+      status: index < 4 ? ("working" as const) : ("ready" as const),
+    }));
+    const positions = arrangeTerminalNodes({ nodes: loadNodes, layout: "status-lanes" });
+    expect(Object.keys(positions)).toHaveLength(20);
+  });
+
+  it("labels checkpoint, resource, review, provider, and error attention states", () => {
+    const task = { id: TaskId.make("task-wait"), status: "active" } as OrchestrationTask;
+    const thread = {
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      latestTurn: null,
+      session: null,
+      backgroundLiveness: null,
+    } as unknown as OrchestrationThreadShell;
+    const run = {
+      status: "attention",
+      startedAt: "2026-08-25T20:00:00.000Z",
+      decisions: [
+        {
+          id: "decision-1",
+          kind: "waiting_checkpoint",
+          taskId: task.id,
+          reason: "Contract Freeze needs functional review approval.",
+          sourceTaskIds: [],
+          occurredAt: "2026-08-25T20:00:10.000Z",
+        },
+      ],
+      attention: [],
+    } as unknown as MissionRun;
+    expect(
+      deriveTerminalAgentPresentation({ thread, task, run, providerAvailable: true }),
+    ).toMatchObject({ state: "waiting-checkpoint", label: "Waiting for checkpoint" });
+    expect(
+      deriveTerminalAgentPresentation({
+        thread,
+        task,
+        run: {
+          ...run,
+          decisions: [{ ...run.decisions[0]!, kind: "waiting_resource" }],
+        },
+        providerAvailable: true,
+      }),
+    ).toMatchObject({ state: "waiting-resource", label: "Waiting for resource" });
+    expect(
+      deriveTerminalAgentPresentation({
+        thread: { ...thread, hasPendingApprovals: true },
+        task,
+        run,
+        providerAvailable: true,
+      }),
+    ).toMatchObject({ state: "review-needed", label: "Review needed" });
+    expect(
+      deriveTerminalAgentPresentation({ thread, task, run, providerAvailable: false }),
+    ).toMatchObject({ state: "provider-unavailable", label: "Provider unavailable" });
+    expect(
+      deriveTerminalAgentPresentation({
+        thread,
+        task,
+        run: {
+          ...run,
+          decisions: [],
+          attention: [
+            {
+              taskId: task.id,
+              code: "provider_failed",
+              detail: "Failed to authenticate because the OAuth token expired.",
+              blocksMission: false,
+            },
+          ],
+        },
+        providerAvailable: true,
+      }),
+    ).toMatchObject({ state: "provider-unavailable", label: "Provider unavailable" });
+    expect(
+      deriveTerminalAgentPresentation({
+        thread,
+        task,
+        run: {
+          ...run,
+          decisions: [],
+          attention: [
+            {
+              taskId: task.id,
+              code: "worker_failed",
+              detail: "Provider turn failed.",
+              blocksMission: true,
+            },
+          ],
+        },
+        providerAvailable: true,
+      }),
+    ).toMatchObject({ state: "error", label: "Error" });
   });
 });

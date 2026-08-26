@@ -7,13 +7,39 @@ const CommandDeckPage = lazy(() =>
   })),
 );
 
+const SwarmWorkspacePage = lazy(() =>
+  import("../components/commandDeck/SwarmWorkspace").then((module) => ({
+    default: module.SwarmWorkspacePage,
+  })),
+);
+
 export interface CommandDeckSearch {
   readonly mode?: "swarm";
+  readonly stage?: "brief" | "plan" | "war-room" | "review";
+  readonly proposalId?: string;
+  readonly missionId?: string;
+  readonly selectedTask?: string;
 }
 
 export const Route = createFileRoute("/projects/$projectKey_/command-deck")({
-  validateSearch: (search: Record<string, unknown>): CommandDeckSearch =>
-    search.mode === "swarm" ? { mode: "swarm" } : {},
+  validateSearch: (search: Record<string, unknown>): CommandDeckSearch => {
+    if (search.mode !== "swarm") return {};
+    const stage: NonNullable<CommandDeckSearch["stage"]> = [
+      "brief",
+      "plan",
+      "war-room",
+      "review",
+    ].includes(String(search.stage))
+      ? (search.stage as NonNullable<CommandDeckSearch["stage"]>)
+      : "brief";
+    return {
+      mode: "swarm",
+      stage,
+      ...(typeof search.proposalId === "string" ? { proposalId: search.proposalId } : {}),
+      ...(typeof search.missionId === "string" ? { missionId: search.missionId } : {}),
+      ...(typeof search.selectedTask === "string" ? { selectedTask: search.selectedTask } : {}),
+    };
+  },
   beforeLoad: async ({ context }) => {
     if (
       context.authGateState.status !== "authenticated" &&
@@ -27,7 +53,7 @@ export const Route = createFileRoute("/projects/$projectKey_/command-deck")({
 
 function CommandDeckRoute() {
   const { projectKey } = Route.useParams();
-  const { mode } = Route.useSearch();
+  const search = Route.useSearch();
   return (
     <Suspense
       fallback={
@@ -36,10 +62,11 @@ function CommandDeckRoute() {
         </div>
       }
     >
-      <CommandDeckPage
-        projectKey={projectKey}
-        initialSection={mode === "swarm" ? "missions" : "tasks"}
-      />
+      {search.mode === "swarm" ? (
+        <SwarmWorkspacePage projectKey={projectKey} search={search} />
+      ) : (
+        <CommandDeckPage projectKey={projectKey} />
+      )}
     </Suspense>
   );
 }

@@ -1,5 +1,6 @@
 import type {
   Mission,
+  MissionRun,
   ModelSelection,
   OrchestrationTask,
   OrchestrationThreadShell,
@@ -207,6 +208,148 @@ export function deriveTerminalNodeStatus(
   )
     return "working";
   return "ready";
+}
+
+export type TerminalAgentState =
+  | "ready"
+  | "working"
+  | "review-needed"
+  | "waiting-resource"
+  | "waiting-checkpoint"
+  | "provider-unavailable"
+  | "error"
+  | "complete";
+
+export interface TerminalAgentPresentation {
+  readonly state: TerminalAgentState;
+  readonly label: string;
+  readonly canvasStatus: TerminalCanvasNode["status"];
+  readonly detail: string | null;
+  readonly elapsed: string | null;
+}
+
+function formatAgentElapsed(startedAt: string, nowMs: number): string | null {
+  const startedMs = Date.parse(startedAt);
+  if (!Number.isFinite(startedMs)) return null;
+  const seconds = Math.max(0, Math.floor((nowMs - startedMs) / 1_000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+export function deriveTerminalAgentPresentation(input: {
+  readonly thread: OrchestrationThreadShell;
+  readonly task: Pick<OrchestrationTask, "id" | "status"> | null;
+  readonly run: Pick<MissionRun, "status" | "startedAt" | "decisions" | "attention"> | null;
+  readonly providerAvailable: boolean;
+  readonly nowMs?: number;
+}): TerminalAgentPresentation {
+  const elapsed = input.run
+    ? formatAgentElapsed(input.run.startedAt, input.nowMs ?? Date.now())
+    : null;
+  if (!input.providerAvailable) {
+    return {
+      state: "provider-unavailable",
+      label: "Provider unavailable",
+      canvasStatus: "attention",
+      detail: "The canonical Thread is preserved and can be resumed after provider recovery.",
+      elapsed,
+    };
+  }
+  if (input.thread.hasPendingApprovals || input.thread.hasPendingUserInput) {
+    return {
+      state: "review-needed",
+      label: "Review needed",
+      canvasStatus: "attention",
+      detail: input.thread.hasPendingApprovals
+        ? "Waiting for an approval in the canonical Thread."
+        : "Waiting for user input in the canonical Thread.",
+      elapsed,
+    };
+  }
+  const taskDecision = input.task
+    ? (input.run?.decisions ?? [])
+        .toReversed()
+        .find(
+          (decision) =>
+            decision.taskId === input.task?.id &&
+            (decision.kind === "waiting_checkpoint" ||
+              decision.kind === "waiting_resource" ||
+              decision.kind === "attention"),
+        )
+    : null;
+  if (taskDecision?.kind === "waiting_checkpoint") {
+    return {
+      state: "waiting-checkpoint",
+      label: "Waiting for checkpoint",
+      canvasStatus: "attention",
+      detail: taskDecision.reason,
+      elapsed,
+    };
+  }
+  if (taskDecision?.kind === "waiting_resource") {
+    return {
+      state: "waiting-resource",
+      label: "Waiting for resource",
+      canvasStatus: "attention",
+      detail: taskDecision.reason,
+      elapsed,
+    };
+  }
+  const taskAttention = input.task
+    ? input.run?.attention.find((attention) => attention.taskId === input.task?.id)
+    : null;
+  if (taskAttention || taskDecision?.kind === "attention") {
+    const detail = taskAttention?.detail ?? taskDecision?.reason ?? "Agent attention is required.";
+    const review = `${taskAttention?.code ?? ""} ${detail}`.toLowerCase().includes("review");
+    const providerUnavailable =
+      taskAttention?.code === "provider_failed" &&
+      /auth|credential|token|unauthorized|provider unavailable/i.test(detail);
+    return {
+      state: review ? "review-needed" : providerUnavailable ? "provider-unavailable" : "error",
+      label: review ? "Review needed" : providerUnavailable ? "Provider unavailable" : "Error",
+      canvasStatus: "attention",
+      detail,
+      elapsed,
+    };
+  }
+  if (input.task?.status === "completed") {
+    return {
+      state: "complete",
+      label: "Complete",
+      canvasStatus: "ready",
+      detail: null,
+      elapsed,
+    };
+  }
+  const canvasStatus = deriveTerminalNodeStatus(input.thread);
+  if (canvasStatus === "attention") {
+    return {
+      state: "error",
+      label: "Error",
+      canvasStatus,
+      detail:
+        input.thread.latestTurn?.state === "error" ? "The latest provider turn failed." : null,
+      elapsed,
+    };
+  }
+  if (canvasStatus === "working") {
+    return {
+      state: "working",
+      label: "Working",
+      canvasStatus,
+      detail: input.thread.planProgress?.step ?? null,
+      elapsed,
+    };
+  }
+  return {
+    state: "ready",
+    label: "Ready",
+    canvasStatus,
+    detail: null,
+    elapsed: null,
+  };
 }
 
 export function hasSharedCheckoutWarning(
