@@ -32,6 +32,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
+import { resolveMissionCheckpointState } from "@t3tools/shared/missionRunner";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
@@ -47,6 +48,7 @@ import {
   HouseIcon,
   LayoutDashboardIcon,
   MessageSquareIcon,
+  NetworkIcon,
   PinIcon,
   PlusIcon,
   SearchIcon,
@@ -110,6 +112,7 @@ import { useNowMinute } from "../hooks/useNowMinute";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useThreadShells } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
+import { environmentSnapshotAtom } from "../state/shell";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
 import { useEnvironmentQuery } from "../state/query";
@@ -1709,6 +1712,115 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   );
 });
 
+function SidebarSwarmModeButton({
+  projectGroup,
+  isMobile,
+  setOpenMobile,
+}: {
+  readonly projectGroup: SidebarProjectSnapshot;
+  readonly isMobile: boolean;
+  readonly setOpenMobile: (open: boolean) => void;
+}) {
+  const router = useRouter();
+  const snapshot = useAtomValue(environmentSnapshotAtom(projectGroup.environmentId));
+  const project = useMemo(
+    () => (snapshot?.projects ?? []).find((candidate) => candidate.id === projectGroup.id) ?? null,
+    [projectGroup.id, snapshot?.projects],
+  );
+  const latestPlan = useMemo(
+    () =>
+      (project?.architectPlans ?? []).toSorted((a, b) =>
+        b.updatedAt.localeCompare(a.updatedAt),
+      )[0] ?? null,
+    [project?.architectPlans],
+  );
+  const activeRun = useMemo(
+    () =>
+      (snapshot?.missionRuns ?? [])
+        .filter(
+          (run) =>
+            run.projectId === projectGroup.id &&
+            (run.status === "running" || run.status === "paused" || run.status === "attention"),
+        )
+        .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null,
+    [projectGroup.id, snapshot?.missionRuns],
+  );
+  const latestMission = useMemo(
+    () =>
+      (snapshot?.missions ?? [])
+        .filter((mission) => mission.projectId === projectGroup.id)
+        .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null,
+    [projectGroup.id, snapshot?.missions],
+  );
+  const mission = activeRun
+    ? ((snapshot?.missions ?? []).find(
+        (candidate) =>
+          candidate.projectId === projectGroup.id && candidate.id === activeRun.missionId,
+      ) ?? null)
+    : latestMission;
+  const missionTasks = useMemo(() => {
+    if (!mission) return [];
+    const taskIds = new Set(mission.taskIds);
+    return (snapshot?.tasks ?? []).filter(
+      (task) => task.projectId === projectGroup.id && taskIds.has(task.id),
+    );
+  }, [mission, projectGroup.id, snapshot?.tasks]);
+  const activeTaskCount = activeRun
+    ? activeRun.scheduledTaskIds.filter(
+        (taskId) => missionTasks.find((task) => task.id === taskId)?.status !== "completed",
+      ).length
+    : 0;
+  const currentCheckpointIndex = mission?.checkpoints?.findIndex(
+    (checkpoint) => resolveMissionCheckpointState(checkpoint, missionTasks).state !== "passed",
+  );
+  const checkpointLabel =
+    typeof currentCheckpointIndex === "number" && currentCheckpointIndex >= 0
+      ? `Checkpoint ${currentCheckpointIndex + 1}`
+      : mission?.checkpoints?.length
+        ? "Checkpoints passed"
+        : null;
+  const status = activeRun
+    ? `${activeRun.status === "paused" ? "Paused" : activeRun.status === "attention" ? "Attention" : `${activeTaskCount} active`}${checkpointLabel ? ` · ${checkpointLabel}` : ""}`
+    : latestMission?.status === "completed"
+      ? "Review ready"
+      : latestPlan?.status === "generating"
+        ? "Planning"
+        : latestPlan?.status === "failed" || latestPlan?.status === "stale"
+          ? "Attention"
+          : latestPlan?.status === "approved"
+            ? "Ready"
+            : "Brief";
+
+  return (
+    <SidebarMenuButton
+      type="button"
+      data-testid="sidebar-swarm-mode"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (isMobile) setOpenMobile(false);
+        void router.navigate({
+          to: "/projects/$projectKey/command-deck",
+          params: { projectKey: projectGroup.projectKey },
+          search: {
+            mode: "swarm",
+            stage: activeRun ? "war-room" : latestPlan ? "plan" : "brief",
+            ...(latestPlan ? { proposalId: latestPlan.id } : {}),
+            ...(mission ? { missionId: mission.id } : {}),
+          },
+        });
+      }}
+      className="mb-1 border border-sidebar-border bg-sidebar-accent/35 text-sidebar-foreground"
+      aria-label={`Open Swarm for ${projectGroup.displayName}: ${status}`}
+      title={mission?.title ?? `Swarm for ${projectGroup.displayName}`}
+    >
+      <NetworkIcon />
+      <span className="min-w-0 flex-1 truncate">Swarm</span>
+      <span className="max-w-36 truncate text-[10px] text-sidebar-muted-foreground">{status}</span>
+    </SidebarMenuButton>
+  );
+}
+
 export default function Sidebar() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
@@ -1815,6 +1927,13 @@ export default function Sidebar() {
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
+  });
+  const routeProjectKey = useParams({
+    strict: false,
+    select: (params) =>
+      typeof params.projectKey === "string" && params.projectKey.length > 0
+        ? params.projectKey
+        : null,
   });
   const routeDraftThread = useComposerDraftStore((store) =>
     routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,
@@ -1937,6 +2056,14 @@ export default function Sidebar() {
         : (projectGroups.find((project) => project.projectKey === projectScopeKey) ?? null),
     [projectGroups, projectScopeKey],
   );
+  const swarmProjectGroup = useMemo(() => {
+    if (scopedProjectGroup) return scopedProjectGroup;
+    if (routeProjectKey) {
+      const routeProject = projectGroups.find((project) => project.projectKey === routeProjectKey);
+      if (routeProject) return routeProject;
+    }
+    return projectGroups[0] ?? null;
+  }, [projectGroups, routeProjectKey, scopedProjectGroup]);
   const scopedProjectKeys = useMemo(
     () =>
       scopedProjectGroup === null
@@ -2029,6 +2156,31 @@ export default function Sidebar() {
       });
     },
     [isMobile, router, setOpenMobile],
+  );
+
+  const handleSwarm = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setProjectScopeMenuOpen(false);
+      if (isMobile) setOpenMobile(false);
+      const latestPlan = projects
+        .find(
+          (project) =>
+            project.environmentId === projectGroup.environmentId && project.id === projectGroup.id,
+        )
+        ?.architectPlans?.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      void router.navigate({
+        to: "/projects/$projectKey/command-deck",
+        params: { projectKey: projectGroup.projectKey },
+        search: {
+          mode: "swarm",
+          stage: latestPlan ? "plan" : "brief",
+          ...(latestPlan ? { proposalId: latestPlan.id } : {}),
+        },
+      });
+    },
+    [isMobile, projects, router, setOpenMobile],
   );
 
   const handleTerminalCenter = useCallback(
@@ -3434,6 +3586,13 @@ export default function Sidebar() {
           // Lifted above the stage backdrop, whose fade bleeds below the
           // header and would otherwise paint across the search row's outline.
           <SidebarGroup className="relative z-[1] gap-1 p-[var(--sidebar-content-inset)]">
+            {swarmProjectGroup ? (
+              <SidebarSwarmModeButton
+                projectGroup={swarmProjectGroup}
+                isMobile={isMobile}
+                setOpenMobile={setOpenMobile}
+              />
+            ) : null}
             <SidebarMenuButton
               type="button"
               onClick={() => {
@@ -3605,6 +3764,17 @@ export default function Sidebar() {
                               onClick={(event) => handleProjectHome(event, project)}
                             >
                               <HouseIcon className="size-3.5" />
+                            </Button>
+                            <Button
+                              size="icon-xs"
+                              variant="ghost-muted"
+                              aria-label={`Open Swarm for ${project.displayName}`}
+                              title={`Swarm for ${project.displayName}`}
+                              className="size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={(event) => handleSwarm(event, project)}
+                            >
+                              <NetworkIcon className="size-3.5" />
                             </Button>
                             <Button
                               size="icon-xs"

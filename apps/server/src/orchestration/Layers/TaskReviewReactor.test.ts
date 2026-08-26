@@ -61,7 +61,12 @@ describe("TaskReviewReactor restore safety", () => {
 
   it("uses a Task-scoped hidden recovery ref", () => {
     expect(taskRestoreCheckpointRef("task-1", TaskRestoreId.make("restore-1"))).toBe(
-      "refs/t3/checkpoints/tasks/task-1/restore/restore-1",
+      "refs/t3/checkpoints/tasks/dGFzay0x/restore/cmVzdG9yZS0x",
+    );
+    expect(
+      taskRestoreCheckpointRef("architect:proposal:task", TaskRestoreId.make("restore:attempt-1")),
+    ).toBe(
+      "refs/t3/checkpoints/tasks/YXJjaGl0ZWN0OnByb3Bvc2FsOnRhc2s/restore/cmVzdG9yZTphdHRlbXB0LTE",
     );
   });
 

@@ -3,12 +3,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import type {
-  ModelSelection,
-  OrchestrationThreadShell,
-  TaskId,
-  ThreadId,
-} from "@t3tools/contracts";
+import type { ModelSelection, TaskId, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
@@ -66,8 +61,8 @@ import { useSettingsProjectGroups } from "../settings/ProjectSettingsPanel";
 import {
   arrangeTerminalNodes,
   DEFAULT_TERMINAL_CENTER_STATE,
+  deriveTerminalAgentPresentation,
   FOCUSED_TERMINAL_SHELL_CLASS,
-  deriveTerminalNodeStatus,
   hasSharedCheckoutWarning,
   hydrateTerminalCanvasThreads,
   nextFreeformPosition,
@@ -100,11 +95,6 @@ function commandError(result: AtomCommandResult<unknown, unknown>): string | nul
   if (result._tag !== "Failure") return null;
   const error = squashAtomCommandFailure(result);
   return error instanceof Error ? error.message : "The command could not be completed.";
-}
-
-function statusLabel(thread: OrchestrationThreadShell): string {
-  const status = deriveTerminalNodeStatus(thread);
-  return status === "attention" ? "Needs attention" : status === "working" ? "Working" : "Ready";
 }
 
 export function TerminalCenterPage({ projectKey }: { readonly projectKey: string }) {
@@ -184,6 +174,16 @@ function TerminalCenter({
         missions.flatMap((mission) => mission.taskIds.map((taskId) => [taskId, mission] as const)),
       ),
     [missions],
+  );
+  const runByTask = useMemo(
+    () =>
+      new Map(
+        activeMissionRuns.flatMap((run) => {
+          const mission = missions.find((candidate) => candidate.id === run.missionId);
+          return (mission?.taskIds ?? []).map((taskId) => [taskId, run] as const);
+        }),
+      ),
+    [activeMissionRuns, missions],
   );
   const state = useUiStateStore(
     (store) => store.terminalCenterByProjectId[project.id] ?? DEFAULT_TERMINAL_CENTER_STATE,
@@ -287,16 +287,25 @@ function TerminalCenter({
       visibleThreads.map((thread) => {
         const task = taskByThread.get(thread.id);
         const mission = task ? missionByTask.get(task.id) : null;
+        const run = task ? (runByTask.get(task.id) ?? null) : null;
+        const providerAvailable = entries.some(
+          (entry) => entry.instanceId === thread.modelSelection.instanceId && entry.isAvailable,
+        );
         return {
           threadId: thread.id,
           projectId: project.id,
           providerId: thread.modelSelection.instanceId,
-          status: deriveTerminalNodeStatus(thread),
+          status: deriveTerminalAgentPresentation({
+            thread,
+            task: task ?? null,
+            run,
+            providerAvailable,
+          }).canvasStatus,
           taskId: task?.id ?? null,
           missionId: mission?.id ?? null,
         };
       }),
-    [missionByTask, taskByThread, visibleThreads],
+    [entries, missionByTask, runByTask, taskByThread, visibleThreads],
   );
   const taskThreadIdByTaskId = useMemo(
     () =>
@@ -936,6 +945,7 @@ function TerminalCenter({
                 );
                 const task = taskByThread.get(thread.id);
                 const mission = task ? missionByTask.get(task.id) : null;
+                const run = task ? (runByTask.get(task.id) ?? null) : null;
                 const attempt = attemptByThread.get(thread.id);
                 const devServerProfile = devServerProfiles[0] ?? null;
                 const devServerSession = devServerProfile
@@ -946,11 +956,20 @@ function TerminalCenter({
                     )
                   : null;
                 const selected = state.selectedThreadId === thread.id;
+                const presentation = deriveTerminalAgentPresentation({
+                  thread,
+                  task: task ?? null,
+                  run,
+                  providerAvailable: Boolean(entry?.isAvailable),
+                });
+                const nodeStatus = presentation.canvasStatus;
                 return (
                   <article
                     key={thread.id}
                     data-terminal-node
-                    className={`absolute w-[272px] select-none rounded-xl border bg-card/95 shadow-lg backdrop-blur ${selected ? "border-primary ring-2 ring-primary/20" : "border-border"}`}
+                    data-node-status={nodeStatus}
+                    data-agent-state={presentation.state}
+                    className={`absolute w-[272px] select-none rounded-xl border bg-card/95 shadow-lg backdrop-blur transition-[border-color,box-shadow,background-color] duration-300 motion-reduce:transition-none ${selected ? "border-primary ring-2 ring-primary/20" : nodeStatus === "attention" ? "border-amber-400/55 bg-amber-400/[0.035] shadow-[0_0_24px_-16px_color-mix(in_srgb,#f59e0b_80%,transparent)]" : nodeStatus === "working" ? "border-sky-400/55 bg-sky-400/[0.035] shadow-[0_0_24px_-16px_color-mix(in_srgb,#38bdf8_80%,transparent)]" : "border-emerald-400/35"}`}
                     style={{ left: point.x, top: point.y }}
                     onClick={() => setSelection(project.id, thread.id)}
                     onDoubleClick={() => setFocusThreadId(thread.id)}
@@ -960,7 +979,7 @@ function TerminalCenter({
                       setFocusThreadId(thread.id);
                     }}
                     tabIndex={0}
-                    aria-label={`${thread.title}, ${statusLabel(thread)}, ${terminalWorkspaceLabel({ worktreePath: thread.worktreePath, taskBacked: Boolean(task) })}`}
+                    aria-label={`${thread.title}, ${presentation.label}, ${terminalWorkspaceLabel({ worktreePath: thread.worktreePath, taskBacked: Boolean(task) })}`}
                   >
                     <div
                       className="flex cursor-grab items-center gap-2 border-b border-border px-3 py-2.5 active:cursor-grabbing"
@@ -991,9 +1010,14 @@ function TerminalCenter({
                         </p>
                       </div>
                       <span
-                        className={`size-2 rounded-full ${deriveTerminalNodeStatus(thread) === "attention" ? "bg-amber-400" : deriveTerminalNodeStatus(thread) === "working" ? "bg-sky-400" : "bg-emerald-400"}`}
-                        aria-label={statusLabel(thread)}
-                      />
+                        className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${nodeStatus === "attention" ? "bg-warning/12 text-warning-foreground" : nodeStatus === "working" ? "bg-info/12 text-info-foreground" : "bg-success/12 text-success-foreground"}`}
+                        aria-live="polite"
+                      >
+                        <span
+                          className={`size-1.5 rounded-full transition-transform duration-200 motion-reduce:transition-none ${nodeStatus === "attention" ? "bg-amber-400" : nodeStatus === "working" ? "scale-125 bg-sky-400" : "bg-emerald-400"}`}
+                        />
+                        {presentation.label}
+                      </span>
                     </div>
                     <div className="space-y-2 px-3 py-2.5 text-xs">
                       <div className="flex justify-between gap-3">
@@ -1007,8 +1031,16 @@ function TerminalCenter({
                       </div>
                       <div className="flex justify-between gap-3">
                         <span className="text-muted-foreground">Current action</span>
-                        <span className="truncate">{deriveCurrentAction(thread)}</span>
+                        <span className="truncate">
+                          {presentation.detail ?? deriveCurrentAction(thread)}
+                        </span>
                       </div>
+                      {presentation.elapsed ? (
+                        <div className="flex justify-between gap-3">
+                          <span className="text-muted-foreground">Elapsed</span>
+                          <span className="tabular-nums">{presentation.elapsed}</span>
+                        </div>
+                      ) : null}
                       {task ? (
                         <div className="flex justify-between gap-3">
                           <span className="text-muted-foreground">Task</span>

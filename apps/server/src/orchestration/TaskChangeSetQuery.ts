@@ -21,6 +21,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
+import { checkpointRefPathSegment } from "../checkpointing/Utils.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 import { mergeUntrackedChanges, parseNameStatus } from "./taskChangeSet.ts";
@@ -138,7 +139,10 @@ function parseNumstat(output: string) {
 export const taskReviewCheckpointRef = (
   taskId: string,
   snapshotId: TaskReviewSnapshotId,
-): CheckpointRef => CheckpointRef.make(`refs/t3/checkpoints/tasks/${taskId}/review/${snapshotId}`);
+): CheckpointRef =>
+  CheckpointRef.make(
+    `refs/t3/checkpoints/tasks/${checkpointRefPathSegment(taskId)}/review/${checkpointRefPathSegment(snapshotId)}`,
+  );
 
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;

@@ -35,14 +35,16 @@ describe("thread sidebar width", () => {
     expect(resolveInitialThreadSidebarWidth(900, 700)).toBe(THREAD_SIDEBAR_MIN_WIDTH);
   });
 
-  it("shows the desktop wordmark across the sidebar's full legal width range", () => {
+  it("shows the Nebula wordmark across the sidebar's full legal width range", () => {
     const sidebarSource = NodeFS.readFileSync(
       new URL("./sidebar/SidebarChrome.tsx", import.meta.url),
       "utf8",
     );
 
-    expect(sidebarSource).toContain("hidden h-7 w-fit min-w-0 shrink-0 items-center gap-2");
-    expect(sidebarSource).toContain("md:flex");
+    expect(sidebarSource).toContain("min-w-0 shrink-0 items-center gap-2 overflow-hidden");
+    expect(sidebarSource).toContain('className="size-5 shrink-0 object-contain"');
+    expect(sidebarSource).toContain("truncate text-[13px] font-medium tracking-[0.08em]");
+    expect(sidebarSource).toContain("Nebula");
     expect(THREAD_SIDEBAR_MIN_WIDTH).toBe(13 * 16);
   });
 });

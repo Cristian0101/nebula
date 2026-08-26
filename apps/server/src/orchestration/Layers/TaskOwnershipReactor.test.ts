@@ -66,6 +66,12 @@ it("revalidates active ownership-managed ready workspaces after restart", () => 
   } as unknown as OrchestrationTask;
   expect(taskNeedsOwnershipReconciliation(task)).toBe(true);
   expect(taskNeedsOwnershipReconciliation({ ...task, status: "completed" })).toBe(false);
+  expect(
+    taskNeedsOwnershipReconciliation({ ...task, status: "draft" }, [
+      { status: "running", scheduledTaskIds: [task.id] },
+    ]),
+  ).toBe(true);
+  expect(taskNeedsOwnershipReconciliation({ ...task, status: "draft" }, [])).toBe(false);
 });
 
 it("recovers final completion only for a certified task in a live Mission run", () => {

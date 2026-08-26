@@ -139,9 +139,17 @@ it.effect("atomically materializes one pinned draft Mission without execution si
         { key: "contract", taskId: TaskId.make("contract-task") },
         { key: "server", taskId: TaskId.make("server-task") },
       ],
+      confirmTaskAssignments: true,
       acknowledgeWarnings: true,
       createdAt: now,
     };
+    const unconfirmed = yield* Effect.flip(
+      decideOrchestrationCommand({
+        readModel: model,
+        command: { ...approval, confirmTaskAssignments: false },
+      }),
+    );
+    expect(unconfirmed.message).toContain("Confirm every displayed Task provider and model");
     model = yield* apply(model, approval);
     expect(model.missions).toHaveLength(1);
     expect(model.missions?.[0]).toMatchObject({

@@ -4,7 +4,7 @@ import {
   type ArchitectMissionDraft,
   type SharedResourceDefinition,
 } from "@t3tools/contracts";
-import { validateArchitectPlan } from "./architectPlan.ts";
+import { createArchitectTeamConfiguration, validateArchitectPlan } from "./architectPlan.ts";
 
 const now = "2026-08-23T12:00:00.000Z";
 const resourceId = SharedResourceId.make("api-schema");
@@ -68,6 +68,155 @@ const validate = (proposal: ArchitectMissionDraft) =>
   });
 
 describe("validateArchitectPlan", () => {
+  it("builds the 2, 4, 8, and 12-agent presets without counting the Planner", () => {
+    expect(
+      (["pair", "standard", "large", "heavy"] as const).map((preset) => {
+        const team = createArchitectTeamConfiguration({ preset, defaultModelSelection: null });
+        return [preset, team.executionAgentCount, team.startingSeats.length];
+      }),
+    ).toEqual([
+      ["pair", 2, 2],
+      ["standard", 4, 4],
+      ["large", 8, 8],
+      ["heavy", 12, 12],
+    ]);
+  });
+
+  it("bounds a custom non-Planner team and derives a separate writable concurrency cap", () => {
+    const custom = createArchitectTeamConfiguration({
+      preset: "custom",
+      customCount: 7,
+      defaultModelSelection: null,
+    });
+    expect(custom).toMatchObject({
+      preset: "custom",
+      executionAgentCount: 7,
+      maxWritableConcurrency: 3,
+    });
+    expect(custom.startingSeats).toHaveLength(7);
+    expect(
+      createArchitectTeamConfiguration({
+        preset: "custom",
+        customCount: Number.NaN,
+        defaultModelSelection: null,
+      }).executionAgentCount,
+    ).toBe(4);
+    expect(
+      createArchitectTeamConfiguration({
+        preset: "custom",
+        customCount: Number.POSITIVE_INFINITY,
+        defaultModelSelection: null,
+      }).executionAgentCount,
+    ).toBe(4);
+    expect(custom.startingSeats.map((seat) => seat.label)).toContain("Functional reviewer 1");
+  });
+
+  it("validates team concurrency, reviewers, and named checkpoint references", () => {
+    const team = createArchitectTeamConfiguration({ preset: "pair", defaultModelSelection: null });
+    const result = validateArchitectPlan({
+      proposal: {
+        ...base,
+        tasks: [
+          { ...base.tasks[0]!, reviewerKey: "server" },
+          { ...base.tasks[1]!, checkpointKey: "contract-freeze" },
+        ],
+        checkpoints: [
+          {
+            key: "contract-freeze",
+            name: "Contract freeze",
+            requiredTaskKeys: ["contract"],
+            unlockTaskKeys: ["server"],
+            requiredGateIds: ["typecheck"],
+            reviewsRequired: true,
+            humanApprovalRequired: true,
+          },
+        ],
+      },
+      planningBaseCommit: "a".repeat(40),
+      resources,
+      team,
+      qualityGateIds: ["typecheck"],
+      validatedAt: now,
+    });
+    expect(result.status).toBe("valid");
+    expect(result.errors).toEqual([]);
+  });
+
+  it("keeps the final Task-agent roster within the selected team-size maximum", () => {
+    const team = createArchitectTeamConfiguration({ preset: "pair", defaultModelSelection: null });
+    const result = validateArchitectPlan({
+      proposal: {
+        ...base,
+        tasks: [...base.tasks, { ...base.tasks[1]!, key: "overflow", title: "Overflow Task" }],
+      },
+      planningBaseCommit: "a".repeat(40),
+      resources,
+      team,
+      validatedAt: now,
+    });
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({ code: "team-plan-over-capacity" }),
+    );
+  });
+
+  it("keeps writable manual-shell Tasks blocked until an explicit WRITE path is assigned", () => {
+    const result = validateArchitectPlan({
+      proposal: {
+        ...base,
+        tasks: [
+          {
+            ...base.tasks[0]!,
+            role: "builder",
+            ownership: { write: [], read: [], deny: [] },
+          },
+          {
+            ...base.tasks[1]!,
+            role: "reviewer",
+            ownership: { write: [], read: ["packages/contracts/**"], deny: [] },
+          },
+        ],
+      },
+      planningBaseCommit: "a".repeat(40),
+      resources,
+      validatedAt: now,
+    });
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({ code: "ownership-write-empty", taskKey: "contract" }),
+    );
+    expect(result.errors).not.toContainEqual(
+      expect.objectContaining({ code: "ownership-write-empty", taskKey: "server" }),
+    );
+  });
+
+  it("requires Task checkpoint labels and unlock lists to describe the same barrier", () => {
+    const result = validateArchitectPlan({
+      proposal: {
+        ...base,
+        tasks: [{ ...base.tasks[0]!, checkpointKey: "contract-freeze" }, base.tasks[1]!],
+        checkpoints: [
+          {
+            key: "contract-freeze",
+            name: "Contract freeze",
+            requiredTaskKeys: ["contract"],
+            unlockTaskKeys: ["server"],
+            requiredGateIds: [],
+            reviewsRequired: false,
+            humanApprovalRequired: false,
+          },
+        ],
+      },
+      planningBaseCommit: "a".repeat(40),
+      resources,
+      validatedAt: now,
+    });
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "checkpoint-task-mismatch", taskKey: "contract" }),
+        expect.objectContaining({ code: "checkpoint-task-mismatch", taskKey: "server" }),
+      ]),
+    );
+  });
+
   it("accepts a bounded valid proposal and computes waves", () => {
     const result = validate(base);
     expect(result.status).toBe("valid");

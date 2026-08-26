@@ -2,7 +2,7 @@
 
 ## Planning status
 
-Architect Plan Proposal, AI-drafted Tasks/DAG/ownership/resource claims, human plan approval, deterministic Supervised Mission Runs, bounded provider routing/replacement, bounded remediation, and optional Automatic Integration are implemented.
+Durable Planner lifecycle, team-size presets, Architect Plan Proposal, AI-drafted Tasks/DAG/ownership/resource claims/checkpoints, human plan approval, deterministic Supervised Mission Runs, bounded provider routing/replacement, bounded remediation, and optional Automatic Integration are implemented.
 
 This document constrains the implemented Supervised Swarm policy. It is not a claim of unattended autonomy.
 
@@ -71,3 +71,9 @@ The handoff is concise evidence for review and integration, not a duplicate proj
 Missions and the Integration Engine do not imply unlimited autonomy. Users author or approve dependency edges, activate the Mission, and choose manual execution or one explicitly confirmed Supervised Run. A frozen Swarm policy may start later waves, acquire canonical resource leases, route or replace providers, remediate within explicit limits, and create Integration. It cannot invent Tasks or dependencies, rewrite or approve the plan, approve scope, resolve conflicts, merge `main`, push, or open a PR.
 
 Shared-resource coordination remains a deterministic safety primitive independent of scheduling. In manual execution, a resource-blocked Task requires a human start after its blocker clears. In Supervised Swarm, the scheduler may start it automatically once its canonical lease is available; it cannot bypass or fabricate the lease.
+
+## Named checkpoint barriers
+
+A checkpoint is persisted Mission policy, not a client-side visual separator. It names prerequisite Tasks and later Tasks it unlocks. It may also require approved quality-gate IDs, independent current-snapshot reviews, and a human approval timestamp. The scheduler emits a durable waiting-checkpoint decision until every configured condition is satisfied. The server validates the same evidence again before accepting human approval.
+
+Checkpoint approval is idempotent. Repeated approval commands preserve the original approval time and do not duplicate projection activity. The UI may explain a blocked checkpoint, but only canonical Task, gate, review, and Mission state can release it.

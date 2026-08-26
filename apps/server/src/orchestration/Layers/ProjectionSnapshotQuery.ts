@@ -42,6 +42,7 @@ import {
   MissionId,
   MissionStatus,
   MissionRun,
+  MissionCheckpoint,
   TaskId,
   type Mission,
   SharedResourceDefinition,
@@ -201,6 +202,7 @@ const ProjectionMissionRow = Schema.Struct({
   cancelledAt: Schema.NullOr(IsoDateTime),
   baseCommit: Schema.NullOr(Schema.String),
   architectPlanProposalId: Schema.NullOr(ArchitectPlanProposalId),
+  checkpointsJson: Schema.fromJsonString(Schema.Array(MissionCheckpoint)),
 });
 const ProjectionMissionTaskRow = Schema.Struct({
   missionId: MissionId,
@@ -257,6 +259,7 @@ function mapMissionRows(input: {
         dependentTaskId: entry.dependentTaskId,
         createdAt: entry.createdAt,
       })),
+    checkpoints: row.checkpointsJson,
     activities: input.activities
       .filter((entry) => entry.missionId === row.missionId)
       .map((entry) => ({
@@ -685,6 +688,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         cancelled_at AS "cancelledAt"
         , base_commit AS "baseCommit"
         , architect_plan_proposal_id AS "architectPlanProposalId"
+        , checkpoints_json AS "checkpointsJson"
       FROM projection_missions ORDER BY created_at, mission_id
     `,
   });

@@ -1,12 +1,23 @@
-# Run a Mission with Supervised Swarm
+# Run a Mission with Swarm
 
-Supervised Swarm turns an approved Architect Mission into one deterministic run. Open **Command Deck → Missions**, activate the approved Mission, choose **Supervised Swarm**, review the frozen launch policy, then choose **Run Swarm**.
+Swarm turns an approved Architect Mission into one deterministic, supervised run. Open **Swarm** from the sidebar or command palette. The workflow keeps planning, approval, execution, and Integration as separate human-visible actions:
 
-The shortest entry path is **Project Home → Run a Swarm**. This opens Command Deck directly in Missions so you can describe the objective to Architect, review the proposed Task graph, explicitly approve it, and then run it. The empty Tasks state offers the same **Plan with Architect** action; manual Task creation remains available as a secondary path.
+1. **Swarm Brief** defines the objective, bounded repository context, Planner, team preset, provider roster, and writable concurrency.
+2. **Team Plan** reviews the proposed roster, Task DAG or table, named checkpoints, ownership, providers, warnings, and advanced JSON evidence.
+3. **War Room** supervises canonical Tasks, Threads, waits, checkpoints, and the retained activity stream.
+4. **Review & Integration** summarizes only real Task, review, gate, checkpoint, and Integration evidence.
+
+The Planner is one planning and coordination seat. Team presets add 2, 4, 8, or 12 non-Planner execution seats; Custom supports a bounded count. The selected team size does not force parallel writes. **Max writable concurrency** is a separate guardrail, and the runtime still respects dependencies, ownership, Shared Resources, provider readiness, reviews, and checkpoints.
+
+Plan generation reports persisted repository validation, context preparation, Planner start/work, schema decoding, and deterministic validation phases. While the provider is working, Nebula says **Tasks pending** instead of displaying a misleading zero. A stalled or failed attempt preserves the brief and offers Retry, Switch Planner, Edit Brief, Build Plan Manually, Diagnostics, and Cancel. Retry appends an attempt and does not duplicate a Mission or Tasks.
+
+The shortest entry path is **Project Home → Run a Swarm**. It opens the Swarm Brief. A plan is still a proposal: **Generate Team Plan** never approves or runs it. **Approve Plan** atomically materializes exactly one ordinary draft Mission and its ordinary Tasks. **Run Swarm** is a later, explicit action.
 
 The launch summary records concurrency, routing, retry and remediation budgets, independent review, automatic Integration, and the permanent rule that Nebula never merges `main`. Once started, the policy is immutable. If the Project quality or review policy changes, the Run stops for attention; stop it and launch a new revision to adopt the change.
 
-Nebula schedules the approved DAG, injects bounded prerequisite evidence, validates ownership and Shared Resources, executes quality gates and independent review, uses bounded recovery, and unlocks later waves without manual Task-start clicks. Terminal Center exposes the live provider Threads using the same canonical Mission flow.
+Named checkpoints are server-enforced barriers. A checkpoint can require specific Tasks, current-snapshot quality gates, independent reviews, and human approval before it releases later Tasks. When human approval is required, the War Room shows **Approve checkpoint** only after the earlier evidence is complete.
+
+Nebula schedules the approved DAG, injects bounded prerequisite evidence, validates ownership and Shared Resources, executes quality gates and independent review, uses bounded recovery, and unlocks later waves without manual Task-start clicks. Terminal Center exposes the live provider Threads using the same canonical Mission flow. Node borders and status labels update from real Thread state, with reduced-motion-safe transitions.
 
 When every Task is complete and **Automatic Integration** is enabled, Nebula creates an Integration Batch in Mission topological order. Unapproved path overlap, Git conflicts, and failed final validation stop for human attention. A Ready Integration makes the Run completion-eligible; the user still completes the Mission and decides whether any external merge or publication happens.
 

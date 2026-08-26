@@ -116,7 +116,7 @@ const seed = Effect.gen(function* () {
 const createMission = (
   id = missionId,
   architectPlanProposalId?: ArchitectPlanProposalId,
-): OrchestrationCommand => ({
+): Extract<OrchestrationCommand, { type: "mission.create" }> => ({
   type: "mission.create",
   commandId: CommandId.make(`create-${id}`),
   missionId: id,
@@ -190,6 +190,94 @@ const addDependency = (
 });
 
 it.layer(NodeServices.layer)("Mission decider", (it) => {
+  it.effect("enforces and idempotently records human checkpoint approval", () =>
+    Effect.gen(function* () {
+      let model = yield* seed;
+      model = yield* apply(model, {
+        ...createMission(),
+        taskIds: [taskA, taskB],
+        checkpoints: [
+          {
+            key: "foundation",
+            name: "Foundation review",
+            requiredTaskIds: [taskA],
+            unlockTaskIds: [taskB],
+            requiredGateIds: [],
+            reviewsRequired: false,
+            humanApprovalRequired: true,
+          },
+        ],
+      });
+
+      const command = {
+        type: "mission.checkpoint.approve" as const,
+        commandId: CommandId.make("approve-foundation"),
+        missionId,
+        projectId,
+        checkpointKey: "foundation",
+        createdAt: now,
+      };
+      const blocked = yield* Effect.flip(decideOrchestrationCommand({ readModel: model, command }));
+      expect(blocked.message).toContain("prerequisite Tasks must complete");
+
+      model = {
+        ...model,
+        tasks: model.tasks?.map((task) =>
+          task.id === taskA ? { ...task, status: "completed" as const, completedAt: now } : task,
+        ),
+      };
+      model = yield* apply(model, command);
+      model = yield* apply(model, {
+        ...command,
+        commandId: CommandId.make("approve-foundation-again"),
+      });
+      expect(model.missions?.[0]?.checkpoints?.[0]?.humanApprovedAt).toBe(now);
+      expect(
+        model.missions?.[0]?.activities.filter(
+          (activity) => activity.type === "mission.checkpoint-approved",
+        ),
+      ).toHaveLength(1);
+    }),
+  );
+
+  it.effect("rejects duplicate and out-of-scope checkpoint inputs", () =>
+    Effect.gen(function* () {
+      const model = yield* seed;
+      const checkpoint = {
+        key: "foundation",
+        name: "Foundation review",
+        requiredTaskIds: [taskA],
+        unlockTaskIds: [taskB],
+        requiredGateIds: [],
+        reviewsRequired: false,
+        humanApprovalRequired: true,
+      };
+      const duplicate = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            ...createMission(),
+            taskIds: [taskA, taskB],
+            checkpoints: [checkpoint, checkpoint],
+          },
+        }),
+      );
+      expect(duplicate.message).toContain("checkpoint keys must be unique");
+
+      const outOfScope = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            ...createMission(),
+            taskIds: [taskA],
+            checkpoints: [checkpoint],
+          },
+        }),
+      );
+      expect(outOfScope.message).toContain("outside the Mission creation scope");
+    }),
+  );
+
   it.effect("persists explicit membership and rejects cycles with the cycle path", () =>
     Effect.gen(function* () {
       let model = yield* seed;
@@ -227,6 +315,17 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
         decideOrchestrationCommand({ readModel: model, command: addTask(otherMissionId, taskA) }),
       );
       expect(duplicate.message).toContain("already belongs");
+
+      const createDuplicate = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            ...createMission(MissionId.make("mission-3")),
+            taskIds: [taskA],
+          },
+        }),
+      );
+      expect(createDuplicate.message).toContain("already belongs");
 
       model = yield* apply(model, createTask(TaskId.make("foreign-task"), otherProjectId));
       const foreign = yield* Effect.flip(

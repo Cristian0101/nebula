@@ -23,6 +23,7 @@ import {
   ResourceLeasesPayload,
   ArchitectPlanPayload,
   MissionCreatedPayload,
+  MissionCheckpointApprovedPayload,
   MissionUpdatedPayload,
   MissionTaskMembershipPayload,
   MissionTasksReorderedPayload,
@@ -482,8 +483,9 @@ export function projectEvent(
               objective: payload.objective,
               description: payload.description,
               status: "draft" as const,
-              taskIds: [],
+              taskIds: payload.taskIds ?? [],
               dependencies: [],
+              checkpoints: payload.checkpoints ?? [],
               activities: [
                 {
                   id: event.eventId,
@@ -503,6 +505,51 @@ export function projectEvent(
               architectPlanProposalId: payload.architectPlanProposalId ?? null,
             },
           ],
+        })),
+      );
+
+    case "mission.checkpoint-approved":
+      return decodeForEvent(
+        MissionCheckpointApprovedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          missions: (nextBase.missions ?? []).map((mission) =>
+            mission.id !== payload.missionId
+              ? mission
+              : mission.checkpoints?.some(
+                    (checkpoint) =>
+                      checkpoint.key === payload.checkpointKey &&
+                      checkpoint.humanApprovedAt !== null,
+                  )
+                ? mission
+                : {
+                    ...mission,
+                    checkpoints: (mission.checkpoints ?? []).map((checkpoint) =>
+                      checkpoint.key === payload.checkpointKey
+                        ? {
+                            ...checkpoint,
+                            humanApprovedAt: payload.approvedAt,
+                            updatedAt: payload.updatedAt,
+                          }
+                        : checkpoint,
+                    ),
+                    updatedAt: payload.updatedAt,
+                    activities: [
+                      ...mission.activities,
+                      {
+                        id: event.eventId,
+                        type: event.type,
+                        summary: `Checkpoint approved: ${payload.checkpointKey}`,
+                        taskId: null,
+                        occurredAt: event.occurredAt,
+                      },
+                    ],
+                  },
+          ),
         })),
       );
 

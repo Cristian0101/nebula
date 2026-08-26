@@ -88,6 +88,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
         aggregateId: command.projectId,
       };
     case "mission.create":
+    case "mission.checkpoint.approve":
     case "mission.update":
     case "mission.task.add":
     case "mission.task.remove":

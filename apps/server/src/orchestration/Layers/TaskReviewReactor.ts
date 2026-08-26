@@ -20,6 +20,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
+import { checkpointRefPathSegment } from "../../checkpointing/Utils.ts";
 import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
 import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import * as TextGeneration from "../../textGeneration/TextGeneration.ts";
@@ -29,6 +30,7 @@ import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts"
 import { TaskReviewReactor, type TaskReviewReactorShape } from "../Services/TaskReviewReactor.ts";
 import { TaskChangeSetQuery } from "../TaskChangeSetQuery.ts";
 import {
+  boundedTaskHandoffEvidence,
   buildStructuredTaskHandoffPrompt,
   parseGeneratedTaskHandoff,
   parseStructuredTaskHandoffValue,
@@ -63,7 +65,9 @@ class IndependentReviewParseError extends Data.TaggedError("IndependentReviewPar
 }> {}
 
 export const taskRestoreCheckpointRef = (taskId: string, restoreId: TaskRestoreId) =>
-  CheckpointRef.make(`refs/t3/checkpoints/tasks/${taskId}/restore/${restoreId}`);
+  CheckpointRef.make(
+    `refs/t3/checkpoints/tasks/${checkpointRefPathSegment(taskId)}/restore/${checkpointRefPathSegment(restoreId)}`,
+  );
 
 export function shouldRecoverReviewPreparation(
   task: {
@@ -237,6 +241,7 @@ const make = Effect.gen(function* () {
                   title: task.title,
                   objective: task.objective,
                   files: captured.changeSet.files,
+                  reportedBuilderEvidence: boundedTaskHandoffEvidence(thread.messages),
                 }),
                 outputSchema: StructuredTaskHandoffGenerationOutput,
                 modelSelection: thread.modelSelection,
