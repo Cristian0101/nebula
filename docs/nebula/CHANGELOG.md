@@ -1,5 +1,14 @@
 # Nebula changelog
 
+## Unreleased — Swarm UX Rescue
+
+- Added the first-class Swarm Brief with real Planner readiness, 2/4/8/12/custom non-Planner team presets, a starting role composition, explicit writable concurrency, and trust guardrails.
+- Added durable repository/context/provider/decoding/validation planning progress, safe cancellation, classified failure recovery, attempt history, Planner switching, and a baseline-safe manual proposal fallback.
+- Replaced the raw default proposal form with Team Plan roster, DAG/table, checkpoint cards, structured Task ownership/provider inspector, warnings, and Advanced-only raw JSON.
+- Added server-enforced named checkpoint barriers over required Tasks, current quality gates, approved reviews, and optional human approval.
+- Added a canonical War Room and Review & Integration flow, direct Thread/Terminal Center actions, first-class sidebar Swarm navigation, and event-driven Terminal node state transitions.
+- Preserved separate Generate, Approve, and Run actions. Approval remains atomic and retry-safe; no action merges `main`.
+
 ## Unreleased — Supervised Mission Runs
 
 - Added durable supervised Run state, deterministic dependency/resource/concurrency scheduling, stable crash-safe Task dispatch, and explainable scheduler decisions.

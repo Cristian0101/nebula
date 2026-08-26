@@ -44,6 +44,8 @@ Use **Add thread** to place an existing Project Thread or Task Thread on the can
 
 Terminal Center and Command Deck are complementary. Terminal Center is for freeform provider sessions and spatial focus switching. Command Deck remains the structured Task, Mission, review, and Integration surface. While a Supervised Mission Run is active, its Task Threads are added to the canvas and the existing **Mission flow** layout remains available.
 
+Each node shows a textual **Ready**, **Working**, or **Needs attention** state alongside its current action. The border, tint, and shadow transition only when canonical Thread state changes; there is no decorative timer or simulated activity. Reduced-motion preferences disable those transitions.
+
 ## Current scope
 
 Project and Global Terminal Center, quick provider launch, automatic layouts, freeform spatial layout, approved Dev Servers, Supervised Run Thread discovery, and Swarm Mission Flow are **implemented**. Canvas edges are reserved for canonical Mission dependencies; Terminal Center does not invent agent-to-agent communication.

@@ -55,7 +55,7 @@ Opening a Project now shows **Project Home** instead of immediately creating a C
 - **Run a Swarm** to start in Command Deck's Mission Architect;
 - **Quick Thread** for the familiar lightweight conversation flow.
 
-Global Terminal Center in the sidebar supervises active Threads across Projects.
+**Swarm** and **Terminal Center** are first-class sidebar destinations. Swarm shows the contextual Project's latest planning state; the ordinary Thread list continues to show active canonical Threads. Global Terminal Center supervises active Threads across Projects.
 
 ## 5. Launch a provider session
 
@@ -77,15 +77,15 @@ Open **Command Deck** for the project.
 
 For a manual workflow, create a Task, define ownership, start it, inspect its diff and handoff, run approved gates, request independent review, then complete it.
 
-## 7. Ask Architect for a Mission
+## 7. Create a Swarm Brief
 
-In **Command Deck → Missions**, choose **New → Architect**. Describe the objective and constraints. Architect reads only bounded repository evidence against the recorded clean commit and returns a proposal; it does not modify the repository.
+Open **Swarm**. Describe the objective and constraints, select a Planner, choose the 2, 4, 8, or 12-agent preset (or Custom), assign ready providers, and set the maximum writable concurrency. The Planner reads only bounded repository evidence against the recorded clean commit and returns a proposal; it does not modify the repository.
 
-Review the Tasks, dependencies, ownership, providers, acceptance criteria, assumptions, and risks. Edit anything necessary, then explicitly approve and activate the Mission.
+Review the Team Plan's roster, Tasks, dependencies, checkpoints, ownership, providers, acceptance criteria, assumptions, warnings, and risks. Edit anything necessary, then explicitly approve the plan. Approval and Run remain separate actions.
 
 ## 8. Run Supervised Swarm
 
-Choose **Supervised Swarm**, then review:
+Choose **Run Swarm**, then supervise in the War Room:
 
 - maximum active Tasks;
 - routing profile;
@@ -95,6 +95,8 @@ Choose **Supervised Swarm**, then review:
 - final approved quality commands and their Task/Integration scope.
 
 Choose **Run Swarm** only after the frozen policy is correct. Nebula schedules ready Tasks, respects dependencies and Shared Resources, injects prerequisite context, and advances later waves. It stops the affected branch when human judgment is required.
+
+When a named checkpoint requires human approval, verify the displayed Task, gate, and review evidence, then choose **Approve checkpoint**. The server will reject early approval; the client cannot bypass the barrier.
 
 ## 9. Resolve attention and inspect Integration
 
