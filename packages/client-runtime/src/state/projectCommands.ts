@@ -33,6 +33,7 @@ import {
   validateIntegration,
   removeIntegrationWorkspace,
   createMission,
+  approveMissionCheckpoint,
   updateMission,
   addMissionTask,
   removeMissionTask,
@@ -70,6 +71,7 @@ export type {
   ValidateIntegrationInput,
   RemoveIntegrationWorkspaceInput,
   CreateMissionInput,
+  ApproveMissionCheckpointInput,
   UpdateMissionInput,
   AddMissionTaskInput,
   RemoveMissionTaskInput,
@@ -241,6 +243,12 @@ export function createProjectEnvironmentAtoms<R, E>(
     addMissionTask: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:mission:task:add",
       execute: addMissionTask,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    approveMissionCheckpoint: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:mission:checkpoint:approve",
+      execute: approveMissionCheckpoint,
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
     }),

@@ -4,9 +4,11 @@ import {
   activeReplacementOwnsProviderTurn,
   isRequiredGateFailureStatus,
   missionProviderTurnInFlight,
+  providerExecutionFailureDetail,
   providerSupportsStructuredReview,
   reviewSnapshotCoversLatestTurn,
   shouldReconcileMissionRunEventType,
+  taskActivationCommandPhase,
 } from "./MissionRunReactor.ts";
 
 describe("MissionRunReactor recovery", () => {
@@ -56,6 +58,29 @@ describe("MissionRunReactor recovery", () => {
     ).toBe(true);
   });
 
+  it("treats a terminal provider authentication response as execution failure evidence", () => {
+    expect(
+      providerExecutionFailureDetail({
+        latestTurn: { turnId: "turn-1", state: "completed" },
+        session: { status: "ready", lastError: null },
+        messages: [
+          {
+            turnId: "turn-1",
+            role: "assistant",
+            text: "Failed to authenticate. API Error: 401 OAuth access token has expired.",
+          },
+        ],
+      } as never),
+    ).toContain("Failed to authenticate");
+    expect(
+      providerExecutionFailureDetail({
+        latestTurn: { turnId: "turn-1", state: "completed" },
+        session: { status: "ready", lastError: null },
+        messages: [{ turnId: "turn-1", role: "assistant", text: "Implemented the module." }],
+      } as never),
+    ).toBeNull();
+  });
+
   it("does not treat historical stale gates as fresh failures", () => {
     expect(isRequiredGateFailureStatus("stale")).toBe(false);
     expect(isRequiredGateFailureStatus("failed")).toBe(true);
@@ -80,5 +105,30 @@ describe("MissionRunReactor recovery", () => {
   it("does not wake the scheduler from its own reconciliation output", () => {
     expect(shouldReconcileMissionRunEventType("mission.run.reconciled")).toBe(false);
     expect(shouldReconcileMissionRunEventType("integration.updated")).toBe(true);
+  });
+
+  it("opens a fresh activation command epoch after ownership is revalidated", () => {
+    const initial = taskActivationCommandPhase({
+      updatedAt: "2026-08-25T13:52:00.000Z",
+      ownership: {
+        validatedAt: "2026-08-25T13:52:01.000Z",
+        updatedAt: "2026-08-25T13:52:01.000Z",
+      },
+    } as never);
+    const retried = taskActivationCommandPhase({
+      updatedAt: "2026-08-25T13:52:00.000Z",
+      ownership: {
+        validatedAt: "2026-08-25T13:53:01.000Z",
+        updatedAt: "2026-08-25T13:53:01.000Z",
+      },
+    } as never);
+
+    expect(initial).not.toBe(retried);
+    expect(
+      taskActivationCommandPhase({
+        updatedAt: "2026-08-25T13:52:00.000Z",
+        ownership: null,
+      } as never),
+    ).toBe("activate:2026-08-25T13:52:00.000Z");
   });
 });

@@ -34,9 +34,24 @@ type OwnershipEvent = Extract<
   }
 >;
 
-export function taskNeedsOwnershipReconciliation(task: OrchestrationTask): boolean {
+export function taskNeedsOwnershipReconciliation(
+  task: OrchestrationTask,
+  missionRuns: ReadonlyArray<{
+    readonly status: string;
+    readonly scheduledTaskIds: ReadonlyArray<string>;
+  }> = [],
+): boolean {
+  const scheduledDraft =
+    task.status === "draft" &&
+    missionRuns.some(
+      (run) =>
+        run.status !== "completed" &&
+        run.status !== "failed" &&
+        run.status !== "stopped" &&
+        run.scheduledTaskIds.includes(task.id),
+    );
   return (
-    task.status === "active" &&
+    (task.status === "active" || scheduledDraft) &&
     task.ownership?.required === true &&
     task.ownership.rules.length > 0 &&
     task.workspace?.status === "ready"
@@ -243,7 +258,7 @@ const make = Effect.gen(function* () {
       }
     }
     for (const task of readModel.tasks ?? []) {
-      if (taskNeedsOwnershipReconciliation(task)) {
+      if (taskNeedsOwnershipReconciliation(task, readModel.missionRuns ?? [])) {
         if (taskNeedsCompletionRecovery(task, readModel.missionRuns ?? [])) {
           yield* engine.dispatch({
             type: "task.complete",

@@ -3,6 +3,7 @@ import type {
   MissionRun,
   MissionRunAttention,
   MissionFinalReport,
+  MissionCheckpoint,
   OrchestrationProject,
   OrchestrationTask,
   TaskId,
@@ -11,7 +12,12 @@ import type {
 import { computeExecutionWaves } from "./missionGraph.ts";
 
 export interface MissionRunSchedulingDecision {
-  readonly kind: "scheduled" | "waiting_dependency" | "waiting_resource" | "waiting_concurrency";
+  readonly kind:
+    | "scheduled"
+    | "waiting_dependency"
+    | "waiting_checkpoint"
+    | "waiting_resource"
+    | "waiting_concurrency";
   readonly taskId: TaskId;
   readonly reason: string;
   readonly sourceTaskIds: ReadonlyArray<TaskId>;
@@ -39,6 +45,75 @@ export function deterministicMissionTaskIds(mission: Mission): ReadonlyArray<Tas
         left.taskId.localeCompare(right.taskId),
     )
     .map(({ taskId }) => taskId);
+}
+
+export type MissionCheckpointState =
+  | "pending_tasks"
+  | "pending_gates"
+  | "pending_reviews"
+  | "awaiting_human"
+  | "passed";
+
+export function resolveMissionCheckpointState(
+  checkpoint: MissionCheckpoint,
+  tasks: ReadonlyArray<OrchestrationTask>,
+): {
+  readonly state: MissionCheckpointState;
+  readonly blockerTaskIds: ReadonlyArray<TaskId>;
+  readonly detail: string;
+} {
+  const taskById = new Map(tasks.map((task) => [task.id, task] as const));
+  const required = checkpoint.requiredTaskIds.map((taskId) => taskById.get(taskId));
+  const pendingTasks = checkpoint.requiredTaskIds.filter(
+    (taskId) => taskById.get(taskId)?.status !== "completed",
+  );
+  if (pendingTasks.length > 0)
+    return {
+      state: "pending_tasks",
+      blockerTaskIds: pendingTasks,
+      detail: `Waiting for checkpoint '${checkpoint.name}' prerequisite Tasks.`,
+    };
+  const gateBlocked = required.filter((task) =>
+    checkpoint.requiredGateIds.some(
+      (gateId) =>
+        !task?.qualityGateRuns?.some(
+          (run) =>
+            run.gateId === gateId &&
+            run.status === "passed" &&
+            run.snapshotId === task.reviewSnapshot?.id,
+        ),
+    ),
+  );
+  if (gateBlocked.length > 0)
+    return {
+      state: "pending_gates",
+      blockerTaskIds: gateBlocked.flatMap((task) => (task ? [task.id] : [])),
+      detail: `Waiting for required quality gates at checkpoint '${checkpoint.name}'.`,
+    };
+  const reviewBlocked = checkpoint.reviewsRequired
+    ? required.filter(
+        (task) =>
+          !task?.reviews?.some(
+            (review) =>
+              review.status === "completed" &&
+              review.snapshotId === task.reviewSnapshot?.id &&
+              (review.verdict === "approve" || review.verdict === "approve_with_notes"),
+          ),
+      )
+    : [];
+  if (reviewBlocked.length > 0)
+    return {
+      state: "pending_reviews",
+      blockerTaskIds: reviewBlocked.flatMap((task) => (task ? [task.id] : [])),
+      detail: `Waiting for independent review at checkpoint '${checkpoint.name}'.`,
+    };
+  if (checkpoint.humanApprovalRequired && checkpoint.humanApprovedAt === null)
+    return {
+      state: "awaiting_human",
+      blockerTaskIds: [],
+      detail: `Waiting for human approval at checkpoint '${checkpoint.name}'.`,
+    };
+  return { state: "passed", blockerTaskIds: [], detail: `Checkpoint '${checkpoint.name}' passed.` };
 }
 
 function configurationAttention(input: {
@@ -126,6 +201,13 @@ export function planMissionRunScheduling(input: {
       dependency.prerequisiteTaskId,
     ]);
   }
+  const checkpointsByUnlockedTask = new Map<TaskId, MissionCheckpoint[]>();
+  for (const checkpoint of input.mission.checkpoints ?? [])
+    for (const taskId of checkpoint.unlockTaskIds)
+      checkpointsByUnlockedTask.set(taskId, [
+        ...(checkpointsByUnlockedTask.get(taskId) ?? []),
+        checkpoint,
+      ]);
   const scheduled = new Set(
     input.run.scheduledTaskIds.filter((taskId) => taskById.get(taskId)?.status !== "completed"),
   );
@@ -163,6 +245,18 @@ export function planMissionRunScheduling(input: {
     const task = taskById.get(taskId);
     if (!task || task.status !== "draft" || scheduled.has(taskId)) continue;
     const sourceTaskIds = prerequisites.get(taskId) ?? [];
+    const checkpointBlocker = (checkpointsByUnlockedTask.get(taskId) ?? [])
+      .map((checkpoint) => resolveMissionCheckpointState(checkpoint, input.tasks))
+      .find((checkpointState) => checkpointState.state !== "passed");
+    if (checkpointBlocker) {
+      decisions.push({
+        kind: "waiting_checkpoint",
+        taskId,
+        reason: checkpointBlocker.detail,
+        sourceTaskIds: checkpointBlocker.blockerTaskIds,
+      });
+      continue;
+    }
     const blockers = sourceTaskIds.filter((id) => taskById.get(id)?.status !== "completed");
     if (blockers.length > 0) {
       decisions.push({

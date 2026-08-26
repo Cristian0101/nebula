@@ -20,6 +20,7 @@ import {
   deterministicMissionTaskIds,
   missionIntegrationOverlapPaths,
   planMissionRunScheduling,
+  resolveMissionCheckpointState,
 } from "./missionRunner.js";
 
 const now = "2026-08-23T12:00:00.000Z";
@@ -131,6 +132,87 @@ const project = {
 };
 
 describe("supervised Mission scheduler", () => {
+  it("holds an unlocked wave at a named human checkpoint and releases it after approval", () => {
+    const tasks = [task("A", "completed"), task("B"), task("C"), task("D")];
+    const checkpoint = {
+      key: "foundation",
+      name: "Foundation review",
+      requiredTaskIds: [taskId("A")],
+      unlockTaskIds: [taskId("B"), taskId("C")],
+      requiredGateIds: [],
+      reviewsRequired: false,
+      humanApprovalRequired: true,
+      humanApprovedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    } as const;
+    const gatedMission = { ...mission, checkpoints: [checkpoint] };
+    const blocked = planMissionRunScheduling({
+      mission: gatedMission,
+      run,
+      tasks,
+      project,
+      providerReadyTaskIds: new Set(tasks.map((candidate) => candidate.id)),
+    });
+    expect(resolveMissionCheckpointState(checkpoint, tasks).state).toBe("awaiting_human");
+    expect(blocked.decisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ taskId: taskId("B"), kind: "waiting_checkpoint" }),
+        expect.objectContaining({ taskId: taskId("C"), kind: "waiting_checkpoint" }),
+      ]),
+    );
+
+    const approvedCheckpoint = { ...checkpoint, humanApprovedAt: now };
+    const released = planMissionRunScheduling({
+      mission: { ...gatedMission, checkpoints: [approvedCheckpoint] },
+      run,
+      tasks,
+      project,
+      providerReadyTaskIds: new Set(tasks.map((candidate) => candidate.id)),
+    });
+    expect(resolveMissionCheckpointState(approvedCheckpoint, tasks).state).toBe("passed");
+    expect(released.scheduledTaskIds).toEqual([taskId("B"), taskId("C")]);
+  });
+
+  it("requires every checkpoint that unlocks the same Task to pass", () => {
+    const tasks = [task("A", "completed"), task("B", "completed"), task("C"), task("D")];
+    const approved = {
+      key: "contract",
+      name: "Contract freeze",
+      requiredTaskIds: [taskId("A")],
+      unlockTaskIds: [taskId("C")],
+      requiredGateIds: [],
+      reviewsRequired: false,
+      humanApprovalRequired: false,
+      humanApprovedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    } as const;
+    const waiting = {
+      ...approved,
+      key: "feature-review",
+      name: "Feature review",
+      requiredTaskIds: [taskId("B")],
+      humanApprovalRequired: true,
+    } as const;
+    const blocked = planMissionRunScheduling({
+      mission: { ...mission, checkpoints: [approved, waiting] },
+      run,
+      tasks,
+      project,
+      providerReadyTaskIds: new Set(tasks.map((candidate) => candidate.id)),
+    });
+
+    expect(blocked.scheduledTaskIds).not.toContain(taskId("C"));
+    expect(blocked.decisions).toContainEqual(
+      expect.objectContaining({
+        taskId: taskId("C"),
+        kind: "waiting_checkpoint",
+        reason: "Waiting for human approval at checkpoint 'Feature review'.",
+      }),
+    );
+  });
+
   it("uses wave, Mission order, and stable ID order", () => {
     expect(deterministicMissionTaskIds(mission)).toEqual(["A", "B", "C", "D"]);
   });

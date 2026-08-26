@@ -61,6 +61,7 @@ const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "mission.tasks-reordered",
   "mission.dependency-added",
   "mission.dependency-removed",
+  "mission.checkpoint-approved",
   "task.workspace.ready",
   "task.workspace.failed",
   "task.workspace.missing",
@@ -111,6 +112,10 @@ const taskThreadId = (run: MissionRun, task: OrchestrationTask) =>
 
 const commandId = (run: MissionRun, taskId: string | null, phase: string) =>
   CommandId.make(`server:mission-run:${run.id}:${taskId ?? "mission"}:${phase}`);
+
+export const taskActivationCommandPhase = (
+  task: Pick<OrchestrationTask, "updatedAt" | "ownership">,
+) => `activate:${task.ownership?.validatedAt ?? task.ownership?.updatedAt ?? task.updatedAt}`;
 
 const ownershipContext = (task: OrchestrationTask) => {
   const groups = {
@@ -239,6 +244,28 @@ export function providerSupportsStructuredReview(instance: {
   return typeof instance.textGeneration.generateStructured === "function";
 }
 
+export function providerExecutionFailureDetail(
+  thread: Pick<OrchestrationThread, "latestTurn" | "session" | "messages"> | undefined,
+): string | null {
+  if (!thread) return null;
+  if (thread.latestTurn?.state === "error" || thread.session?.status === "error")
+    return thread.session?.lastError ?? "Builder provider execution failed.";
+  if (thread.latestTurn?.state !== "completed") return null;
+  const assistantMessage = thread.messages.findLast(
+    (message) =>
+      message.role === "assistant" &&
+      (message.turnId === null || message.turnId === thread.latestTurn?.turnId),
+  );
+  const detail = assistantMessage?.text.trim() ?? "";
+  if (
+    !/^(?:failed to authenticate\b|authentication (?:failed|required)\b|api error:\s*(?:401|403)\b|(?:error|failed):[^\n]*(?:credential|token|unauthorized|provider unavailable))/iu.test(
+      detail,
+    )
+  )
+    return null;
+  return detail.slice(0, 1_000);
+}
+
 const activeTaskAttention = (
   task: OrchestrationTask,
   thread: OrchestrationThread | undefined,
@@ -278,8 +305,8 @@ const activeTaskAttention = (
     (review.verdict === "request_changes" || review.verdict === "reject")
   )
     add("changes_requested", review.summary || "Independent review requested changes.");
-  if (thread?.latestTurn?.state === "error" || thread?.session?.status === "error")
-    add("provider_failed", thread.session?.lastError ?? "Builder provider execution failed.");
+  const providerFailure = providerExecutionFailureDetail(thread);
+  if (providerFailure) add("provider_failed", providerFailure);
   if (thread?.latestTurn?.state === "interrupted")
     add("provider_interrupted", "Builder provider turn was interrupted.");
   return attention;
@@ -600,7 +627,7 @@ const make = Effect.gen(function* () {
     if (task.status === "draft") {
       yield* engine.dispatch({
         type: "task.activate",
-        commandId: commandId(run, task.id, "activate"),
+        commandId: commandId(run, task.id, taskActivationCommandPhase(task)),
         taskId: task.id,
         createdAt: run.startedAt,
       });
@@ -883,10 +910,7 @@ const make = Effect.gen(function* () {
     if (!thread) return false;
     const gate = requiredGateFailure(task);
     const review = reviewSnapshotCoversLatestTurn(task, thread) ? currentReview(task) : null;
-    const providerError =
-      thread.latestTurn?.state === "error" || thread.session?.status === "error"
-        ? (thread.session?.lastError ?? "Provider execution failed.")
-        : null;
+    const providerError = providerExecutionFailureDetail(thread);
     const failureClass = providerError
       ? classifyRuntimeFailure({ source: "provider", message: providerError })
       : gate

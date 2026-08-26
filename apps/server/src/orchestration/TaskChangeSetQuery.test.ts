@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ProjectId,
   TaskId,
+  TaskReviewSnapshotId,
   ThreadId,
   type OrchestrationReadModel,
   type OrchestrationTask,
@@ -53,6 +54,15 @@ const layer = TaskChangeSetQuery.layer.pipe(
   Layer.provideMerge(serverConfigLayer),
   Layer.provideMerge(NodeServices.layer),
 );
+
+it("encodes generated Task identifiers into valid Git ref segments", () => {
+  expect(
+    TaskChangeSetQuery.taskReviewCheckpointRef(
+      "architect:proposal:task",
+      TaskReviewSnapshotId.make("snapshot:1"),
+    ),
+  ).toBe("refs/t3/checkpoints/tasks/YXJjaGl0ZWN0OnByb3Bvc2FsOnRhc2s/review/c25hcHNob3Q6MQ");
+});
 
 it.layer(layer)("TaskChangeSetQuery Git fixture", (it) => {
   it.effect(

@@ -39,7 +39,11 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { ArchitectPlanMaterializationTask, ArchitectPlanProposal } from "./architectPlan.ts";
+import {
+  ArchitectPlanMaterializationTask,
+  ArchitectPlanProposal,
+  ArchitectTeamConfiguration,
+} from "./architectPlan.ts";
 import {
   CoordinationRequest,
   RecoveryPolicy,
@@ -434,6 +438,20 @@ export const MissionActivity = Schema.Struct({
 });
 export type MissionActivity = typeof MissionActivity.Type;
 
+export const MissionCheckpoint = Schema.Struct({
+  key: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  requiredTaskIds: Schema.Array(TaskId),
+  unlockTaskIds: Schema.Array(TaskId),
+  requiredGateIds: Schema.Array(TrimmedNonEmptyString),
+  reviewsRequired: Schema.Boolean,
+  humanApprovalRequired: Schema.Boolean,
+  humanApprovedAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type MissionCheckpoint = typeof MissionCheckpoint.Type;
+
 export const Mission = Schema.Struct({
   id: MissionId,
   projectId: ProjectId,
@@ -443,6 +461,7 @@ export const Mission = Schema.Struct({
   status: MissionStatus,
   taskIds: Schema.Array(TaskId),
   dependencies: Schema.Array(MissionTaskDependency),
+  checkpoints: Schema.optional(Schema.Array(MissionCheckpoint)),
   activities: Schema.Array(MissionActivity),
   integrationBatchId: Schema.NullOr(IntegrationBatchId),
   createdAt: IsoDateTime,
@@ -482,6 +501,7 @@ export const MissionRunDecision = Schema.Struct({
   kind: Schema.Literals([
     "scheduled",
     "waiting_dependency",
+    "waiting_checkpoint",
     "waiting_resource",
     "waiting_concurrency",
     "context_injected",
@@ -1470,6 +1490,16 @@ const MissionCreateCommand = Schema.Struct({
   description: Schema.optional(Schema.NullOr(TrimmedString)),
   baseCommit: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   architectPlanProposalId: Schema.optional(Schema.NullOr(ArchitectPlanProposalId)),
+  checkpoints: Schema.optional(Schema.Array(MissionCheckpoint)),
+  createdAt: IsoDateTime,
+});
+
+const MissionCheckpointApproveCommand = Schema.Struct({
+  type: Schema.Literal("mission.checkpoint.approve"),
+  commandId: CommandId,
+  missionId: MissionId,
+  projectId: ProjectId,
+  checkpointKey: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
 });
 
@@ -1490,6 +1520,7 @@ const ArchitectPlanGenerateCommand = Schema.Struct({
   constraints: Schema.optional(TrimmedString),
   modelSelection: ModelSelection,
   contextPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  team: Schema.optional(ArchitectTeamConfiguration),
   createdAt: IsoDateTime,
 });
 
@@ -2204,6 +2235,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ArchitectPlanRejectCommand,
   ArchitectPlanApproveCommand,
   MissionCreateCommand,
+  MissionCheckpointApproveCommand,
   MissionUpdateCommand,
   MissionTaskAddCommand,
   MissionTaskRemoveCommand,
@@ -2285,6 +2317,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ArchitectPlanRejectCommand,
   ArchitectPlanApproveCommand,
   MissionCreateCommand,
+  MissionCheckpointApproveCommand,
   MissionUpdateCommand,
   MissionTaskAddCommand,
   MissionTaskRemoveCommand,
@@ -2694,6 +2727,7 @@ export const OrchestrationEventType = Schema.Literals([
   "architect.plan-rejected",
   "architect.plan-approved",
   "mission.created",
+  "mission.checkpoint-approved",
   "mission.updated",
   "mission.task-added",
   "mission.task-removed",
@@ -2858,6 +2892,14 @@ export const MissionCreatedPayload = Schema.Struct({
   updatedAt: IsoDateTime,
   baseCommit: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   architectPlanProposalId: Schema.optional(Schema.NullOr(ArchitectPlanProposalId)),
+  checkpoints: Schema.optional(Schema.Array(MissionCheckpoint)),
+});
+
+export const MissionCheckpointApprovedPayload = Schema.Struct({
+  missionId: MissionId,
+  checkpointKey: TrimmedNonEmptyString,
+  approvedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
 });
 
 export const ArchitectPlanPayload = Schema.Struct({
@@ -3514,6 +3556,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("mission.created"),
     payload: MissionCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mission.checkpoint-approved"),
+    payload: MissionCheckpointApprovedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

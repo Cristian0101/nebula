@@ -1203,7 +1203,10 @@ const makeWsRpcLayer = (
                         },
                         createdAt: checkedAt,
                       });
-                      return yield* dispatchNormalizedCommand(staleCommand);
+                      yield* dispatchNormalizedCommand(staleCommand);
+                      return yield* new OrchestrationDispatchCommandError({
+                        message: `Repository changed after planning. The Team Plan is now stale (planned ${plan.planningBaseCommit.slice(0, 8)}, current ${commitSha.slice(0, 8)}). Regenerate it or explicitly approve the original baseline.`,
+                      });
                     }
                   }
                 }

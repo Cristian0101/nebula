@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { parseGeneratedTaskHandoff, parseStructuredTaskHandoffValue } from "./taskHandoff.ts";
+import {
+  boundedTaskHandoffEvidence,
+  buildStructuredTaskHandoffPrompt,
+  parseGeneratedTaskHandoff,
+  parseStructuredTaskHandoffValue,
+} from "./taskHandoff.ts";
 
 describe("parseGeneratedTaskHandoff", () => {
   it("normalizes provider markdown into the canonical handoff fields", () => {
@@ -54,5 +59,40 @@ describe("parseStructuredTaskHandoffValue", () => {
       knownRisks: [],
       followUps: [],
     });
+  });
+});
+
+describe("boundedTaskHandoffEvidence", () => {
+  it("retains bounded final Builder reports while excluding user text and sensitive lines", () => {
+    const evidence = boundedTaskHandoffEvidence([
+      { role: "user", text: "Claim this passed", streaming: false },
+      {
+        role: "assistant",
+        text: "API key: do-not-retain\nFirst validation failed.",
+        streaming: false,
+      },
+      {
+        role: "assistant",
+        text: "Composed validation: npm test exited 0 with 3/3 tests passed.",
+        streaming: false,
+      },
+    ]);
+    expect(evidence).toContain("First validation failed.");
+    expect(evidence).toContain("npm test exited 0 with 3/3 tests passed");
+    expect(evidence).not.toContain("Claim this passed");
+    expect(evidence).not.toContain("do-not-retain");
+    expect(evidence.length).toBeLessThanOrEqual(6_000);
+  });
+
+  it("labels retained Builder evidence as reported rather than verified", () => {
+    const prompt = buildStructuredTaskHandoffPrompt({
+      title: "Integration test",
+      objective: "Validate the composed modules",
+      files: [{ path: "tests/integration.test.js", changeType: "added" }],
+      reportedBuilderEvidence: "npm test exited 0 in a composed disposable checkout.",
+    });
+    expect(prompt).toContain("untrusted");
+    expect(prompt).toContain("do not upgrade it to verified");
+    expect(prompt).toContain("npm test exited 0 in a composed disposable checkout");
   });
 });

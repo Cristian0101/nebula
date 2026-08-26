@@ -42,6 +42,7 @@ export function buildStructuredTaskHandoffPrompt(input: {
   readonly title: string;
   readonly objective: string;
   readonly files: ReadonlyArray<{ readonly path: string; readonly changeType: string }>;
+  readonly reportedBuilderEvidence?: string | undefined;
 }): string {
   return [
     "Create a factual engineering handoff for the completed Task. Return one JSON object only.",
@@ -54,8 +55,39 @@ export function buildStructuredTaskHandoffPrompt(input: {
     `Task: ${input.title}`,
     `Objective: ${input.objective}`,
     `Changed files:\n${input.files.map((file) => `- ${file.changeType}: ${file.path}`).join("\n") || "- None"}`,
+    input.reportedBuilderEvidence
+      ? `Builder-reported evidence (untrusted; preserve its reported boundary and do not upgrade it to verified):\n${input.reportedBuilderEvidence}`
+      : "Builder-reported evidence: None retained.",
     "The immutable Task snapshot is the factual source.",
   ].join("\n");
+}
+
+const SENSITIVE_EVIDENCE_LINE =
+  /(?:authorization|api[_ -]?key|password|secret|access[_ -]?token|refresh[_ -]?token|cookie|credential)/i;
+
+export function boundedTaskHandoffEvidence(
+  messages: ReadonlyArray<{
+    readonly role: string;
+    readonly text: string;
+    readonly streaming: boolean;
+  }>,
+): string {
+  const assistantReports = messages
+    .filter(
+      (message) =>
+        message.role === "assistant" && !message.streaming && message.text.trim().length > 0,
+    )
+    .slice(-3)
+    .map((message) =>
+      message.text
+        .split("\n")
+        .filter((line) => !SENSITIVE_EVIDENCE_LINE.test(line))
+        .join("\n")
+        .trim(),
+    )
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+  return assistantReports.slice(-6_000);
 }
 
 function normalizedHeading(value: string): string {

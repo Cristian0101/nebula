@@ -41,6 +41,7 @@ export type GenerateArchitectPlanInput = CommandInput<"architect.plan.generate">
 export type RejectArchitectPlanInput = CommandInput<"architect.plan.reject">;
 export type ApproveArchitectPlanInput = CommandInput<"architect.plan.approve">;
 export type CreateMissionInput = CommandInput<"mission.create">;
+export type ApproveMissionCheckpointInput = CommandInput<"mission.checkpoint.approve">;
 export type UpdateMissionInput = CommandInput<"mission.update">;
 export type AddMissionTaskInput = CommandInput<"mission.task.add">;
 export type RemoveMissionTaskInput = CommandInput<"mission.task.remove">;
@@ -250,6 +251,7 @@ const missionCommand = <
     | "mission.activate"
     | "mission.complete"
     | "mission.cancel"
+    | "mission.checkpoint.approve"
     | "mission.run.start"
     | "mission.run.pause"
     | "mission.run.resume"
@@ -272,6 +274,10 @@ const missionCommand = <
 export const createMission: (input: CreateMissionInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.createMission",
 )((input) => missionCommand("mission.create", input));
+export const approveMissionCheckpoint: (input: ApproveMissionCheckpointInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.approveMissionCheckpoint")((input) =>
+    missionCommand("mission.checkpoint.approve", input),
+  );
 export const updateMission: (input: UpdateMissionInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.updateMission",
 )((input) => missionCommand("mission.update", input));

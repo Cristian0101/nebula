@@ -711,6 +711,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         observedHeadCommit: null,
         architectProviderInstanceId: selection.instanceId,
         architectModelSelection: selection,
+        ...(command.team ? { team: command.team } : {}),
+        lifecycle: {
+          phase: "validating_repository" as const,
+          attempt: 1,
+          startedAt: command.createdAt,
+          lastProgressAt: command.createdAt,
+          completedAt: null,
+          failureCategory: null,
+        },
+        attempts: [
+          {
+            number: 1,
+            providerInstanceId: selection.instanceId,
+            model: selection.model,
+            startedAt: command.createdAt,
+            completedAt: null,
+            lastPhase: "validating_repository" as const,
+            outcome: "running" as const,
+            failureCategory: null,
+            failureReason: null,
+          },
+        ],
         contextFingerprint: "pending",
         contextPaths: command.contextPaths ?? [],
         resourcePolicyFingerprint: "pending",
@@ -755,6 +777,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           proposal: command.plan.proposal,
           planningBaseCommit: command.plan.planningBaseCommit,
           resources: project.sharedResources ?? [],
+          ...(command.plan.team ? { team: command.plan.team } : {}),
+          qualityGateIds: (project.qualityPolicy?.gates ?? [])
+            .filter((gate) => gate.enabled)
+            .map((gate) => gate.id),
           validatedAt: command.createdAt,
         });
         const supplied = command.plan.validation;
@@ -840,6 +866,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         proposal: plan.proposal,
         planningBaseCommit: plan.planningBaseCommit,
         resources: project.sharedResources ?? [],
+        ...(plan.team ? { team: plan.team } : {}),
+        qualityGateIds: (project.qualityPolicy?.gates ?? [])
+          .filter((gate) => gate.enabled)
+          .map((gate) => gate.id),
         validatedAt: command.createdAt,
       });
       if (validation.errors.length > 0)
@@ -877,6 +907,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           description: plan.proposal.description ?? null,
           baseCommit: plan.planningBaseCommit,
           architectPlanProposalId: plan.id,
+          checkpoints: (plan.proposal.checkpoints ?? []).map((checkpoint) => ({
+            key: checkpoint.key,
+            name: checkpoint.name,
+            requiredTaskIds: checkpoint.requiredTaskKeys.map((key) => taskIds.get(key)!),
+            unlockTaskIds: checkpoint.unlockTaskKeys.map((key) => taskIds.get(key)!),
+            requiredGateIds: checkpoint.requiredGateIds,
+            reviewsRequired: checkpoint.reviewsRequired,
+            humanApprovalRequired: checkpoint.humanApprovalRequired,
+            humanApprovedAt: null,
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+          })),
           createdAt: command.createdAt,
         },
       ];
@@ -997,7 +1039,99 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           description: command.description ?? null,
           baseCommit: command.baseCommit ?? null,
           architectPlanProposalId: command.architectPlanProposalId ?? null,
+          checkpoints: command.checkpoints ?? [],
           createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "mission.checkpoint.approve": {
+      const mission = yield* requireMission({ readModel, command, missionId: command.missionId });
+      if (mission.projectId !== command.projectId)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Checkpoint and Mission must belong to the same Project.",
+        });
+      const checkpoint = (mission.checkpoints ?? []).find(
+        (candidate) => candidate.key === command.checkpointKey,
+      );
+      if (!checkpoint)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Checkpoint '${command.checkpointKey}' was not found.`,
+        });
+      if (!checkpoint.humanApprovalRequired)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "This checkpoint does not require human approval.",
+        });
+      if (checkpoint.humanApprovedAt !== null) {
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: "mission",
+            aggregateId: mission.id,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "mission.checkpoint-approved" as const,
+          payload: {
+            missionId: mission.id,
+            checkpointKey: checkpoint.key,
+            approvedAt: checkpoint.humanApprovedAt,
+            updatedAt: checkpoint.updatedAt,
+          },
+        };
+      }
+      const requiredTasks = checkpoint.requiredTaskIds.map((taskId) =>
+        (readModel.tasks ?? []).find((task) => task.id === taskId),
+      );
+      if (requiredTasks.some((task) => task?.status !== "completed"))
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Checkpoint prerequisite Tasks must complete before human approval.",
+        });
+      for (const task of requiredTasks) {
+        if (!task) continue;
+        for (const gateId of checkpoint.requiredGateIds) {
+          const passed = (task.qualityGateRuns ?? []).some(
+            (run) =>
+              run.gateId === gateId &&
+              run.status === "passed" &&
+              run.snapshotId === task.reviewSnapshot?.id,
+          );
+          if (!passed)
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Checkpoint quality gate '${gateId}' has not passed for Task '${task.title}'.`,
+            });
+        }
+        if (
+          checkpoint.reviewsRequired &&
+          !(task.reviews ?? []).some(
+            (review) =>
+              review.status === "completed" &&
+              review.snapshotId === task.reviewSnapshot?.id &&
+              (review.verdict === "approve" || review.verdict === "approve_with_notes"),
+          )
+        )
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Checkpoint review has not been approved for Task '${task.title}'.`,
+          });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.checkpoint-approved" as const,
+        payload: {
+          missionId: mission.id,
+          checkpointKey: checkpoint.key,
+          approvedAt: command.createdAt,
           updatedAt: command.createdAt,
         },
       };

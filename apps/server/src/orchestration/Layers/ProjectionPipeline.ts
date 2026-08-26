@@ -17,6 +17,7 @@ import {
   TaskResourceComplianceState,
   OwnershipRequest,
   MissionRun,
+  MissionCheckpoint,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -118,6 +119,12 @@ const decodeOwnershipRequests = Schema.decodeSync(
   Schema.fromJsonString(Schema.Array(OwnershipRequest)),
 );
 const encodeMissionRun = Schema.encodeSync(Schema.fromJsonString(MissionRun));
+const encodeMissionCheckpoints = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(MissionCheckpoint)),
+);
+const decodeMissionCheckpoints = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Array(MissionCheckpoint)),
+);
 const decodeTaskReviewSnapshot = Schema.decodeSync(Schema.fromJsonString(TaskReviewSnapshot));
 const decodeTaskHandoff = Schema.decodeSync(Schema.fromJsonString(TaskHandoff));
 const decodeTaskRestore = Schema.decodeUnknownEffect(Schema.fromJsonString(TaskRestoreState));
@@ -1694,18 +1701,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             INSERT INTO projection_missions (
               mission_id, project_id, title, objective, description, status,
               integration_batch_id, created_at, updated_at, activated_at, completed_at, cancelled_at,
-              base_commit, architect_plan_proposal_id
+              base_commit, architect_plan_proposal_id, checkpoints_json
             ) VALUES (
               ${event.payload.missionId}, ${event.payload.projectId}, ${event.payload.title},
               ${event.payload.objective}, ${event.payload.description}, 'draft', NULL,
               ${event.payload.createdAt}, ${event.payload.updatedAt}, NULL, NULL, NULL,
-              ${event.payload.baseCommit ?? null}, ${event.payload.architectPlanProposalId ?? null}
+              ${event.payload.baseCommit ?? null}, ${event.payload.architectPlanProposalId ?? null},
+              ${encodeMissionCheckpoints(event.payload.checkpoints ?? [])}
             ) ON CONFLICT (mission_id) DO UPDATE SET
               project_id = excluded.project_id, title = excluded.title,
               objective = excluded.objective, description = excluded.description,
               updated_at = excluded.updated_at,
               base_commit = excluded.base_commit,
-              architect_plan_proposal_id = excluded.architect_plan_proposal_id
+              architect_plan_proposal_id = excluded.architect_plan_proposal_id,
+              checkpoints_json = excluded.checkpoints_json
           `.pipe(Effect.mapError(toPersistenceSqlError("ProjectionMissions.created:query")));
           yield* appendMissionActivity({
             missionId: event.payload.missionId,
@@ -1716,6 +1725,43 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             occurredAt: event.occurredAt,
           });
           return;
+        case "mission.checkpoint-approved": {
+          const rows = yield* sql<{
+            checkpoints_json: string;
+          }>`SELECT checkpoints_json FROM projection_missions WHERE mission_id = ${event.payload.missionId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.checkpointRead:query")),
+          );
+          const checkpoints = decodeMissionCheckpoints(rows[0]?.checkpoints_json ?? "[]");
+          if (
+            checkpoints.some(
+              (checkpoint) =>
+                checkpoint.key === event.payload.checkpointKey &&
+                checkpoint.humanApprovedAt !== null,
+            )
+          )
+            return;
+          const updatedCheckpoints = checkpoints.map((checkpoint) =>
+            checkpoint.key === event.payload.checkpointKey
+              ? {
+                  ...checkpoint,
+                  humanApprovedAt: event.payload.approvedAt,
+                  updatedAt: event.payload.updatedAt,
+                }
+              : checkpoint,
+          );
+          yield* sql`UPDATE projection_missions SET checkpoints_json = ${encodeMissionCheckpoints(updatedCheckpoints)}, updated_at = ${event.payload.updatedAt} WHERE mission_id = ${event.payload.missionId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.checkpointApproved:query")),
+          );
+          yield* appendMissionActivity({
+            missionId: event.payload.missionId,
+            eventId: event.eventId,
+            type: event.type,
+            summary: `Checkpoint approved: ${event.payload.checkpointKey}`,
+            taskId: null,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        }
         case "mission.updated":
           yield* sql`UPDATE projection_missions SET title = ${event.payload.title}, objective = ${event.payload.objective}, description = ${event.payload.description}, updated_at = ${event.payload.updatedAt} WHERE mission_id = ${event.payload.missionId}`.pipe(
             Effect.mapError(toPersistenceSqlError("ProjectionMissions.updated:query")),

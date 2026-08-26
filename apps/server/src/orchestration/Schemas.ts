@@ -9,6 +9,7 @@ import {
   ArchitectPlanPayload as ContractsArchitectPlanPayloadSchema,
   ProjectDeletedPayload as ContractsProjectDeletedPayloadSchema,
   MissionCreatedPayload as ContractsMissionCreatedPayloadSchema,
+  MissionCheckpointApprovedPayload as ContractsMissionCheckpointApprovedPayloadSchema,
   MissionUpdatedPayload as ContractsMissionUpdatedPayloadSchema,
   MissionTaskMembershipPayload as ContractsMissionTaskMembershipPayloadSchema,
   MissionTasksReorderedPayload as ContractsMissionTasksReorderedPayloadSchema,
@@ -99,6 +100,7 @@ export const ResourceLeasesPayload = ContractsResourceLeasesPayloadSchema;
 export const ArchitectPlanPayload = ContractsArchitectPlanPayloadSchema;
 export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema;
 export const MissionCreatedPayload = ContractsMissionCreatedPayloadSchema;
+export const MissionCheckpointApprovedPayload = ContractsMissionCheckpointApprovedPayloadSchema;
 export const MissionUpdatedPayload = ContractsMissionUpdatedPayloadSchema;
 export const MissionTaskMembershipPayload = ContractsMissionTaskMembershipPayloadSchema;
 export const MissionTasksReorderedPayload = ContractsMissionTasksReorderedPayloadSchema;

@@ -116,7 +116,7 @@ const seed = Effect.gen(function* () {
 const createMission = (
   id = missionId,
   architectPlanProposalId?: ArchitectPlanProposalId,
-): OrchestrationCommand => ({
+): Extract<OrchestrationCommand, { type: "mission.create" }> => ({
   type: "mission.create",
   commandId: CommandId.make(`create-${id}`),
   missionId: id,
@@ -190,6 +190,59 @@ const addDependency = (
 });
 
 it.layer(NodeServices.layer)("Mission decider", (it) => {
+  it.effect("enforces and idempotently records human checkpoint approval", () =>
+    Effect.gen(function* () {
+      let model = yield* seed;
+      model = yield* apply(model, {
+        ...createMission(),
+        checkpoints: [
+          {
+            key: "foundation",
+            name: "Foundation review",
+            requiredTaskIds: [taskA],
+            unlockTaskIds: [taskB],
+            requiredGateIds: [],
+            reviewsRequired: false,
+            humanApprovalRequired: true,
+            humanApprovedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+      model = yield* apply(model, addTask(missionId, taskA));
+
+      const command = {
+        type: "mission.checkpoint.approve" as const,
+        commandId: CommandId.make("approve-foundation"),
+        missionId,
+        projectId,
+        checkpointKey: "foundation",
+        createdAt: now,
+      };
+      const blocked = yield* Effect.flip(decideOrchestrationCommand({ readModel: model, command }));
+      expect(blocked.message).toContain("prerequisite Tasks must complete");
+
+      model = {
+        ...model,
+        tasks: model.tasks?.map((task) =>
+          task.id === taskA ? { ...task, status: "completed" as const, completedAt: now } : task,
+        ),
+      };
+      model = yield* apply(model, command);
+      model = yield* apply(model, {
+        ...command,
+        commandId: CommandId.make("approve-foundation-again"),
+      });
+      expect(model.missions?.[0]?.checkpoints?.[0]?.humanApprovedAt).toBe(now);
+      expect(
+        model.missions?.[0]?.activities.filter(
+          (activity) => activity.type === "mission.checkpoint-approved",
+        ),
+      ).toHaveLength(1);
+    }),
+  );
+
   it.effect("persists explicit membership and rejects cycles with the cycle path", () =>
     Effect.gen(function* () {
       let model = yield* seed;
