@@ -1,51 +1,32 @@
-# Work with provider sessions in Terminal Center
+# Work across Projects in Terminal Center
 
-During supervised recovery, Terminal Center keeps one visible node for the canonical Task's current provider attempt. Earlier attempt Threads stay durable and can be opened explicitly. See [Recover and route supervised Missions](recovery-routing.md).
+Terminal Center has two levels:
 
-Terminal Center is Nebula's freeform manual provider workspace. Open a Project to reach **Project Home**, then choose **Open Terminal Center**. You can also open it from Project settings or the command palette. It works with zero Tasks and zero Missions: choose a configured provider and Nebula creates one canonical Thread, ready for its first prompt.
+- **Global Terminal Center** answers what is running across every Project. It uses lightweight Project columns so many live sessions remain inexpensive to supervise.
+- **Project Terminal Workspace** is where you work. It embeds live shells, provider Threads, approved processes, previews, tests, logs, and Git status in one persistent layout.
 
-**Global Terminal Center** is available from the sidebar and command palette. It supervises canonical Threads from several Projects on one canvas. Choose a Project, provider, model, and optionally an approved Dev Server profile when creating a session. Global launch always uses the current checkout; use the Project Terminal Center when you need an isolated Task worktree.
+Choose **Terminal Center** in the sidebar for the global view. Choose a Project tab or a Project column to open that Project's last-used Terminal Workspace.
 
-## Configure quick launch
+## Global supervision
 
-The first provider launch asks for a Project preference:
+Each Project column summarizes the panes that are intentionally visible in its active Workspace. A hidden Thread does not reappear just because its canonical conversation still exists. Running Dev Servers remain visible as Project activity even when their pane is hidden.
 
-- **Current project checkout** creates a writable Thread in the Project checkout. When more than one writable Thread shares it, Terminal Center shows a persistent shared-checkout warning.
-- **New isolated Task-backed workspace** creates a canonical draft Builder Task, records the explicit write path you choose, prepares the existing Task worktree, and binds the new Thread to it. Terminal Center never silently grants `WRITE **`.
+The Active Threads sidebar uses the same canonical Threads as Chat and Swarm. **Open Thread** opens the conversation. **Focus in Workspace** explicitly adds or restores a pane reference and opens it in the Project Workspace; it does not duplicate the Thread.
 
-The chosen workspace mode and provider model are reused for later one-click launches. Provider availability comes from the configured provider registry. Disabled or unavailable providers stay visible with the reason they cannot launch.
+## Project work
 
-Creating a node does not execute the provider. Select or focus it and send the first prompt through the existing Thread composer when you are ready.
+A Project's first visit creates a **Default** Terminal Workspace with one live Shell rooted in the Project. Empty cells expose **Add pane**. Additional named Workspaces—such as Release or Frontend—remember their own pane membership, layout, positions, sizes, selection, and viewport.
 
-## Organize the canvas
+A Terminal Workspace is UI composition. It is not a Git worktree. Panes may point at the current checkout or an existing isolated worktree without changing that distinction.
 
-Pan the background, use the mouse wheel to zoom, drag node headers, and choose **Fit all** to frame the visible workspace. The **Arrange** menu offers:
+See [Terminal Workspaces](terminal-workspaces.md) for pane and layout behavior, [Dev Servers](dev-servers.md) for command approval and lifecycle, and [Preview Stage](preview-stage.md) for the large live-app view.
 
-- **Grid** for a regular overview.
-- **Project columns** grouped by Project. This is most useful in Global Terminal Center.
-- **Provider columns** grouped by configured provider instance.
-- **Status lanes** grouped into Ready, Working, and Needs attention.
-- **Mission flow** using canonical Mission dependency waves for Task-backed Threads.
-- **Radial** with the selected Thread in the center.
-- **Compact** for a dense many-session overview.
-- **Freeform** to preserve manual positions.
+## Persistence and hiding
 
-The selected layout, node positions, viewport, visible Thread IDs, and quick-launch preference are local UI settings. Task and Thread projections never contain canvas coordinates. Restarting Nebula restores the same canvas over the same server-persisted Threads.
+**Hide pane** removes only that pane from the visible Workspace. It does not delete its Thread or terminate its shell, test watcher, or Dev Server. The **Hidden panes** menu restores panes intentionally.
 
-Global and Project canvases persist independently. Their membership, layout, manual positions, viewport, and selection do not overwrite one another.
+Workspace hydration treats saved pane membership as authoritative. Navigation and restart preserve hidden panes, layout mode, placement, selection, and the last Workspace used for each Project. Use the existing Thread deletion flow when you actually intend to delete a canonical conversation.
 
-## Work with Threads, Tasks, and Dev Servers
+## Swarm relationship
 
-Unselected nodes show a lightweight preview rather than mounting complete histories. Single-click selects a node; double-click or Enter focuses it. **Focus** mounts the existing Thread workspace—messages, composer, provider stream, tools, terminal, and supported model controls. Press Escape or choose **Canvas** to return. Exactly one heavyweight Thread workspace is mounted at a time.
-
-When a Project has an approved Dev Server profile, nodes show its live status and preferred port. Select a node to start, stop, restart, preview, or open logs. The server is a dedicated canonical terminal process tied to that Thread workspace; completing a provider turn or hiding the canvas node does not stop it.
-
-Use **Add thread** to place an existing Project Thread or Task Thread on the canvas. Mission Flow uses the Task's existing Mission membership and dependencies. Removing a node only hides it from this canvas; it does not delete the Thread, cancel a Task, or remove a workspace.
-
-Terminal Center and Command Deck are complementary. Terminal Center is for freeform provider sessions and spatial focus switching. Command Deck remains the structured Task, Mission, review, and Integration surface. While a Supervised Mission Run is active, its Task Threads are added to the canvas and the existing **Mission flow** layout remains available.
-
-Each node shows a textual **Ready**, **Working**, or **Needs attention** state alongside its current action. The border, tint, and shadow transition only when canonical Thread state changes; there is no decorative timer or simulated activity. Reduced-motion preferences disable those transitions.
-
-## Current scope
-
-Project and Global Terminal Center, quick provider launch, automatic layouts, freeform spatial layout, approved Dev Servers, Supervised Run Thread discovery, and Swarm Mission Flow are **implemented**. Canvas edges are reserved for canonical Mission dependencies; Terminal Center does not invent agent-to-agent communication.
+Terminal Center is the manual multi-Project engineering workspace. Swarm remains the supervised multi-agent team. Both surfaces reference the same canonical Projects, Threads, Tasks, worktrees, provider runs, and process infrastructure.
