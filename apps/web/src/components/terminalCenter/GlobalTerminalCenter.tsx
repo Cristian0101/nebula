@@ -244,14 +244,14 @@ export function GlobalTerminalCenterPage() {
   useEffect(() => {
     if (initializedRef.current || threads.length === 0) return;
     initializedRef.current = true;
-    if (state.visibleThreadIds.length > 0) return;
+    if (state.membershipInitialized) return;
     threads
       .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .slice(0, MAX_INITIAL_NODES)
       .forEach((thread, index) =>
         showThread(GLOBAL_CANVAS_KEY, thread.id, nextFreeformPosition({}, index)),
       );
-  }, [showThread, state.visibleThreadIds.length, threads]);
+  }, [showThread, state.membershipInitialized, threads]);
 
   const selectedGroup = groups.find((group) => group.projectKey === selectedProjectKey) ?? null;
   const selectedProject =

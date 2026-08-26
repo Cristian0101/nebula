@@ -10,6 +10,15 @@ import {
   type TerminalCenterProjectState,
   type TerminalCenterQuickLaunchProfile,
 } from "./components/terminalCenter/terminalCenterLogic";
+import {
+  TERMINAL_WORKSPACE_LAYOUTS,
+  TERMINAL_WORKSPACE_PANE_TYPES,
+  normalizeGridPlacement,
+  type TerminalWorkspace,
+  type TerminalWorkspaceFreeformPlacement,
+  type TerminalWorkspacePane,
+  type TerminalWorkspaceProjectState,
+} from "./components/terminalCenter/terminalWorkspace";
 
 export const PERSISTED_STATE_KEY = "t3code:ui-state:v1";
 const THREAD_CHANGED_FILES_EXPANSION_VERSION = 1;
@@ -37,6 +46,7 @@ export interface PersistedUiState {
   threadChangedFilesExpansionVersion?: typeof THREAD_CHANGED_FILES_EXPANSION_VERSION;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   terminalCenterByProjectId?: Record<string, TerminalCenterProjectState>;
+  terminalWorkspacesByProjectId?: Record<string, TerminalWorkspaceProjectState>;
 }
 
 export interface UiProjectState {
@@ -55,6 +65,7 @@ export interface UiEndpointState {
 
 export interface UiTerminalCenterState {
   terminalCenterByProjectId: Record<string, TerminalCenterProjectState>;
+  terminalWorkspacesByProjectId: Record<string, TerminalWorkspaceProjectState>;
 }
 
 export interface UiState
@@ -67,7 +78,119 @@ const initialState: UiState = {
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
   terminalCenterByProjectId: {},
+  terminalWorkspacesByProjectId: {},
 };
+
+function sanitizeFreeformPlacement(value: unknown): TerminalWorkspaceFreeformPlacement {
+  const candidate = (value ?? {}) as Partial<TerminalWorkspaceFreeformPlacement>;
+  return {
+    x: Number.isFinite(candidate.x) ? candidate.x! : 24,
+    y: Number.isFinite(candidate.y) ? candidate.y! : 24,
+    width: Number.isFinite(candidate.width) ? Math.max(240, candidate.width!) : 560,
+    height: Number.isFinite(candidate.height) ? Math.max(180, candidate.height!) : 360,
+    z: Number.isFinite(candidate.z) ? Math.max(1, Math.round(candidate.z!)) : 1,
+  };
+}
+
+function sanitizeWorkspacePane(value: unknown): TerminalWorkspacePane | null {
+  if (!value || typeof value !== "object") return null;
+  const pane = value as Partial<TerminalWorkspacePane>;
+  if (
+    typeof pane.id !== "string" ||
+    pane.id.length === 0 ||
+    !TERMINAL_WORKSPACE_PANE_TYPES.includes(pane.type as TerminalWorkspacePane["type"]) ||
+    typeof pane.workspacePath !== "string" ||
+    pane.workspacePath.length === 0
+  )
+    return null;
+  const createdAt = typeof pane.createdAt === "string" ? pane.createdAt : new Date(0).toISOString();
+  return {
+    id: pane.id,
+    type: pane.type as TerminalWorkspacePane["type"],
+    title: typeof pane.title === "string" && pane.title.length > 0 ? pane.title : "Pane",
+    threadId: typeof pane.threadId === "string" ? pane.threadId : null,
+    providerInstanceId:
+      typeof pane.providerInstanceId === "string" ? pane.providerInstanceId : null,
+    terminalId: typeof pane.terminalId === "string" ? pane.terminalId : null,
+    devServerProfileId:
+      typeof pane.devServerProfileId === "string" ? pane.devServerProfileId : null,
+    attachedPaneId: typeof pane.attachedPaneId === "string" ? pane.attachedPaneId : null,
+    command: typeof pane.command === "string" ? pane.command : null,
+    previewUrl: typeof pane.previewUrl === "string" ? pane.previewUrl : null,
+    workspacePath: pane.workspacePath,
+    grid: normalizeGridPlacement(pane.grid),
+    freeform: sanitizeFreeformPlacement(pane.freeform),
+    visible: pane.visible !== false,
+    createdAt,
+    updatedAt: typeof pane.updatedAt === "string" ? pane.updatedAt : createdAt,
+  };
+}
+
+function sanitizeTerminalWorkspaces(value: unknown): Record<string, TerminalWorkspaceProjectState> {
+  if (!value || typeof value !== "object") return {};
+  const result: Record<string, TerminalWorkspaceProjectState> = {};
+  for (const [projectId, raw] of Object.entries(value)) {
+    if (!projectId || !raw || typeof raw !== "object") continue;
+    const candidate = raw as Partial<TerminalWorkspaceProjectState>;
+    const workspaces = (Array.isArray(candidate.workspaces) ? candidate.workspaces : []).flatMap(
+      (rawWorkspace): TerminalWorkspace[] => {
+        if (!rawWorkspace || typeof rawWorkspace !== "object") return [];
+        const workspace = rawWorkspace as Partial<TerminalWorkspace>;
+        if (typeof workspace.id !== "string" || workspace.id.length === 0) return [];
+        const panes = (Array.isArray(workspace.panes) ? workspace.panes : []).flatMap((pane) => {
+          const sanitized = sanitizeWorkspacePane(pane);
+          return sanitized ? [sanitized] : [];
+        });
+        const createdAt =
+          typeof workspace.createdAt === "string" ? workspace.createdAt : new Date(0).toISOString();
+        return [
+          {
+            id: workspace.id,
+            name:
+              typeof workspace.name === "string" && workspace.name.length > 0
+                ? workspace.name
+                : "Workspace",
+            layout: TERMINAL_WORKSPACE_LAYOUTS.includes(
+              workspace.layout as TerminalWorkspace["layout"],
+            )
+              ? (workspace.layout as TerminalWorkspace["layout"])
+              : "grid",
+            splitDirection: workspace.splitDirection === "vertical" ? "vertical" : "horizontal",
+            panes,
+            selectedPaneId:
+              typeof workspace.selectedPaneId === "string" ? workspace.selectedPaneId : null,
+            focusedPaneId:
+              typeof workspace.focusedPaneId === "string" ? workspace.focusedPaneId : null,
+            viewport:
+              workspace.viewport &&
+              Number.isFinite(workspace.viewport.x) &&
+              Number.isFinite(workspace.viewport.y) &&
+              Number.isFinite(workspace.viewport.zoom)
+                ? {
+                    x: workspace.viewport.x,
+                    y: workspace.viewport.y,
+                    zoom: Math.min(2, Math.max(0.5, workspace.viewport.zoom)),
+                  }
+                : { x: 0, y: 0, zoom: 1 },
+            createdAt,
+            updatedAt: typeof workspace.updatedAt === "string" ? workspace.updatedAt : createdAt,
+          },
+        ];
+      },
+    );
+    if (workspaces.length === 0) continue;
+    result[projectId] = {
+      initialized: true,
+      activeWorkspaceId:
+        typeof candidate.activeWorkspaceId === "string" &&
+        workspaces.some((workspace) => workspace.id === candidate.activeWorkspaceId)
+          ? candidate.activeWorkspaceId
+          : workspaces[0]!.id,
+      workspaces,
+    };
+  }
+  return result;
+}
 
 function sanitizeTerminalCenterState(value: unknown): Record<string, TerminalCenterProjectState> {
   if (!value || typeof value !== "object") return {};
@@ -92,6 +215,7 @@ function sanitizeTerminalCenterState(value: unknown): Record<string, TerminalCen
     );
     const viewport = candidate.viewport;
     result[projectId] = {
+      membershipInitialized: candidate.membershipInitialized !== false,
       visibleThreadIds: sanitizeStringArray(candidate.visibleThreadIds),
       positions,
       freeformPositions,
@@ -204,6 +328,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
         ? parsed.defaultAdvertisedEndpointKey
         : null,
     terminalCenterByProjectId: sanitizeTerminalCenterState(parsed.terminalCenterByProjectId),
+    terminalWorkspacesByProjectId: sanitizeTerminalWorkspaces(parsed.terminalWorkspacesByProjectId),
   };
 }
 
@@ -277,6 +402,7 @@ export function persistState(state: UiState): void {
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
         terminalCenterByProjectId: state.terminalCenterByProjectId,
+        terminalWorkspacesByProjectId: state.terminalWorkspacesByProjectId,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -477,6 +603,10 @@ interface UiStateStore extends UiState {
     projectId: string,
     profile: TerminalCenterQuickLaunchProfile,
   ) => void;
+  setTerminalWorkspaceProjectState: (
+    projectId: string,
+    state: TerminalWorkspaceProjectState,
+  ) => void;
 }
 
 function projectTerminalState(state: UiState, projectId: string): TerminalCenterProjectState {
@@ -512,6 +642,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
           ...state.terminalCenterByProjectId,
           [projectId]: {
             ...current,
+            membershipInitialized: true,
             visibleThreadIds: [...current.visibleThreadIds, threadId],
             selectedThreadId: threadId,
             positions: point ? { ...current.positions, [threadId]: point } : current.positions,
@@ -532,6 +663,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
           ...state.terminalCenterByProjectId,
           [projectId]: {
             ...current,
+            membershipInitialized: true,
             visibleThreadIds: current.visibleThreadIds.filter((id) => id !== threadId),
             selectedThreadId:
               current.selectedThreadId === threadId ? null : current.selectedThreadId,
@@ -605,6 +737,13 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
         },
       };
     }),
+  setTerminalWorkspaceProjectState: (projectId, terminalWorkspaceState) =>
+    set((state) => ({
+      terminalWorkspacesByProjectId: {
+        ...state.terminalWorkspacesByProjectId,
+        [projectId]: terminalWorkspaceState,
+      },
+    })),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

@@ -27,6 +27,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
     terminalCenterByProjectId: {},
+    terminalWorkspacesByProjectId: {},
     ...overrides,
   };
 }
@@ -219,6 +220,7 @@ describe("parsePersistedState", () => {
         },
       },
       terminalCenterByProjectId: {},
+      terminalWorkspacesByProjectId: {},
     });
 
     expect(parsed).toEqual({
@@ -237,6 +239,7 @@ describe("parsePersistedState", () => {
         },
       },
       terminalCenterByProjectId: {},
+      terminalWorkspacesByProjectId: {},
     });
   });
 
@@ -358,6 +361,7 @@ describe("uiStateStore persistence", () => {
         },
       },
       terminalCenterByProjectId: {},
+      terminalWorkspacesByProjectId: {},
     });
     expect(parsePersistedState(persisted)).toEqual({
       ...state,
