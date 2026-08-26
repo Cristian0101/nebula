@@ -195,6 +195,7 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
       let model = yield* seed;
       model = yield* apply(model, {
         ...createMission(),
+        taskIds: [taskA, taskB],
         checkpoints: [
           {
             key: "foundation",
@@ -204,13 +205,9 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
             requiredGateIds: [],
             reviewsRequired: false,
             humanApprovalRequired: true,
-            humanApprovedAt: null,
-            createdAt: now,
-            updatedAt: now,
           },
         ],
       });
-      model = yield* apply(model, addTask(missionId, taskA));
 
       const command = {
         type: "mission.checkpoint.approve" as const,
@@ -240,6 +237,44 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
           (activity) => activity.type === "mission.checkpoint-approved",
         ),
       ).toHaveLength(1);
+    }),
+  );
+
+  it.effect("rejects duplicate and out-of-scope checkpoint inputs", () =>
+    Effect.gen(function* () {
+      const model = yield* seed;
+      const checkpoint = {
+        key: "foundation",
+        name: "Foundation review",
+        requiredTaskIds: [taskA],
+        unlockTaskIds: [taskB],
+        requiredGateIds: [],
+        reviewsRequired: false,
+        humanApprovalRequired: true,
+      };
+      const duplicate = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            ...createMission(),
+            taskIds: [taskA, taskB],
+            checkpoints: [checkpoint, checkpoint],
+          },
+        }),
+      );
+      expect(duplicate.message).toContain("checkpoint keys must be unique");
+
+      const outOfScope = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            ...createMission(),
+            taskIds: [taskA],
+            checkpoints: [checkpoint],
+          },
+        }),
+      );
+      expect(outOfScope.message).toContain("outside the Mission creation scope");
     }),
   );
 

@@ -483,7 +483,7 @@ export function projectEvent(
               objective: payload.objective,
               description: payload.description,
               status: "draft" as const,
-              taskIds: [],
+              taskIds: payload.taskIds ?? [],
               dependencies: [],
               checkpoints: payload.checkpoints ?? [],
               activities: [

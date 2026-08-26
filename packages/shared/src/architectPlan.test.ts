@@ -94,6 +94,21 @@ describe("validateArchitectPlan", () => {
       maxWritableConcurrency: 3,
     });
     expect(custom.startingSeats).toHaveLength(7);
+    expect(
+      createArchitectTeamConfiguration({
+        preset: "custom",
+        customCount: Number.NaN,
+        defaultModelSelection: null,
+      }).executionAgentCount,
+    ).toBe(4);
+    expect(
+      createArchitectTeamConfiguration({
+        preset: "custom",
+        customCount: Number.POSITIVE_INFINITY,
+        defaultModelSelection: null,
+      }).executionAgentCount,
+    ).toBe(4);
+    expect(custom.startingSeats.map((seat) => seat.label)).toContain("Functional reviewer 1");
   });
 
   it("validates team concurrency, reviewers, and named checkpoint references", () => {

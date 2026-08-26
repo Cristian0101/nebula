@@ -65,7 +65,7 @@ export function taskNeedsCompletionRecovery(
     readonly scheduledTaskIds: ReadonlyArray<string>;
   }>,
 ): boolean {
-  if (!taskNeedsOwnershipReconciliation(task)) return false;
+  if (!taskNeedsOwnershipReconciliation(task, missionRuns)) return false;
   if (task.ownership?.status !== "valid") return false;
   const snapshotId = task.reviewSnapshot?.status === "current" ? task.reviewSnapshot.id : null;
   if (

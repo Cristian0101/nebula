@@ -166,6 +166,7 @@ export function ArchitectPlanPanel({
         proposalId: plan.id,
         missionId: MissionId.make(randomUUID()),
         tasks: plan.proposal.tasks.map((task) => ({ key: task.key, taskId: newTaskId() })),
+        confirmTaskAssignments: true,
         acknowledgeWarnings: true,
         acknowledgeOriginalBaseline: plan.status === "stale",
       },
@@ -809,11 +810,12 @@ export function ArchitectPlanPanel({
       >
         <DialogPopup>
           <DialogHeader>
-            <DialogTitle>Approve Architect Plan?</DialogTitle>
+            <DialogTitle>Confirm assignments and approve?</DialogTitle>
             <DialogDescription>
-              This creates 1 draft Mission, {approvalPlan?.proposal?.tasks.length ?? 0} draft Tasks,
-              and {approvalPlan?.proposal?.dependencies.length ?? 0} dependencies. Nothing will
-              start. No worktrees, Threads, providers, or leases will be created.
+              You are confirming the displayed provider and model for every Task. This creates 1
+              draft Mission, {approvalPlan?.proposal?.tasks.length ?? 0} draft Tasks, and{" "}
+              {approvalPlan?.proposal?.dependencies.length ?? 0} dependencies. Nothing will start.
+              No worktrees, Threads, providers, or leases will be created.
               {approvalPlan?.status === "stale"
                 ? ` This explicitly uses original planning baseline ${approvalPlan.planningBaseCommit.slice(0, 8)}, not current HEAD ${approvalPlan.observedHeadCommit?.slice(0, 8) ?? "unknown"}.`
                 : ""}
@@ -827,7 +829,7 @@ export function ArchitectPlanPanel({
               disabled={working}
               onClick={() => approvalPlan && void approveSelected(approvalPlan)}
             >
-              Approve Plan
+              Confirm assignments and approve
             </Button>
           </DialogFooter>
         </DialogPopup>

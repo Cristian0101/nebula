@@ -84,6 +84,29 @@ describe("boundedTaskHandoffEvidence", () => {
     expect(evidence.length).toBeLessThanOrEqual(6_000);
   });
 
+  it("drops unlabeled provider tokens, JWTs, and private-key blocks", () => {
+    const evidence = boundedTaskHandoffEvidence([
+      {
+        role: "assistant",
+        streaming: false,
+        text: [
+          "Safe summary retained.",
+          "ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+          "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmaXh0dXJlIn0.fixture-signature",
+          "-----BEGIN PRIVATE KEY-----",
+          "ZmFrZS1rZXktbWF0ZXJpYWw=",
+          "-----END PRIVATE KEY-----",
+          "Safe validation retained.",
+        ].join("\n"),
+      },
+    ]);
+    expect(evidence).toContain("Safe summary retained.");
+    expect(evidence).toContain("Safe validation retained.");
+    expect(evidence).not.toContain("ghp_");
+    expect(evidence).not.toContain("eyJhbGci");
+    expect(evidence).not.toContain("ZmFrZS1rZXktbWF0ZXJpYWw");
+  });
+
   it("labels retained Builder evidence as reported rather than verified", () => {
     const prompt = buildStructuredTaskHandoffPrompt({
       title: "Integration test",

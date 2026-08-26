@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
+import { ArchitectPlanGenerationError } from "@t3tools/contracts";
 
 import { classifyArchitectPlanningFailure } from "./ArchitectPlanReactor.ts";
 
@@ -13,5 +14,16 @@ describe("Architect planning failure classification", () => {
     ["Unexpected planner failure", "unknown"],
   ] as const)("maps %s to %s", (message, category) => {
     expect(classifyArchitectPlanningFailure(message)).toBe(category);
+  });
+
+  it("uses the typed origin category instead of reclassifying its message", () => {
+    expect(
+      classifyArchitectPlanningFailure(
+        new ArchitectPlanGenerationError({
+          message: "Unexpected provider wording",
+          category: "transport_interrupted",
+        }),
+      ),
+    ).toBe("transport_interrupted");
   });
 });

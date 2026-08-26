@@ -1716,6 +1716,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               architect_plan_proposal_id = excluded.architect_plan_proposal_id,
               checkpoints_json = excluded.checkpoints_json
           `.pipe(Effect.mapError(toPersistenceSqlError("ProjectionMissions.created:query")));
+          yield* Effect.forEach(
+            event.payload.taskIds ?? [],
+            (taskId, position) =>
+              sql`INSERT OR IGNORE INTO projection_mission_tasks (mission_id, task_id, position, added_at) VALUES (${event.payload.missionId}, ${taskId}, ${position}, ${event.payload.createdAt})`.pipe(
+                Effect.mapError(toPersistenceSqlError("ProjectionMissions.created:tasks")),
+              ),
+            { discard: true },
+          );
           yield* appendMissionActivity({
             missionId: event.payload.missionId,
             eventId: event.eventId,

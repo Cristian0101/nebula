@@ -208,6 +208,12 @@ export function planMissionRunScheduling(input: {
         ...(checkpointsByUnlockedTask.get(taskId) ?? []),
         checkpoint,
       ]);
+  const checkpointStateByKey = new Map(
+    (input.mission.checkpoints ?? []).map((checkpoint) => [
+      checkpoint.key,
+      resolveMissionCheckpointState(checkpoint, input.tasks),
+    ]),
+  );
   const scheduled = new Set(
     input.run.scheduledTaskIds.filter((taskId) => taskById.get(taskId)?.status !== "completed"),
   );
@@ -246,7 +252,7 @@ export function planMissionRunScheduling(input: {
     if (!task || task.status !== "draft" || scheduled.has(taskId)) continue;
     const sourceTaskIds = prerequisites.get(taskId) ?? [];
     const checkpointBlocker = (checkpointsByUnlockedTask.get(taskId) ?? [])
-      .map((checkpoint) => resolveMissionCheckpointState(checkpoint, input.tasks))
+      .map((checkpoint) => checkpointStateByKey.get(checkpoint.key)!)
       .find((checkpointState) => checkpointState.state !== "passed");
     if (checkpointBlocker) {
       decisions.push({

@@ -252,9 +252,7 @@ export function providerExecutionFailureDetail(
     return thread.session?.lastError ?? "Builder provider execution failed.";
   if (thread.latestTurn?.state !== "completed") return null;
   const assistantMessage = thread.messages.findLast(
-    (message) =>
-      message.role === "assistant" &&
-      (message.turnId === null || message.turnId === thread.latestTurn?.turnId),
+    (message) => message.role === "assistant" && message.turnId === thread.latestTurn?.turnId,
   );
   const detail = assistantMessage?.text.trim() ?? "";
   if (

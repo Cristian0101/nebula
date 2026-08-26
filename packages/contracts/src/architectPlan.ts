@@ -3,6 +3,8 @@ import {
   ArchitectPlanProposalId,
   IsoDateTime,
   MissionId,
+  NonNegativeInt,
+  PositiveInt,
   ProjectId,
   SharedResourceId,
   TaskId,
@@ -53,7 +55,7 @@ export type ArchitectPlanningFailureCategory = typeof ArchitectPlanningFailureCa
 
 export const ArchitectPlanningLifecycle = Schema.Struct({
   phase: ArchitectPlanningPhase,
-  attempt: Schema.Number,
+  attempt: PositiveInt,
   startedAt: IsoDateTime,
   lastProgressAt: IsoDateTime,
   completedAt: Schema.NullOr(IsoDateTime),
@@ -62,7 +64,7 @@ export const ArchitectPlanningLifecycle = Schema.Struct({
 export type ArchitectPlanningLifecycle = typeof ArchitectPlanningLifecycle.Type;
 
 export const ArchitectPlanningAttempt = Schema.Struct({
-  number: Schema.Number,
+  number: PositiveInt,
   providerInstanceId: ProviderInstanceId,
   model: TrimmedNonEmptyString,
   startedAt: IsoDateTime,
@@ -104,8 +106,12 @@ export type ArchitectTeamSeat = typeof ArchitectTeamSeat.Type;
 
 export const ArchitectTeamConfiguration = Schema.Struct({
   preset: ArchitectTeamPreset,
-  executionAgentCount: Schema.Number,
-  maxWritableConcurrency: Schema.Number,
+  executionAgentCount: PositiveInt.check(
+    Schema.isLessThanOrEqualTo(ARCHITECT_PLAN_MAX_TEAM_AGENTS),
+  ),
+  maxWritableConcurrency: PositiveInt.check(
+    Schema.isLessThanOrEqualTo(ARCHITECT_PLAN_MAX_TEAM_AGENTS),
+  ),
   startingSeats: Schema.Array(ArchitectTeamSeat),
 });
 export type ArchitectTeamConfiguration = typeof ArchitectTeamConfiguration.Type;
@@ -238,9 +244,9 @@ export const ArchitectPlanValidation = Schema.Struct({
   status: Schema.Literals(["valid", "invalid"]),
   errors: Schema.Array(ArchitectPlanIssue),
   warnings: Schema.Array(ArchitectPlanIssue),
-  taskCount: Schema.Number,
-  edgeCount: Schema.Number,
-  waveCount: Schema.optional(Schema.Number),
+  taskCount: NonNegativeInt,
+  edgeCount: NonNegativeInt,
+  waveCount: Schema.optional(NonNegativeInt),
   validatedAt: IsoDateTime,
 });
 export type ArchitectPlanValidation = typeof ArchitectPlanValidation.Type;
@@ -259,7 +265,7 @@ export const ArchitectPlanStatus = Schema.Literals([
 export type ArchitectPlanStatus = typeof ArchitectPlanStatus.Type;
 
 export const ArchitectPlanRevision = Schema.Struct({
-  number: Schema.Number,
+  number: PositiveInt,
   source: Schema.Literals(["architect", "human"]),
   feedback: Schema.optional(Schema.NullOr(TrimmedString)),
   proposal: ArchitectMissionDraft,
@@ -315,7 +321,11 @@ export type ArchitectPlanGenerateResult = typeof ArchitectPlanGenerateResult.Typ
 
 export class ArchitectPlanGenerationError extends Schema.TaggedErrorClass<ArchitectPlanGenerationError>()(
   "ArchitectPlanGenerationError",
-  { message: TrimmedNonEmptyString, cause: Schema.optional(Schema.Defect()) },
+  {
+    message: TrimmedNonEmptyString,
+    category: ArchitectPlanningFailureCategory,
+    cause: Schema.optional(Schema.Defect()),
+  },
 ) {}
 
 export const ArchitectPlanMaterializationTask = Schema.Struct({

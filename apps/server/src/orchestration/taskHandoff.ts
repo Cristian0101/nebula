@@ -64,6 +64,29 @@ export function buildStructuredTaskHandoffPrompt(input: {
 
 const SENSITIVE_EVIDENCE_LINE =
   /(?:authorization|api[_ -]?key|password|secret|access[_ -]?token|refresh[_ -]?token|cookie|credential)/i;
+const RAW_SECRET_EVIDENCE_LINE =
+  /(?:\b(?:gh[opusr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{25,}|sk-(?:ant-)?[A-Za-z0-9_-]{20,}|xox[pbar]-[A-Za-z0-9-]{20,})\b|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b|\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,})/i;
+const PRIVATE_KEY_BEGIN = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/i;
+const PRIVATE_KEY_END = /-----END [A-Z0-9 ]*PRIVATE KEY-----/i;
+
+function safeEvidenceLines(text: string): string {
+  let insidePrivateKey = false;
+  return text
+    .split("\n")
+    .filter((line) => {
+      if (PRIVATE_KEY_BEGIN.test(line)) {
+        insidePrivateKey = true;
+        return false;
+      }
+      if (insidePrivateKey) {
+        if (PRIVATE_KEY_END.test(line)) insidePrivateKey = false;
+        return false;
+      }
+      return !SENSITIVE_EVIDENCE_LINE.test(line) && !RAW_SECRET_EVIDENCE_LINE.test(line);
+    })
+    .join("\n")
+    .trim();
+}
 
 export function boundedTaskHandoffEvidence(
   messages: ReadonlyArray<{
@@ -78,16 +101,9 @@ export function boundedTaskHandoffEvidence(
         message.role === "assistant" && !message.streaming && message.text.trim().length > 0,
     )
     .slice(-3)
-    .map((message) =>
-      message.text
-        .split("\n")
-        .filter((line) => !SENSITIVE_EVIDENCE_LINE.test(line))
-        .join("\n")
-        .trim(),
-    )
-    .filter(Boolean)
+    .map((message) => message.text)
     .join("\n\n---\n\n");
-  return assistantReports.slice(-6_000);
+  return safeEvidenceLines(assistantReports).slice(-6_000);
 }
 
 function normalizedHeading(value: string): string {

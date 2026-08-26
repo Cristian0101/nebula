@@ -79,6 +79,20 @@ describe("MissionRunReactor recovery", () => {
         messages: [{ turnId: "turn-1", role: "assistant", text: "Implemented the module." }],
       } as never),
     ).toBeNull();
+    expect(
+      providerExecutionFailureDetail({
+        latestTurn: { turnId: "turn-2", state: "completed" },
+        session: { status: "ready", lastError: null },
+        messages: [
+          {
+            turnId: null,
+            role: "assistant",
+            text: "Failed to authenticate. API Error: 401 stale provider output.",
+          },
+          { turnId: "turn-2", role: "assistant", text: "Implemented the module." },
+        ],
+      } as never),
+    ).toBeNull();
   });
 
   it("does not treat historical stale gates as fresh failures", () => {

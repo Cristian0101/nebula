@@ -63,7 +63,6 @@ import {
   DEFAULT_TERMINAL_CENTER_STATE,
   deriveTerminalAgentPresentation,
   FOCUSED_TERMINAL_SHELL_CLASS,
-  deriveTerminalNodeStatus,
   hasSharedCheckoutWarning,
   hydrateTerminalCanvasThreads,
   nextFreeformPosition,
@@ -288,16 +287,25 @@ function TerminalCenter({
       visibleThreads.map((thread) => {
         const task = taskByThread.get(thread.id);
         const mission = task ? missionByTask.get(task.id) : null;
+        const run = task ? (runByTask.get(task.id) ?? null) : null;
+        const providerAvailable = entries.some(
+          (entry) => entry.instanceId === thread.modelSelection.instanceId && entry.isAvailable,
+        );
         return {
           threadId: thread.id,
           projectId: project.id,
           providerId: thread.modelSelection.instanceId,
-          status: deriveTerminalNodeStatus(thread),
+          status: deriveTerminalAgentPresentation({
+            thread,
+            task: task ?? null,
+            run,
+            providerAvailable,
+          }).canvasStatus,
           taskId: task?.id ?? null,
           missionId: mission?.id ?? null,
         };
       }),
-    [missionByTask, taskByThread, visibleThreads],
+    [entries, missionByTask, runByTask, taskByThread, visibleThreads],
   );
   const taskThreadIdByTaskId = useMemo(
     () =>

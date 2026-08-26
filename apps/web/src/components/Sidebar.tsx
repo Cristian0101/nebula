@@ -2165,15 +2165,12 @@ export default function Sidebar() {
       event.stopPropagation();
       setProjectScopeMenuOpen(false);
       if (isMobile) setOpenMobile(false);
-      const projectRefs = new Set(
-        projectGroup.memberProjectRefs.map(
-          (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
-        ),
-      );
       const latestPlan = projects
-        .filter((project) => projectRefs.has(`${project.environmentId}:${project.id}`))
-        .flatMap((project) => project.architectPlans ?? [])
-        .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+        .find(
+          (project) =>
+            project.environmentId === projectGroup.environmentId && project.id === projectGroup.id,
+        )
+        ?.architectPlans?.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
       void router.navigate({
         to: "/projects/$projectKey/command-deck",
         params: { projectKey: projectGroup.projectKey },

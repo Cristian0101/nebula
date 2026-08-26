@@ -2709,6 +2709,7 @@ function SwarmWorkspace({
           key: task.key,
           taskId: deterministicArchitectTaskId(selectedPlan, task.key),
         })),
+        confirmTaskAssignments: true,
         acknowledgeWarnings: true,
         acknowledgeOriginalBaseline: selectedPlan.status === "stale",
       },

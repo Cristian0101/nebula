@@ -452,6 +452,17 @@ export const MissionCheckpoint = Schema.Struct({
 });
 export type MissionCheckpoint = typeof MissionCheckpoint.Type;
 
+export const MissionCheckpointCreateInput = Schema.Struct({
+  key: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  requiredTaskIds: Schema.Array(TaskId),
+  unlockTaskIds: Schema.Array(TaskId),
+  requiredGateIds: Schema.Array(TrimmedNonEmptyString),
+  reviewsRequired: Schema.Boolean,
+  humanApprovalRequired: Schema.Boolean,
+});
+export type MissionCheckpointCreateInput = typeof MissionCheckpointCreateInput.Type;
+
 export const Mission = Schema.Struct({
   id: MissionId,
   projectId: ProjectId,
@@ -1490,7 +1501,8 @@ const MissionCreateCommand = Schema.Struct({
   description: Schema.optional(Schema.NullOr(TrimmedString)),
   baseCommit: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   architectPlanProposalId: Schema.optional(Schema.NullOr(ArchitectPlanProposalId)),
-  checkpoints: Schema.optional(Schema.Array(MissionCheckpoint)),
+  taskIds: Schema.optional(Schema.Array(TaskId)),
+  checkpoints: Schema.optional(Schema.Array(MissionCheckpointCreateInput)),
   createdAt: IsoDateTime,
 });
 
@@ -1539,6 +1551,7 @@ const ArchitectPlanApproveCommand = Schema.Struct({
   proposalId: ArchitectPlanProposalId,
   missionId: MissionId,
   tasks: Schema.Array(ArchitectPlanMaterializationTask),
+  confirmTaskAssignments: Schema.Boolean,
   acknowledgeWarnings: Schema.Boolean,
   acknowledgeOriginalBaseline: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
@@ -2885,6 +2898,7 @@ export const ResourceLeasesPayload = Schema.Struct({
 export const MissionCreatedPayload = Schema.Struct({
   missionId: MissionId,
   projectId: ProjectId,
+  taskIds: Schema.optional(Schema.Array(TaskId)),
   title: TrimmedNonEmptyString,
   objective: TrimmedNonEmptyString,
   description: Schema.NullOr(TrimmedString),

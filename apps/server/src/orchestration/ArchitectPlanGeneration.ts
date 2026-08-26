@@ -6,6 +6,7 @@ import {
   ArchitectMissionGenerationDraft,
   ArchitectMissionDraft,
   ArchitectPlanGenerationError,
+  type ArchitectPlanningFailureCategory,
   type ArchitectPlanningPhase,
   type ArchitectTeamConfiguration,
   type ArchitectPlanGenerateInput,
@@ -46,10 +47,38 @@ export interface ArchitectPlanningProgressPatch {
   readonly resourcePolicyFingerprint?: string;
 }
 
-function normalizeGeneratedDraft(
+function classifyTextGenerationFailure(message: string): ArchitectPlanningFailureCategory {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("auth") || normalized.includes("credential"))
+    return "authentication_required";
+  if (
+    normalized.includes("no provider") ||
+    normalized.includes("not support structured") ||
+    normalized.includes("provider unavailable")
+  )
+    return "provider_unavailable";
+  if (
+    normalized.includes("transport") ||
+    normalized.includes("connection") ||
+    normalized.includes("interrupt") ||
+    normalized.includes("timeout") ||
+    normalized.includes("timed out")
+  )
+    return "transport_interrupted";
+  if (
+    normalized.includes("malformed") ||
+    normalized.includes("decode") ||
+    normalized.includes("structured output")
+  )
+    return "invalid_structured_plan";
+  return "unknown";
+}
+
+export function normalizeGeneratedDraft(
   generated: typeof ArchitectMissionGenerationDraft.Type,
   team?: ArchitectTeamConfiguration,
 ): ArchitectMissionDraft {
+  const writableSeats = team?.startingSeats.filter((seat) => seat.access === "write") ?? [];
   return {
     title: generated.title,
     objective: generated.objective,
@@ -77,8 +106,8 @@ function normalizeGeneratedDraft(
           }
         : {}),
       assignedModelSelection:
-        team && team.startingSeats.length > 0
-          ? (team.startingSeats[index % team.startingSeats.length]?.modelSelection ?? null)
+        writableSeats.length > 0
+          ? (writableSeats[index % writableSeats.length]?.modelSelection ?? null)
           : null,
       ...(task.role !== null ? { role: task.role } : {}),
       reviewerKey: task.reviewerKey,
@@ -181,6 +210,7 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
         (cause) =>
           new ArchitectPlanGenerationError({
             message: "Could not persist Architect planning progress.",
+            category: "unknown",
             cause,
           }),
       ),
@@ -193,6 +223,7 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
       (cause) =>
         new ArchitectPlanGenerationError({
           message: "Could not inspect the planning repository.",
+          category: "repository_changed",
           cause,
         }),
     ),
@@ -200,11 +231,13 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
   if (!status.isRepo)
     return yield* new ArchitectPlanGenerationError({
       message: "Architect planning requires a valid Git repository.",
+      category: "repository_changed",
     });
   if (status.hasWorkingTreeChanges)
     return yield* new ArchitectPlanGenerationError({
       message:
         "Nebula needs a stable repository baseline before the Architect can propose a reproducible multi-Task plan. Commit or stash the source changes and try again.",
+      category: "repository_changed",
     });
   const { commitSha } = yield* git
     .resolveCommit({ cwd: input.project.workspaceRoot, revision: "HEAD" })
@@ -213,6 +246,7 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
         (cause) =>
           new ArchitectPlanGenerationError({
             message: "Could not resolve the planning base commit.",
+            category: "repository_changed",
             cause,
           }),
       ),
@@ -232,6 +266,7 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
     catch: (cause) =>
       new ArchitectPlanGenerationError({
         message: "Could not build the bounded Architect context package.",
+        category: "unknown",
         cause,
       }),
   });
@@ -278,6 +313,7 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
   if (!textGeneration.generateStructured)
     return yield* new ArchitectPlanGenerationError({
       message: "The selected provider does not support structured Architect generation.",
+      category: "provider_unavailable",
     });
   const modelSelection = {
     instanceId: input.request.modelSelection.instanceId,
@@ -291,6 +327,7 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
     catch: (cause) =>
       new ArchitectPlanGenerationError({
         message: "Could not create the isolated Architect execution directory.",
+        category: "unknown",
         cause,
       }),
   });
@@ -308,7 +345,12 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
     })
     .pipe(
       Effect.mapError(
-        (cause) => new ArchitectPlanGenerationError({ message: cause.message, cause }),
+        (cause) =>
+          new ArchitectPlanGenerationError({
+            message: cause.message,
+            category: classifyTextGenerationFailure(cause.message),
+            cause,
+          }),
       ),
       Effect.ensuring(removeExecutionCwd),
     );
@@ -318,6 +360,7 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
       (cause) =>
         new ArchitectPlanGenerationError({
           message: "Architect returned malformed structured generation output.",
+          category: "invalid_structured_plan",
           cause,
         }),
     ),
@@ -329,6 +372,7 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
       (cause) =>
         new ArchitectPlanGenerationError({
           message: "Architect returned malformed structured plan output.",
+          category: "invalid_structured_plan",
           cause,
         }),
     ),

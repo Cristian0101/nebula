@@ -24,8 +24,10 @@ import {
 } from "../Services/ArchitectPlanReactor.ts";
 
 export function classifyArchitectPlanningFailure(
-  message: string,
+  failure: string | ArchitectPlanGenerationError,
 ): ArchitectPlanningFailureCategory {
+  if (typeof failure !== "string") return failure.category;
+  const message = failure;
   const normalized = message.toLowerCase();
   if (normalized.includes("auth") || normalized.includes("credential"))
     return "authentication_required";
@@ -124,6 +126,7 @@ const make = Effect.gen(function* () {
             (cause) =>
               new ArchitectPlanGenerationError({
                 message: "Could not persist Architect planning progress.",
+                category: "unknown",
                 cause,
               }),
           ),
@@ -179,7 +182,7 @@ const make = Effect.gen(function* () {
           : item,
       );
     const failureCategory =
-      result._tag === "Failure" ? classifyArchitectPlanningFailure(result.failure.message) : null;
+      result._tag === "Failure" ? classifyArchitectPlanningFailure(result.failure) : null;
     const nextPlan =
       result._tag === "Success"
         ? {
@@ -226,20 +229,34 @@ const make = Effect.gen(function* () {
       plan: nextPlan,
     });
   });
-  const worker = yield* makeDrainableWorker((plan: ArchitectPlanProposal) =>
-    process(plan).pipe(
+  const pendingWork = new Set<string>();
+  const workKey = (plan: ArchitectPlanProposal) =>
+    `${plan.id}:${plan.lifecycle?.attempt ?? Math.max(1, plan.attempts?.length ?? 1)}`;
+  const worker = yield* makeDrainableWorker((plan: ArchitectPlanProposal) => {
+    const key = workKey(plan);
+    return process(plan).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("Architect Plan generation failed", { cause }),
       ),
-    ),
-  );
+      Effect.ensuring(Effect.sync(() => pendingWork.delete(key))),
+    );
+  });
+  const enqueue = (plan: ArchitectPlanProposal) =>
+    Effect.suspend(() => {
+      const key = workKey(plan);
+      if (pendingWork.has(key)) return Effect.void;
+      pendingWork.add(key);
+      return worker
+        .enqueue(plan)
+        .pipe(Effect.tapError(() => Effect.sync(() => pendingWork.delete(key))));
+    });
   const start: ArchitectPlanReactorShape["start"] = Effect.fn("ArchitectPlanReactor.start")(
     function* () {
       yield* forkParkedStream(engine.streamDomainEvents, (event: OrchestrationEvent) =>
         event.type === "architect.plan-saved" &&
         event.payload.plan.status === "generating" &&
         (event.payload.plan.lifecycle?.phase ?? "validating_repository") === "validating_repository"
-          ? worker.enqueue(event.payload.plan)
+          ? enqueue(event.payload.plan)
           : Effect.void,
       );
       yield* forkParked(
@@ -256,7 +273,7 @@ const make = Effect.gen(function* () {
           if (readModel)
             for (const project of readModel.projects)
               for (const plan of project.architectPlans ?? [])
-                if (plan.status === "generating") yield* worker.enqueue(plan);
+                if (plan.status === "generating") yield* enqueue(plan);
         }),
       );
     },

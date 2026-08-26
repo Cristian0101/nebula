@@ -208,6 +208,25 @@ function threadHasQueuedTurnStart(
   );
 }
 
+function currentQualityGatePassed(
+  readModel: OrchestrationReadModel,
+  task: NonNullable<OrchestrationReadModel["tasks"]>[number],
+  gateId: string,
+): boolean {
+  const project = readModel.projects.find((candidate) => candidate.id === task.projectId);
+  const gate = (project?.qualityPolicy?.gates ?? []).find(
+    (candidate) => candidate.enabled && candidate.id === gateId,
+  );
+  if (!gate) return false;
+  return (task.qualityGateRuns ?? []).some(
+    (run) =>
+      run.snapshotId === task.reviewSnapshot?.id &&
+      run.gateId === gate.id &&
+      run.command === gate.command &&
+      run.status === "passed",
+  );
+}
+
 function requiredQualityGateFailure(
   readModel: OrchestrationReadModel,
   task: NonNullable<OrchestrationReadModel["tasks"]>[number],
@@ -217,14 +236,7 @@ function requiredQualityGateFailure(
     (gate) => gate.enabled && gate.required && gate.scope !== "integration",
   );
   for (const gate of required) {
-    const passed = (task.qualityGateRuns ?? []).some(
-      (run) =>
-        run.snapshotId === task.reviewSnapshot?.id &&
-        run.gateId === gate.id &&
-        run.command === gate.command &&
-        run.status === "passed",
-    );
-    if (!passed) return gate.label;
+    if (!currentQualityGatePassed(readModel, task, gate.id)) return gate.label;
   }
   return null;
 }
@@ -887,6 +899,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           commandType: command.type,
           detail: "Every proposed Task requires a human-confirmed provider and model assignment.",
         });
+      if (!command.confirmTaskAssignments)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Confirm every displayed Task provider and model assignment before approval.",
+        });
       const taskIds = new Map(command.tasks.map((task) => [task.key, task.taskId] as const));
       if (
         taskIds.size !== plan.proposal.tasks.length ||
@@ -896,32 +913,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           commandType: command.type,
           detail: "Materialization must provide exactly one canonical Task ID per proposed Task.",
         });
-      const commands: OrchestrationCommand[] = [
-        {
-          type: "mission.create",
-          commandId: command.commandId,
-          missionId: command.missionId,
-          projectId: project.id,
-          title: plan.proposal.title,
-          objective: plan.proposal.objective,
-          description: plan.proposal.description ?? null,
-          baseCommit: plan.planningBaseCommit,
-          architectPlanProposalId: plan.id,
-          checkpoints: (plan.proposal.checkpoints ?? []).map((checkpoint) => ({
-            key: checkpoint.key,
-            name: checkpoint.name,
-            requiredTaskIds: checkpoint.requiredTaskKeys.map((key) => taskIds.get(key)!),
-            unlockTaskIds: checkpoint.unlockTaskKeys.map((key) => taskIds.get(key)!),
-            requiredGateIds: checkpoint.requiredGateIds,
-            reviewsRequired: checkpoint.reviewsRequired,
-            humanApprovalRequired: checkpoint.humanApprovalRequired,
-            humanApprovedAt: null,
-            createdAt: command.createdAt,
-            updatedAt: command.createdAt,
-          })),
-          createdAt: command.createdAt,
-        },
-      ];
+      const commands: OrchestrationCommand[] = [];
       for (const task of plan.proposal.tasks) {
         const taskId = taskIds.get(task.key)!;
         const assigned = task.assignedModelSelection!;
@@ -942,6 +934,31 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           requiredResourceIds: task.requiredResourceIds,
           createdAt: command.createdAt,
         });
+      }
+      commands.push({
+        type: "mission.create",
+        commandId: command.commandId,
+        missionId: command.missionId,
+        projectId: project.id,
+        title: plan.proposal.title,
+        objective: plan.proposal.objective,
+        description: plan.proposal.description ?? null,
+        baseCommit: plan.planningBaseCommit,
+        architectPlanProposalId: plan.id,
+        taskIds: [...taskIds.values()],
+        checkpoints: (plan.proposal.checkpoints ?? []).map((checkpoint) => ({
+          key: checkpoint.key,
+          name: checkpoint.name,
+          requiredTaskIds: checkpoint.requiredTaskKeys.map((key) => taskIds.get(key)!),
+          unlockTaskIds: checkpoint.unlockTaskKeys.map((key) => taskIds.get(key)!),
+          requiredGateIds: checkpoint.requiredGateIds,
+          reviewsRequired: checkpoint.reviewsRequired,
+          humanApprovalRequired: checkpoint.humanApprovalRequired,
+        })),
+        createdAt: command.createdAt,
+      });
+      for (const task of plan.proposal.tasks) {
+        const taskId = taskIds.get(task.key)!;
         commands.push({
           type: "task.ownership.set",
           commandId: command.commandId,
@@ -969,14 +986,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               createdAt: command.createdAt,
             })),
           ],
-          createdAt: command.createdAt,
-        });
-        commands.push({
-          type: "mission.task.add",
-          commandId: command.commandId,
-          missionId: command.missionId,
-          projectId: project.id,
-          taskId,
           createdAt: command.createdAt,
         });
       }
@@ -1023,6 +1032,36 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       yield* requireMissionAbsent({ readModel, command, missionId: command.missionId });
+      const taskIds = command.taskIds ?? [];
+      if (new Set(taskIds).size !== taskIds.length)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Mission creation Task IDs must be unique.",
+        });
+      const outOfProjectTaskId = taskIds.find((taskId) => {
+        const task = (readModel.tasks ?? []).find((candidate) => candidate.id === taskId);
+        return !task || task.projectId !== command.projectId;
+      });
+      if (outOfProjectTaskId)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Mission Task '${outOfProjectTaskId}' must already exist in this Project.`,
+        });
+      const checkpointKeys = (command.checkpoints ?? []).map((checkpoint) => checkpoint.key);
+      if (new Set(checkpointKeys).size !== checkpointKeys.length)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Mission checkpoint keys must be unique.",
+        });
+      const missionTaskIds = new Set(taskIds);
+      const outOfScopeCheckpointTaskId = (command.checkpoints ?? [])
+        .flatMap((checkpoint) => [...checkpoint.requiredTaskIds, ...checkpoint.unlockTaskIds])
+        .find((taskId) => !missionTaskIds.has(taskId));
+      if (outOfScopeCheckpointTaskId)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Checkpoint Task '${outOfScopeCheckpointTaskId}' is outside the Mission creation scope.`,
+        });
       return {
         ...(yield* withEventBase({
           aggregateKind: "mission",
@@ -1034,12 +1073,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           missionId: command.missionId,
           projectId: command.projectId,
+          taskIds,
           title: command.title,
           objective: command.objective,
           description: command.description ?? null,
           baseCommit: command.baseCommit ?? null,
           architectPlanProposalId: command.architectPlanProposalId ?? null,
-          checkpoints: command.checkpoints ?? [],
+          checkpoints: (command.checkpoints ?? []).map((checkpoint) => ({
+            ...checkpoint,
+            humanApprovedAt: null,
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+          })),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -1094,13 +1139,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       for (const task of requiredTasks) {
         if (!task) continue;
         for (const gateId of checkpoint.requiredGateIds) {
-          const passed = (task.qualityGateRuns ?? []).some(
-            (run) =>
-              run.gateId === gateId &&
-              run.status === "passed" &&
-              run.snapshotId === task.reviewSnapshot?.id,
-          );
-          if (!passed)
+          if (!currentQualityGatePassed(readModel, task, gateId))
             return yield* new OrchestrationCommandInvariantError({
               commandType: command.type,
               detail: `Checkpoint quality gate '${gateId}' has not passed for Task '${task.title}'.`,

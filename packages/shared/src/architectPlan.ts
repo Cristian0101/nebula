@@ -46,7 +46,7 @@ function roleSequence(count: number): ReadonlyArray<ArchitectTeamRoleKind> {
   ].slice(0, count);
 }
 
-const roleLabel = (role: ArchitectTeamRoleKind, index: number) => {
+const roleLabel = (role: ArchitectTeamRoleKind, number: number) => {
   const labels: Record<ArchitectTeamRoleKind, string> = {
     builder: "Builder",
     reviewer: "Functional reviewer",
@@ -55,7 +55,7 @@ const roleLabel = (role: ArchitectTeamRoleKind, index: number) => {
     security_reviewer: "Security reviewer",
     integrator: "Integrator",
   };
-  return `${labels[role]} ${index + 1}`;
+  return `${labels[role]} ${number}`;
 };
 
 export function createArchitectTeamConfiguration(input: {
@@ -64,28 +64,33 @@ export function createArchitectTeamConfiguration(input: {
   readonly defaultModelSelection?: ArchitectModelSelection | null | undefined;
 }): ArchitectTeamConfiguration {
   const option = ARCHITECT_TEAM_PRESET_OPTIONS.find((item) => item.preset === input.preset);
-  const count = Math.max(
-    1,
-    Math.min(ARCHITECT_PLAN_MAX_TEAM_AGENTS, option?.count ?? Math.round(input.customCount ?? 4)),
-  );
+  const requestedCount = option?.count ?? input.customCount ?? 4;
+  const count = Number.isFinite(requestedCount)
+    ? Math.max(1, Math.min(ARCHITECT_PLAN_MAX_TEAM_AGENTS, Math.round(requestedCount)))
+    : 4;
   const maxWritableConcurrency =
     option?.maxWritableConcurrency ?? Math.min(6, Math.ceil(count / 3));
+  const roleCounts = new Map<ArchitectTeamRoleKind, number>();
   return {
     preset: input.preset,
     executionAgentCount: count,
     maxWritableConcurrency,
-    startingSeats: roleSequence(count).map((role, index) => ({
-      key: `seat-${index + 1}`,
-      role,
-      label: roleLabel(role, index),
-      access:
-        role === "reviewer" || role === "security_reviewer"
-          ? "review"
-          : role === "integrator"
-            ? "coordinate"
-            : "write",
-      modelSelection: input.defaultModelSelection ?? null,
-    })),
+    startingSeats: roleSequence(count).map((role, index) => {
+      const roleNumber = (roleCounts.get(role) ?? 0) + 1;
+      roleCounts.set(role, roleNumber);
+      return {
+        key: `seat-${index + 1}`,
+        role,
+        label: roleLabel(role, roleNumber),
+        access:
+          role === "reviewer" || role === "security_reviewer"
+            ? "review"
+            : role === "integrator"
+              ? "coordinate"
+              : "write",
+        modelSelection: input.defaultModelSelection ?? null,
+      };
+    }),
   };
 }
 
