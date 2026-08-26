@@ -23,6 +23,92 @@ export const ARCHITECT_PLAN_MAX_TASKS = 20;
 export const ARCHITECT_PLAN_MAX_EDGES = 50;
 export const ARCHITECT_PLAN_MAX_CRITERIA_PER_TASK = 20;
 export const ARCHITECT_PLAN_MAX_OWNERSHIP_PATTERNS_PER_TASK = 30;
+export const ARCHITECT_PLAN_MAX_TEAM_AGENTS = 20;
+
+export const ArchitectPlanningPhase = Schema.Literals([
+  "idle",
+  "validating_repository",
+  "preparing_context",
+  "starting_planner",
+  "planner_working",
+  "decoding_plan",
+  "validating_plan",
+  "ready",
+  "failed",
+  "cancelled",
+  "stale",
+]);
+export type ArchitectPlanningPhase = typeof ArchitectPlanningPhase.Type;
+
+export const ArchitectPlanningFailureCategory = Schema.Literals([
+  "provider_unavailable",
+  "authentication_required",
+  "transport_interrupted",
+  "invalid_structured_plan",
+  "validation_failed",
+  "repository_changed",
+  "unknown",
+]);
+export type ArchitectPlanningFailureCategory = typeof ArchitectPlanningFailureCategory.Type;
+
+export const ArchitectPlanningLifecycle = Schema.Struct({
+  phase: ArchitectPlanningPhase,
+  attempt: Schema.Number,
+  startedAt: IsoDateTime,
+  lastProgressAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+  failureCategory: Schema.NullOr(ArchitectPlanningFailureCategory),
+});
+export type ArchitectPlanningLifecycle = typeof ArchitectPlanningLifecycle.Type;
+
+export const ArchitectPlanningAttempt = Schema.Struct({
+  number: Schema.Number,
+  providerInstanceId: ProviderInstanceId,
+  model: TrimmedNonEmptyString,
+  startedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+  lastPhase: ArchitectPlanningPhase,
+  outcome: Schema.Literals(["running", "ready", "failed", "cancelled"]),
+  failureCategory: Schema.NullOr(ArchitectPlanningFailureCategory),
+  failureReason: Schema.NullOr(TrimmedString),
+});
+export type ArchitectPlanningAttempt = typeof ArchitectPlanningAttempt.Type;
+
+export const ArchitectTeamPreset = Schema.Literals([
+  "pair",
+  "standard",
+  "large",
+  "heavy",
+  "custom",
+]);
+export type ArchitectTeamPreset = typeof ArchitectTeamPreset.Type;
+
+export const ArchitectTeamRoleKind = Schema.Literals([
+  "builder",
+  "reviewer",
+  "debugger",
+  "test_specialist",
+  "security_reviewer",
+  "integrator",
+]);
+export type ArchitectTeamRoleKind = typeof ArchitectTeamRoleKind.Type;
+
+export const ArchitectTeamSeat = Schema.Struct({
+  key: TrimmedNonEmptyString,
+  role: ArchitectTeamRoleKind,
+  label: TrimmedNonEmptyString,
+  access: Schema.Literals(["write", "review", "coordinate"]),
+  modelSelection: Schema.NullOr(ArchitectModelSelection),
+});
+export type ArchitectTeamSeat = typeof ArchitectTeamSeat.Type;
+
+export const ArchitectTeamConfiguration = Schema.Struct({
+  preset: ArchitectTeamPreset,
+  executionAgentCount: Schema.Number,
+  maxWritableConcurrency: Schema.Number,
+  startingSeats: Schema.Array(ArchitectTeamSeat),
+});
+export type ArchitectTeamConfiguration = typeof ArchitectTeamConfiguration.Type;
 
 export const ArchitectOwnershipDraft = Schema.Struct({
   write: Schema.Array(TrimmedNonEmptyString),
@@ -47,6 +133,9 @@ export const ArchitectTaskDraft = Schema.Struct({
   requiredResourceIds: Schema.Array(SharedResourceId),
   providerRecommendation: Schema.optional(ArchitectProviderRecommendation),
   assignedModelSelection: Schema.optional(Schema.NullOr(ArchitectModelSelection)),
+  role: Schema.optional(ArchitectTeamRoleKind),
+  reviewerKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  checkpointKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   notes: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type ArchitectTaskDraft = typeof ArchitectTaskDraft.Type;
@@ -70,12 +159,24 @@ export const ArchitectRisk = Schema.Struct({
 });
 export type ArchitectRisk = typeof ArchitectRisk.Type;
 
+export const ArchitectCheckpointDraft = Schema.Struct({
+  key: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  requiredTaskKeys: Schema.Array(TrimmedNonEmptyString),
+  unlockTaskKeys: Schema.Array(TrimmedNonEmptyString),
+  requiredGateIds: Schema.Array(TrimmedNonEmptyString),
+  reviewsRequired: Schema.Boolean,
+  humanApprovalRequired: Schema.Boolean,
+});
+export type ArchitectCheckpointDraft = typeof ArchitectCheckpointDraft.Type;
+
 export const ArchitectMissionDraft = Schema.Struct({
   title: TrimmedNonEmptyString,
   objective: TrimmedNonEmptyString,
   description: Schema.optional(TrimmedString),
   tasks: Schema.Array(ArchitectTaskDraft),
   dependencies: Schema.Array(ArchitectDependencyDraft),
+  checkpoints: Schema.optional(Schema.Array(ArchitectCheckpointDraft)),
   assumptions: Schema.Array(TrimmedNonEmptyString),
   risks: Schema.Array(ArchitectRisk),
   unresolvedQuestions: Schema.Array(TrimmedNonEmptyString),
@@ -106,10 +207,14 @@ export const ArchitectMissionGenerationDraft = Schema.Struct({
         }),
       ),
       assignedModelSelection: Schema.Null,
+      role: Schema.NullOr(ArchitectTeamRoleKind),
+      reviewerKey: Schema.NullOr(TrimmedNonEmptyString),
+      checkpointKey: Schema.NullOr(TrimmedNonEmptyString),
       notes: Schema.Array(TrimmedNonEmptyString),
     }),
   ),
   dependencies: Schema.Array(ArchitectDependencyDraft),
+  checkpoints: Schema.Array(ArchitectCheckpointDraft),
   assumptions: Schema.Array(TrimmedNonEmptyString),
   risks: Schema.Array(
     Schema.Struct({
@@ -148,6 +253,7 @@ export const ArchitectPlanStatus = Schema.Literals([
   "approved",
   "rejected",
   "failed",
+  "cancelled",
   "superseded",
 ]);
 export type ArchitectPlanStatus = typeof ArchitectPlanStatus.Type;
@@ -172,6 +278,9 @@ export const ArchitectPlanProposal = Schema.Struct({
   observedHeadCommit: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   architectProviderInstanceId: ProviderInstanceId,
   architectModelSelection: ArchitectModelSelection,
+  team: Schema.optional(ArchitectTeamConfiguration),
+  lifecycle: Schema.optional(ArchitectPlanningLifecycle),
+  attempts: Schema.optional(Schema.Array(ArchitectPlanningAttempt)),
   contextFingerprint: TrimmedNonEmptyString,
   contextPaths: Schema.Array(TrimmedNonEmptyString),
   resourcePolicyFingerprint: TrimmedNonEmptyString,
@@ -193,6 +302,7 @@ export const ArchitectPlanGenerateInput = Schema.Struct({
   constraints: Schema.optional(TrimmedString),
   modelSelection: ArchitectModelSelection,
   contextPaths: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  team: Schema.optional(ArchitectTeamConfiguration),
   previousProposal: Schema.optional(ArchitectMissionDraft),
   revisionFeedback: Schema.optional(TrimmedString),
 });
