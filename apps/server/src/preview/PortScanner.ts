@@ -78,6 +78,23 @@ const WEB_PROBE_CACHE_TTL_MS = Duration.toMillis(Duration.seconds(15));
 const WEB_PROBE_CONCURRENCY = 16;
 const NAVIGATION_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
+export const classifyEmbeddingPolicy = (
+  headers: Readonly<Record<string, string | undefined>>,
+): "allowed" | "blocked" | "unknown" => {
+  const frameOptions = headers["x-frame-options"]?.toLowerCase().trim();
+  if (frameOptions === "deny") return "blocked";
+  const contentSecurityPolicy = headers["content-security-policy"]?.toLowerCase();
+  const frameAncestors = contentSecurityPolicy
+    ?.split(";")
+    .map((directive) => directive.trim())
+    .find((directive) => directive.startsWith("frame-ancestors"));
+  if (/^frame-ancestors\s+'none'\s*$/u.test(frameAncestors ?? "")) return "blocked";
+  if (frameOptions) return "unknown";
+  if (!frameAncestors) return "allowed";
+  if (/^frame-ancestors\s+\*\s*$/u.test(frameAncestors)) return "allowed";
+  return "unknown";
+};
+
 type Listener = (servers: ReadonlyArray<DiscoveredLocalServer>) => Effect.Effect<void>;
 
 interface ListenerSubscription {
@@ -105,6 +122,7 @@ interface TerminalProcessOwner {
 interface WebProbeCacheEntry {
   readonly pid: number | null;
   readonly isWeb: boolean;
+  readonly embeddingPolicy: "allowed" | "blocked" | "unknown";
   readonly expiresAtMillis: number;
 }
 
@@ -330,14 +348,17 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
     httpClient.get(url).pipe(
       Effect.map((response) => {
         const location = response.headers.location?.trim();
-        if (NAVIGATION_REDIRECT_STATUSES.has(response.status) && location) return url;
+        if (NAVIGATION_REDIRECT_STATUSES.has(response.status) && location)
+          return { url, embeddingPolicy: "unknown" as const };
         if (response.status < 200 || response.status >= 300) return null;
         if (response.status === 204 || response.status === 205) return null;
         const contentType = response.headers["content-type"]
           ?.split(";", 1)[0]
           ?.trim()
           .toLowerCase();
-        return contentType === "text/html" || contentType === "application/xhtml+xml" ? url : null;
+        return contentType === "text/html" || contentType === "application/xhtml+xml"
+          ? { url, embeddingPolicy: classifyEmbeddingPolicy(response.headers) }
+          : null;
       }),
       Effect.scoped,
       Effect.timeoutOption(WEB_PROBE_TIMEOUT),
@@ -417,7 +438,12 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
                 ? Effect.succeed({ probe: cachedProbe, fresh: false })
                 : probeWebUrl(url).pipe(
                     Effect.map((result) => ({
-                      probe: { pid, isWeb: result !== null, expiresAtMillis: 0 },
+                      probe: {
+                        pid,
+                        isWeb: result !== null,
+                        embeddingPolicy: result?.embeddingPolicy ?? "unknown",
+                        expiresAtMillis: 0,
+                      },
                       fresh: true,
                     })),
                   ),
@@ -461,7 +487,12 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
         );
       }
       if (visibleUrl === null) continue;
-      const server = { ...group.server, url: visibleUrl };
+      const visibleProbe = probes.find(([key]) => key === webProbeCacheKey(visibleUrl));
+      const server = {
+        ...group.server,
+        url: visibleUrl,
+        embeddingPolicy: visibleProbe?.[1].embeddingPolicy ?? "unknown",
+      };
       if (group.configuredKey === null) discovered.push(server);
       else configured.set(group.configuredKey, server);
     }

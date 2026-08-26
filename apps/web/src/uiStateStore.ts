@@ -12,8 +12,10 @@ import {
 } from "./components/terminalCenter/terminalCenterLogic";
 import {
   TERMINAL_WORKSPACE_LAYOUTS,
+  TERMINAL_WORKSPACE_GRID_PRESETS,
   TERMINAL_WORKSPACE_PANE_TYPES,
   normalizeGridPlacement,
+  reflowWorkspaceGrid,
   type TerminalWorkspace,
   type TerminalWorkspaceFreeformPlacement,
   type TerminalWorkspacePane,
@@ -104,6 +106,30 @@ function sanitizeWorkspacePane(value: unknown): TerminalWorkspacePane | null {
   )
     return null;
   const createdAt = typeof pane.createdAt === "string" ? pane.createdAt : new Date(0).toISOString();
+  const externalServerCandidate = pane.externalServer;
+  const externalServer =
+    externalServerCandidate &&
+    typeof externalServerCandidate === "object" &&
+    typeof externalServerCandidate.host === "string" &&
+    Number.isInteger(externalServerCandidate.port) &&
+    externalServerCandidate.port > 0 &&
+    externalServerCandidate.port < 65_536 &&
+    typeof externalServerCandidate.url === "string"
+      ? {
+          host: externalServerCandidate.host,
+          port: externalServerCandidate.port,
+          url: externalServerCandidate.url,
+          pid: Number.isInteger(externalServerCandidate.pid) ? externalServerCandidate.pid! : null,
+          processName:
+            typeof externalServerCandidate.processName === "string"
+              ? externalServerCandidate.processName
+              : null,
+          attachedAt:
+            typeof externalServerCandidate.attachedAt === "string"
+              ? externalServerCandidate.attachedAt
+              : createdAt,
+        }
+      : null;
   return {
     id: pane.id,
     type: pane.type as TerminalWorkspacePane["type"],
@@ -117,6 +143,7 @@ function sanitizeWorkspacePane(value: unknown): TerminalWorkspacePane | null {
     attachedPaneId: typeof pane.attachedPaneId === "string" ? pane.attachedPaneId : null,
     command: typeof pane.command === "string" ? pane.command : null,
     previewUrl: typeof pane.previewUrl === "string" ? pane.previewUrl : null,
+    externalServer,
     workspacePath: pane.workspacePath,
     grid: normalizeGridPlacement(pane.grid),
     freeform: sanitizeFreeformPlacement(pane.freeform),
@@ -137,44 +164,68 @@ function sanitizeTerminalWorkspaces(value: unknown): Record<string, TerminalWork
         if (!rawWorkspace || typeof rawWorkspace !== "object") return [];
         const workspace = rawWorkspace as Partial<TerminalWorkspace>;
         if (typeof workspace.id !== "string" || workspace.id.length === 0) return [];
+        const paneIds = new Set<string>();
+        let visiblePaneCount = 0;
         const panes = (Array.isArray(workspace.panes) ? workspace.panes : []).flatMap((pane) => {
           const sanitized = sanitizeWorkspacePane(pane);
-          return sanitized ? [sanitized] : [];
+          if (!sanitized || paneIds.has(sanitized.id)) return [];
+          paneIds.add(sanitized.id);
+          if (!sanitized.visible) return [sanitized];
+          visiblePaneCount += 1;
+          return [visiblePaneCount <= 16 ? sanitized : { ...sanitized, visible: false }];
         });
         const createdAt =
           typeof workspace.createdAt === "string" ? workspace.createdAt : new Date(0).toISOString();
+        const selectedPaneId =
+          typeof workspace.selectedPaneId === "string" &&
+          panes.some((pane) => pane.id === workspace.selectedPaneId && pane.visible)
+            ? workspace.selectedPaneId
+            : null;
+        const focusedPaneId =
+          typeof workspace.focusedPaneId === "string" &&
+          panes.some((pane) => pane.id === workspace.focusedPaneId && pane.visible)
+            ? workspace.focusedPaneId
+            : null;
+        const gridPreset = TERMINAL_WORKSPACE_GRID_PRESETS.includes(
+          workspace.gridPreset as TerminalWorkspace["gridPreset"],
+        )
+          ? (workspace.gridPreset as TerminalWorkspace["gridPreset"])
+          : "auto";
+        const sanitized: TerminalWorkspace = {
+          id: workspace.id,
+          name:
+            typeof workspace.name === "string" && workspace.name.length > 0
+              ? workspace.name
+              : "Workspace",
+          layout: TERMINAL_WORKSPACE_LAYOUTS.includes(
+            workspace.layout as TerminalWorkspace["layout"],
+          )
+            ? (workspace.layout as TerminalWorkspace["layout"])
+            : "grid",
+          gridPreset,
+          splitDirection: workspace.splitDirection === "vertical" ? "vertical" : "horizontal",
+          panes,
+          selectedPaneId,
+          focusedPaneId,
+          viewport:
+            workspace.viewport &&
+            Number.isFinite(workspace.viewport.x) &&
+            Number.isFinite(workspace.viewport.y) &&
+            Number.isFinite(workspace.viewport.zoom)
+              ? {
+                  x: workspace.viewport.x,
+                  y: workspace.viewport.y,
+                  zoom: Math.min(2, Math.max(0.5, workspace.viewport.zoom)),
+                }
+              : { x: 0, y: 0, zoom: 1 },
+          createdAt,
+          updatedAt: typeof workspace.updatedAt === "string" ? workspace.updatedAt : createdAt,
+        };
+        const reflowed = reflowWorkspaceGrid(sanitized, gridPreset, sanitized.updatedAt);
         return [
-          {
-            id: workspace.id,
-            name:
-              typeof workspace.name === "string" && workspace.name.length > 0
-                ? workspace.name
-                : "Workspace",
-            layout: TERMINAL_WORKSPACE_LAYOUTS.includes(
-              workspace.layout as TerminalWorkspace["layout"],
-            )
-              ? (workspace.layout as TerminalWorkspace["layout"])
-              : "grid",
-            splitDirection: workspace.splitDirection === "vertical" ? "vertical" : "horizontal",
-            panes,
-            selectedPaneId:
-              typeof workspace.selectedPaneId === "string" ? workspace.selectedPaneId : null,
-            focusedPaneId:
-              typeof workspace.focusedPaneId === "string" ? workspace.focusedPaneId : null,
-            viewport:
-              workspace.viewport &&
-              Number.isFinite(workspace.viewport.x) &&
-              Number.isFinite(workspace.viewport.y) &&
-              Number.isFinite(workspace.viewport.zoom)
-                ? {
-                    x: workspace.viewport.x,
-                    y: workspace.viewport.y,
-                    zoom: Math.min(2, Math.max(0.5, workspace.viewport.zoom)),
-                  }
-                : { x: 0, y: 0, zoom: 1 },
-            createdAt,
-            updatedAt: typeof workspace.updatedAt === "string" ? workspace.updatedAt : createdAt,
-          },
+          reflowed === sanitized
+            ? reflowWorkspaceGrid(sanitized, "auto", sanitized.updatedAt)
+            : reflowed,
         ];
       },
     );

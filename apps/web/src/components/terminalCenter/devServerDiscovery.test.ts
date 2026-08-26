@@ -1,13 +1,34 @@
+import { ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   approvedProfileFromSuggestion,
+  discoveredServerForTerminal,
   discoverDevServerSuggestions,
   nextAvailablePreferredPort,
+  replaceRetargetedProfile,
   retargetApprovedProfile,
 } from "./devServerDiscovery";
 
 describe("Dev Server discovery", () => {
+  it("resolves the reachable server owned by the managed terminal instead of guessing a port", () => {
+    const server = {
+      host: "localhost",
+      port: 3001,
+      url: "http://localhost:3001",
+      processName: "next-server",
+      pid: 42,
+      terminal: { threadId: ThreadId.make("workspace-host"), terminalId: "dev-surge" },
+    } as const;
+    expect(
+      discoveredServerForTerminal({
+        servers: [{ ...server, port: 3000, url: "http://localhost:3000", terminal: null }, server],
+        threadId: "workspace-host",
+        terminalId: "dev-surge",
+      }),
+    ).toBe(server);
+  });
+
   it("suggests the package dev script without executing it", () => {
     expect(
       discoverDevServerSuggestions({
@@ -51,6 +72,43 @@ describe("Dev Server discovery", () => {
       preferredPort: 3002,
       previewUrl: "http://localhost:3002",
     });
+  });
+
+  it("does not invent a port or preview URL for a generic package command", () => {
+    const suggestion = discoverDevServerSuggestions({
+      packageJsonContents: JSON.stringify({ scripts: { dev: "custom-server" } }),
+    })[0]!;
+    expect(suggestion).toMatchObject({ preferredPort: null, previewUrl: "", framework: "generic" });
+    expect(
+      approvedProfileFromSuggestion({
+        id: "generic",
+        suggestion,
+        port: 3000,
+        approvedAt: "2026-08-26T00:00:00.000Z",
+      }),
+    ).toMatchObject({ command: "npm run dev", preferredPort: null, previewUrl: "" });
+  });
+
+  it("preserves a configured Project Script preview URL", () => {
+    expect(
+      discoverDevServerSuggestions({
+        packageJsonContents: null,
+        projectScripts: [
+          {
+            id: "web",
+            name: "Start web",
+            command: "npm run serve",
+            icon: "play",
+            runOnWorktreeCreate: false,
+            previewUrl: "http://localhost:4321/app",
+          },
+        ],
+      })[0],
+    ).toMatchObject({ preferredPort: null, previewUrl: "http://localhost:4321/app" });
+  });
+
+  it("returns no port when the managed range is exhausted", () => {
+    expect(nextAvailablePreferredPort(65_535, new Set([65_535]))).toBeNull();
   });
 
   it("retargets an approved adjustable profile for a parallel worktree", () => {
@@ -100,5 +158,32 @@ describe("Dev Server discovery", () => {
         approvedAt: "2026-08-26T00:01:00.000Z",
       }),
     ).toBeNull();
+  });
+
+  it("keeps the approved profile and reuses an equivalent retargeted profile", () => {
+    const original = {
+      id: "profile-1",
+      name: "Web App",
+      command: "npm run dev -- -p 3000",
+      workingDirectory: ".",
+      preferredPort: 3000,
+      previewUrl: "http://localhost:3000",
+      approvedAt: "2026-08-26T00:00:00.000Z",
+    };
+    const existing = {
+      ...original,
+      id: "profile-2",
+      name: "Web App (3001)",
+      command: "npm run dev -- -p 3001",
+      preferredPort: 3001,
+      previewUrl: "http://localhost:3001",
+    };
+    expect(
+      replaceRetargetedProfile({
+        profiles: [original, existing],
+        originalProfileId: original.id,
+        retargetedProfile: { ...existing, id: original.id },
+      }),
+    ).toEqual([original, existing]);
   });
 });

@@ -18,11 +18,32 @@ import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
 import * as TestClock from "effect/testing/TestClock";
-import { expect } from "vite-plus/test";
+import { expect, it } from "vite-plus/test";
 import { FetchHttpClient } from "effect/unstable/http";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "./PortScanner.ts";
+
+it("classifies frame-denying response headers before Preview attempts to embed", () => {
+  expect(PortScanner.classifyEmbeddingPolicy({ "x-frame-options": "DENY" })).toBe("blocked");
+  expect(
+    PortScanner.classifyEmbeddingPolicy({
+      "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+    }),
+  ).toBe("blocked");
+  expect(PortScanner.classifyEmbeddingPolicy({})).toBe("allowed");
+  expect(PortScanner.classifyEmbeddingPolicy({ "x-frame-options": "SAMEORIGIN" })).toBe("unknown");
+  expect(
+    PortScanner.classifyEmbeddingPolicy({
+      "content-security-policy": "frame-ancestors 'self'",
+    }),
+  ).toBe("unknown");
+  expect(
+    PortScanner.classifyEmbeddingPolicy({
+      "content-security-policy": "frame-ancestors https://preview.example.com",
+    }),
+  ).toBe("unknown");
+});
 const processProbeFailure: ProcessRunner.ProcessRunner["Service"]["run"] = (input) =>
   Effect.fail(
     new ProcessRunner.ProcessSpawnError({
