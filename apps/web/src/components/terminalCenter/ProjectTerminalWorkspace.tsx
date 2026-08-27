@@ -1,9 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   EnvironmentId,
+  TaskId,
   ThreadId,
   type DevServerProfile,
   type DiscoveredLocalServer,
+  type NebulaTaskRole,
+  type OrchestrationTask,
   type OrchestrationThreadShell,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
@@ -20,6 +23,7 @@ import {
   GitBranchIcon,
   Grid2X2Icon,
   LinkIcon,
+  ListChecksIcon,
   Maximize2Icon,
   Minimize2Icon,
   PlayIcon,
@@ -35,7 +39,7 @@ import {
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { readLocalApi } from "../../localApi";
-import { randomUUID, newThreadId } from "../../lib/utils";
+import { newMessageId, newTaskId, randomUUID, newThreadId } from "../../lib/utils";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -46,6 +50,7 @@ import { environmentSnapshotAtom } from "../../state/shell";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { terminalEnvironment } from "../../state/terminal";
+import { taskEnvironment } from "../../state/tasks";
 import { useKnownTerminalSessions } from "../../state/terminalSessions";
 import { threadEnvironment } from "../../state/threads";
 import { vcsEnvironment } from "../../state/vcs";
@@ -75,6 +80,14 @@ import {
 } from "../ui/sheet";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import {
+  TaskChangesPanel,
+  TaskCreateFields,
+  ownershipDraftsValid,
+  ownershipRulesFromDrafts,
+  taskOwnershipContext,
+  type OwnershipRuleDraft,
+} from "../ProjectTasksSection";
 import { useSettingsProjectGroups } from "../settings/ProjectSettingsPanel";
 import { deriveCurrentAction } from "../commandDeck/commandDeckLogic";
 import { useDiscoveredLocalServers } from "../preview/useDiscoveredLocalServers";
@@ -170,6 +183,7 @@ function openExternal(url: string) {
 
 function PaneHeader({
   pane,
+  task,
   selected,
   working,
   onSelect,
@@ -181,8 +195,10 @@ function PaneHeader({
   draggable,
   onDragStart,
   onDragEnd,
+  onInspectTask,
 }: {
   readonly pane: TerminalWorkspacePane;
+  readonly task: OrchestrationTask | null;
   readonly selected: boolean;
   readonly working: boolean;
   readonly onSelect: () => void;
@@ -194,6 +210,7 @@ function PaneHeader({
   readonly draggable: boolean;
   readonly onDragStart: (event: React.DragEvent) => void;
   readonly onDragEnd: () => void;
+  readonly onInspectTask: () => void;
 }) {
   const Icon = paneIcon[pane.type];
   return (
@@ -209,8 +226,28 @@ function PaneHeader({
       </span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium">{pane.title}</p>
-        <p className="truncate text-[10px] text-muted-foreground">{pane.workspacePath}</p>
+        <p className="truncate text-[10px] text-muted-foreground">
+          {task ? `${task.title} · ${task.role} · ${task.status}` : pane.workspacePath}
+        </p>
       </div>
+      {task ? (
+        <Button
+          size="xs"
+          variant="ghost"
+          className="h-6 max-w-40 gap-1 px-1.5 text-[10px]"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={onInspectTask}
+        >
+          <ListChecksIcon className="size-3" />
+          <span className="truncate">
+            {task.ownership?.status === "valid"
+              ? "Ownership valid"
+              : task.ownership?.status === "violation"
+                ? `Ownership issue ${task.ownership.violations.length}`
+                : "Task details"}
+          </span>
+        </Button>
+      ) : null}
       <span
         className={`size-1.5 rounded-full ${working ? "bg-emerald-500 motion-safe:animate-pulse" : selected ? "bg-primary" : "bg-muted-foreground/40"}`}
         aria-label={working ? "Working" : selected ? "Selected" : "Idle"}
@@ -545,6 +582,14 @@ export function ProjectTerminalWorkspace({
     () => (snapshot?.threads ?? []).filter((thread) => thread.projectId === project.id),
     [project.id, snapshot?.threads],
   );
+  const projectTasks = useMemo(
+    () => (snapshot?.tasks ?? []).filter((task) => task.projectId === project.id),
+    [project.id, snapshot?.tasks],
+  );
+  const taskById = useMemo(
+    () => new Map(projectTasks.map((task) => [task.id, task] as const)),
+    [projectTasks],
+  );
   const threadById = useMemo(
     () => new Map(projectThreads.map((thread) => [thread.id, thread] as const)),
     [projectThreads],
@@ -555,6 +600,14 @@ export function ProjectTerminalWorkspace({
   const legacyState = useUiStateStore((store) => store.terminalCenterByProjectId[project.id]);
   const setWorkspaceState = useUiStateStore((store) => store.setTerminalWorkspaceProjectState);
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
+  const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const createTask = useAtomCommand(taskEnvironment.create, { reportFailure: false });
+  const bindTaskThread = useAtomCommand(taskEnvironment.bindThread, { reportFailure: false });
+  const activateTask = useAtomCommand(taskEnvironment.activate, { reportFailure: false });
+  const prepareTaskWorkspace = useAtomCommand(taskEnvironment.prepareWorkspace, {
+    reportFailure: false,
+  });
+  const setTaskOwnership = useAtomCommand(taskEnvironment.setOwnership, { reportFailure: false });
   const openTerminal = useAtomCommand(terminalEnvironment.open, { reportFailure: false });
   const writeTerminal = useAtomCommand(terminalEnvironment.write, { reportFailure: false });
   const closeTerminal = useAtomCommand(terminalEnvironment.close, { reportFailure: false });
@@ -583,6 +636,18 @@ export function ProjectTerminalWorkspace({
     [packageJson.data?.contents, project.scripts],
   );
   const [addPaneOpen, setAddPaneOpen] = useState(false);
+  const [taskCreateOpen, setTaskCreateOpen] = useState(false);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskObjective, setTaskObjective] = useState("");
+  const [taskRole, setTaskRole] = useState<NebulaTaskRole>("builder");
+  const [taskProviderInstanceId, setTaskProviderInstanceId] = useState("");
+  const [taskAcceptanceCriteria, setTaskAcceptanceCriteria] = useState("");
+  const [taskOwnershipRules, setTaskOwnershipRules] = useState<ReadonlyArray<OwnershipRuleDraft>>([
+    { draftId: randomUUID(), access: "write", pattern: "", reason: "" },
+  ]);
+  const [taskContextId, setTaskContextId] = useState<TaskId | null>(null);
+  const [inspectedTaskId, setInspectedTaskId] = useState<TaskId | null>(null);
+  const [taskCreateBusy, setTaskCreateBusy] = useState(false);
   const [addAt, setAddAt] = useState<{ column: number; row: number } | null>(null);
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
@@ -625,9 +690,14 @@ export function ProjectTerminalWorkspace({
     ) ??
     workspaceState?.workspaces[0] ??
     null;
+  const taskContext = taskContextId ? (taskById.get(taskContextId) ?? null) : null;
+  const taskContextPath =
+    taskContext?.workspace?.status === "ready" ? taskContext.workspace.path : null;
   const selectedWorkspacePath =
+    taskContextPath ??
     activeWorkspace?.panes.find((pane) => pane.id === activeWorkspace.selectedPaneId)
-      ?.workspacePath ?? project.workspaceRoot;
+      ?.workspacePath ??
+    project.workspaceRoot;
 
   const persistProjectState = useCallback(
     (next: TerminalWorkspaceProjectState) => setWorkspaceState(project.id, next),
@@ -656,6 +726,18 @@ export function ProjectTerminalWorkspace({
         (workspace) => workspace.id === activeWorkspace.id,
       );
       if (!currentState || !currentWorkspace) return null;
+      const boundTask = input.taskId ? taskById.get(TaskId.make(input.taskId)) : null;
+      if (
+        input.taskId &&
+        (!boundTask || boundTask.workspace?.status !== "ready" || !boundTask.workspace.path)
+      ) {
+        reportError(
+          "Task workspace is not ready",
+          boundTask?.workspace?.failureReason ??
+            "Task-bound panes require a ready canonical worktree.",
+        );
+        return null;
+      }
       const placement = firstAvailableGridPlacement(
         currentWorkspace.panes,
         addAt ?? undefined,
@@ -673,7 +755,7 @@ export function ProjectTerminalWorkspace({
       const pane = createTerminalWorkspacePane({
         ...input,
         id: randomUUID(),
-        workspacePath: input.workspacePath ?? project.workspaceRoot,
+        workspacePath: boundTask?.workspace?.path ?? input.workspacePath ?? project.workspaceRoot,
         grid: placement,
       });
       persistProjectState(
@@ -688,11 +770,90 @@ export function ProjectTerminalWorkspace({
       setAddAt(null);
       return pane;
     },
-    [activeWorkspace, addAt, persistProjectState, project.id, project.workspaceRoot],
+    [activeWorkspace, addAt, persistProjectState, project.id, project.workspaceRoot, taskById],
   );
 
+  const createBoundTask = useCallback(async () => {
+    if (
+      !taskTitle.trim() ||
+      !taskObjective.trim() ||
+      (taskRole === "builder" && !ownershipDraftsValid(taskOwnershipRules))
+    )
+      return;
+    const taskId = newTaskId();
+    setTaskCreateBusy(true);
+    const criteria = taskAcceptanceCriteria
+      .split("\n")
+      .map((criterion) => criterion.trim())
+      .filter(Boolean);
+    const providerEntry = providerEntries.find(
+      (entry) => entry.instanceId === taskProviderInstanceId,
+    );
+    const created = await createTask({
+      environmentId: project.environmentId,
+      input: {
+        taskId,
+        projectId: project.id,
+        title: taskTitle.trim(),
+        objective: taskObjective.trim(),
+        role: taskRole,
+        modelSelection: providerEntry
+          ? {
+              instanceId: providerEntry.instanceId,
+              model: providerEntry.models[0]?.slug ?? "auto",
+            }
+          : project.defaultModelSelection,
+        acceptanceCriteria: criteria,
+        reviewRequired: true,
+        preferDifferentReviewerProvider: true,
+      },
+    });
+    let error = commandFailure(created);
+    if (!error && taskOwnershipRules.some((rule) => rule.pattern.trim()))
+      error = commandFailure(
+        await setTaskOwnership({
+          environmentId: project.environmentId,
+          input: { taskId, rules: ownershipRulesFromDrafts(taskOwnershipRules) },
+        }),
+      );
+    if (!error)
+      error = commandFailure(
+        await prepareTaskWorkspace({
+          environmentId: project.environmentId,
+          input: { taskId },
+        }),
+      );
+    setTaskCreateBusy(false);
+    if (error) {
+      reportError("Could not create Task workspace", error);
+      return;
+    }
+    setTaskContextId(taskId);
+    setTaskTitle("");
+    setTaskObjective("");
+    setTaskRole("builder");
+    setTaskProviderInstanceId("");
+    setTaskAcceptanceCriteria("");
+    setTaskOwnershipRules([{ draftId: randomUUID(), access: "write", pattern: "", reason: "" }]);
+    setTaskCreateOpen(false);
+  }, [
+    createTask,
+    prepareTaskWorkspace,
+    project.defaultModelSelection,
+    project.environmentId,
+    project.id,
+    providerEntries,
+    setTaskOwnership,
+    taskAcceptanceCriteria,
+    taskObjective,
+    taskOwnershipRules,
+    taskProviderInstanceId,
+    taskRole,
+    taskTitle,
+  ]);
+
   const launchProvider = useCallback(
-    async (driverKind: "codex" | "antigravity") => {
+    async (driverKind: "codex" | "antigravity", task: OrchestrationTask | null = null) => {
       const entry = providerEntries.find(
         (candidate) =>
           candidate.driverKind === driverKind && candidate.enabled && candidate.isAvailable,
@@ -704,34 +865,118 @@ export function ProjectTerminalWorkspace({
         );
         return;
       }
+      if (
+        task &&
+        (task.workspace?.status !== "ready" || !task.workspace.path || !task.workspace.branch)
+      ) {
+        reportError(
+          "Task workspace is not ready",
+          task.workspace?.failureReason ?? "Wait for the canonical worktree to finish preparing.",
+        );
+        return;
+      }
+      if (task?.threadId) {
+        const thread = threadById.get(task.threadId);
+        addPane({
+          type: "thread",
+          title: task.title,
+          taskId: task.id,
+          threadId: task.threadId,
+          providerInstanceId: thread?.modelSelection.instanceId ?? entry.instanceId,
+          workspacePath: task.workspace!.path!,
+        });
+        return;
+      }
       const threadId = newThreadId();
+      const modelSelection = {
+        instanceId: entry.instanceId,
+        model: entry.models[0]?.slug ?? "auto",
+      };
       const result = await createThread({
         environmentId: project.environmentId,
         input: {
           threadId,
           projectId: project.id,
-          ...terminalThreadCreateFields({
-            title: `${entry.displayName} workspace`,
-            modelSelection: {
-              instanceId: entry.instanceId,
-              model: entry.models[0]?.slug ?? "auto",
-            },
-            workspace: { mode: "current" },
-          }),
+          ...(task
+            ? {
+                title: task.title,
+                modelSelection,
+                runtimeMode: "full-access" as const,
+                interactionMode: "default" as const,
+                branch: task.workspace!.branch!,
+                worktreePath: task.workspace!.path!,
+              }
+            : terminalThreadCreateFields({
+                title: `${entry.displayName} workspace`,
+                modelSelection,
+                workspace: { mode: "current" },
+              })),
         },
       });
       if (commandFailure(result)) {
         reportError("Could not create provider pane", "The canonical Thread was not created.");
         return;
       }
+      if (task) {
+        const bound = await bindTaskThread({
+          environmentId: project.environmentId,
+          input: { taskId: task.id, threadId },
+        });
+        if (commandFailure(bound)) {
+          reportError("Could not bind provider pane", "The canonical Task rejected this Thread.");
+          return;
+        }
+        const activated = await activateTask({
+          environmentId: project.environmentId,
+          input: { taskId: task.id },
+        });
+        if (commandFailure(activated)) {
+          reportError("Could not start Task", "The canonical Task transition was rejected.");
+          return;
+        }
+        const started = await startThreadTurn({
+          environmentId: project.environmentId,
+          input: {
+            threadId,
+            message: {
+              messageId: newMessageId(),
+              role: "user",
+              text: `Task: ${task.title}\n\nObjective:\n${task.objective}\n\n${taskOwnershipContext(task)}`,
+              attachments: [],
+            },
+            modelSelection,
+            titleSeed: task.title,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+          },
+        });
+        if (commandFailure(started))
+          reportError(
+            "Task is active, but provider start failed",
+            "The Task and worktree were preserved. Retry from the canonical Thread.",
+          );
+      }
       addPane({
         type: "provider",
-        title: entry.displayName,
+        title: task?.title ?? entry.displayName,
+        taskId: task?.id ?? null,
         threadId,
         providerInstanceId: entry.instanceId,
+        workspacePath: task?.workspace?.path ?? project.workspaceRoot,
       });
     },
-    [addPane, createThread, project.environmentId, project.id, providerEntries],
+    [
+      activateTask,
+      addPane,
+      bindTaskThread,
+      createThread,
+      project.environmentId,
+      project.id,
+      project.workspaceRoot,
+      providerEntries,
+      startThreadTurn,
+      threadById,
+    ],
   );
 
   const hostThreadId = activeWorkspace
@@ -839,6 +1084,7 @@ export function ProjectTerminalWorkspace({
       const pane = addPane({
         type: "dev_server",
         title: profile.name,
+        taskId: taskContext?.id ?? null,
         terminalId: `dev-${randomUUID()}`,
         devServerProfileId: profile.id,
         previewUrl: profile.previewUrl,
@@ -854,6 +1100,7 @@ export function ProjectTerminalWorkspace({
       project.workspaceRoot,
       projectKey,
       selectedWorkspacePath,
+      taskContext?.id,
       settings.devServerProfilesByProject,
       startProfile,
       updateClientSettings,
@@ -907,6 +1154,7 @@ export function ProjectTerminalWorkspace({
       const pane = addPane({
         type: "dev_server",
         title: profile.name,
+        taskId: taskContext?.id ?? null,
         terminalId: `dev-${randomUUID()}`,
         devServerProfileId: profile.id,
         previewUrl: profile.previewUrl,
@@ -921,6 +1169,7 @@ export function ProjectTerminalWorkspace({
       discoveredServers,
       projectKey,
       selectedWorkspacePath,
+      taskContext?.id,
       settings.devServerProfilesByProject,
       startProfile,
       updateClientSettings,
@@ -977,6 +1226,7 @@ export function ProjectTerminalWorkspace({
       const devPane = addPane({
         type: "dev_server",
         title,
+        taskId: taskContext?.id ?? null,
         terminalId: null,
         previewUrl: server.url,
         externalServer: {
@@ -993,6 +1243,7 @@ export function ProjectTerminalWorkspace({
       const previewPane = addPane({
         type: "preview",
         title: `${title} Preview`,
+        taskId: taskContext?.id ?? null,
         previewUrl: server.url,
         attachedPaneId: devPane.id,
         workspacePath: selectedWorkspacePath,
@@ -1000,7 +1251,14 @@ export function ProjectTerminalWorkspace({
       if (previewPane) setPreviewStagePaneId(previewPane.id);
       setAddPaneOpen(false);
     },
-    [activeWorkspace?.id, addPane, project.id, selectedWorkspacePath, updateActiveWorkspace],
+    [
+      activeWorkspace?.id,
+      addPane,
+      project.id,
+      selectedWorkspacePath,
+      taskContext?.id,
+      updateActiveWorkspace,
+    ],
   );
 
   const detachExternalServer = useCallback(
@@ -1041,12 +1299,14 @@ export function ProjectTerminalWorkspace({
     const pane = addPane({
       type: "tests",
       title: "Tests",
+      taskId: taskContext?.id ?? null,
       terminalId: `tests-${randomUUID()}`,
       command,
+      workspacePath: selectedWorkspacePath,
     });
     setTestCommand("");
     if (pane) void startTests(pane);
-  }, [addPane, startTests, testCommand]);
+  }, [addPane, selectedWorkspacePath, startTests, taskContext?.id, testCommand]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1085,13 +1345,19 @@ export function ProjectTerminalWorkspace({
         }));
       } else if (event.shiftKey && event.key.toLowerCase() === "t") {
         event.preventDefault();
-        addPane({ type: "shell", title: "Shell", terminalId: `shell-${randomUUID()}` });
+        addPane({
+          type: "shell",
+          title: taskContext ? `${taskContext.title} Shell` : "Shell",
+          taskId: taskContext?.id ?? null,
+          terminalId: `shell-${randomUUID()}`,
+          workspacePath: selectedWorkspacePath,
+        });
       } else if (event.shiftKey && event.key.toLowerCase() === "c") {
         event.preventDefault();
-        void launchProvider("codex");
+        void launchProvider("codex", taskContext);
       } else if (event.shiftKey && event.key.toLowerCase() === "a") {
         event.preventDefault();
-        void launchProvider("antigravity");
+        void launchProvider("antigravity", taskContext);
       } else if (!event.shiftKey && event.key.toLowerCase() === "n") {
         event.preventDefault();
         setAddPaneOpen(true);
@@ -1106,6 +1372,8 @@ export function ProjectTerminalWorkspace({
     launchProvider,
     maximizedPaneId,
     previewStagePaneId,
+    selectedWorkspacePath,
+    taskContext,
     updateActiveWorkspace,
   ]);
 
@@ -1234,8 +1502,22 @@ export function ProjectTerminalWorkspace({
         />
       );
     }
-    if (pane.type === "git")
+    if (pane.type === "git") {
+      const task = pane.taskId ? (taskById.get(TaskId.make(pane.taskId)) ?? null) : null;
+      if (task)
+        return (
+          <div className="h-full overflow-auto p-2">
+            <TaskChangesPanel
+              environmentId={project.environmentId}
+              task={task}
+              provider={
+                task.threadId ? threadById.get(task.threadId)?.modelSelection.instanceId : undefined
+              }
+            />
+          </div>
+        );
       return <GitStatusPane environmentId={project.environmentId} cwd={pane.workspacePath} />;
+    }
     if (pane.type === "preview") {
       const attachedDevPane = pane.attachedPaneId
         ? (activeWorkspace.panes.find((candidate) => candidate.id === pane.attachedPaneId) ?? null)
@@ -1983,6 +2265,7 @@ export function ProjectTerminalWorkspace({
                 >
                   <PaneHeader
                     pane={pane}
+                    task={pane.taskId ? (taskById.get(TaskId.make(pane.taskId)) ?? null) : null}
                     selected={selected}
                     working={working}
                     maximized={maximizedPaneId === pane.id}
@@ -2006,6 +2289,9 @@ export function ProjectTerminalWorkspace({
                     onHide={() =>
                       updateActiveWorkspace((workspace) => hideWorkspacePane(workspace, pane.id))
                     }
+                    onInspectTask={() => {
+                      if (pane.taskId) setInspectedTaskId(TaskId.make(pane.taskId));
+                    }}
                     onResize={() => {
                       if (activeWorkspace.layout === "freeform") {
                         updateActiveWorkspace((workspace) => ({
@@ -2161,13 +2447,65 @@ export function ProjectTerminalWorkspace({
       <Sheet open={addPaneOpen} onOpenChange={setAddPaneOpen}>
         <SheetPopup side="right" className="max-w-[28rem] border-l border-border bg-popover/98">
           <SheetHeader className="border-b border-border/70 pb-4">
-            <SheetTitle className="text-lg">Add to Workspace</SheetTitle>
+            <SheetTitle className="text-lg">
+              {taskContext ? "Add to Task" : "Add to Workspace"}
+            </SheetTitle>
             <SheetDescription>
               Bring live tools, approved processes, and canonical Threads into{" "}
               {activeWorkspace.name}.
             </SheetDescription>
           </SheetHeader>
           <SheetPanel className="space-y-6 px-5 pb-8">
+            <section className="rounded-xl border border-border bg-muted/15 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium">Execution context</p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    Task tools inherit the canonical worktree and Task identity.
+                  </p>
+                </div>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => {
+                    setAddPaneOpen(false);
+                    setTaskCreateOpen(true);
+                  }}
+                >
+                  <PlusIcon /> Create Task
+                </Button>
+              </div>
+              <select
+                aria-label="Task execution context"
+                value={taskContextId ?? ""}
+                onChange={(event) =>
+                  setTaskContextId(
+                    event.currentTarget.value ? TaskId.make(event.currentTarget.value) : null,
+                  )
+                }
+                className="mt-3 w-full rounded-md border border-border bg-background px-2 py-2 text-xs"
+              >
+                <option value="">Repository workspace · general session</option>
+                {projectTasks
+                  .filter((task) => task.status !== "cancelled")
+                  .map((task) => (
+                    <option key={task.id} value={task.id}>
+                      {task.title} · {task.workspace?.status ?? "workspace not prepared"}
+                    </option>
+                  ))}
+              </select>
+              {taskContext ? (
+                <div className="mt-3 grid gap-1 text-[10px] text-muted-foreground">
+                  <span>
+                    {taskContext.role} · {taskContext.status} · Ownership{" "}
+                    {taskContext.ownership?.status ?? "unconfigured"}
+                  </span>
+                  <span className="truncate font-mono">
+                    {taskContextPath ?? "Canonical worktree is still preparing"}
+                  </span>
+                </div>
+              ) : null}
+            </section>
             <section>
               <p className="mb-2 text-[11px] font-medium text-primary">Live</p>
               <p className="mb-3 text-[11px] text-muted-foreground">
@@ -2180,8 +2518,10 @@ export function ProjectTerminalWorkspace({
                   onClick={() =>
                     addPane({
                       type: "shell",
-                      title: "Shell",
+                      title: taskContext ? `${taskContext.title} Shell` : "Shell",
+                      taskId: taskContext?.id ?? null,
                       terminalId: `shell-${randomUUID()}`,
+                      workspacePath: selectedWorkspacePath,
                     })
                   }
                 >
@@ -2191,7 +2531,7 @@ export function ProjectTerminalWorkspace({
                 <Button
                   variant="outline"
                   className="h-auto min-h-20 flex-col items-start justify-between gap-3 p-3"
-                  onClick={() => void launchProvider("codex")}
+                  onClick={() => void launchProvider("codex", taskContext)}
                 >
                   <BotIcon className="text-primary" />
                   <span className="text-xs">Codex</span>
@@ -2199,7 +2539,7 @@ export function ProjectTerminalWorkspace({
                 <Button
                   variant="outline"
                   className="h-auto min-h-20 flex-col items-start justify-between gap-3 p-3"
-                  onClick={() => void launchProvider("antigravity")}
+                  onClick={() => void launchProvider("antigravity", taskContext)}
                 >
                   <BotIcon className="text-primary" />
                   <span className="text-xs">Antigravity</span>
@@ -2276,6 +2616,7 @@ export function ProjectTerminalWorkspace({
                     addPane({
                       type: "preview",
                       title: `${devPane.title} Preview`,
+                      taskId: devPane.taskId,
                       previewUrl: serverForPane(devPane)?.url ?? profile?.previewUrl ?? "",
                       devServerProfileId: devPane.devServerProfileId,
                       attachedPaneId: devPane.id,
@@ -2289,7 +2630,14 @@ export function ProjectTerminalWorkspace({
                 <Button
                   variant="outline"
                   className="h-auto min-h-20 flex-col items-start justify-between gap-3 p-3"
-                  onClick={() => addPane({ type: "git", title: "Git / Diff" })}
+                  onClick={() =>
+                    addPane({
+                      type: "git",
+                      title: taskContext ? `${taskContext.title} Diff` : "Git / Diff",
+                      taskId: taskContext?.id ?? null,
+                      workspacePath: selectedWorkspacePath,
+                    })
+                  }
                 >
                   <GitBranchIcon className="text-primary" />
                   <span className="text-xs">Git / Diff</span>
@@ -2306,6 +2654,7 @@ export function ProjectTerminalWorkspace({
                     addPane({
                       type: "logs",
                       title: `${devPane.title} Logs`,
+                      taskId: devPane.taskId,
                       terminalId: devPane.terminalId,
                       devServerProfileId: devPane.devServerProfileId,
                       attachedPaneId: devPane.id,
@@ -2449,6 +2798,8 @@ export function ProjectTerminalWorkspace({
                           addPane({
                             type: "thread",
                             title: thread.title,
+                            taskId:
+                              projectTasks.find((task) => task.threadId === thread.id)?.id ?? null,
                             threadId: thread.id,
                             providerInstanceId: thread.modelSelection.instanceId,
                             workspacePath: thread.worktreePath ?? project.workspaceRoot,
@@ -2478,6 +2829,220 @@ export function ProjectTerminalWorkspace({
           </SheetPanel>
         </SheetPopup>
       </Sheet>
+
+      <Sheet
+        open={inspectedTaskId !== null}
+        onOpenChange={(open) => !open && setInspectedTaskId(null)}
+      >
+        <SheetPopup side="right" className="max-w-[42rem] border-l border-border bg-popover/98">
+          {(() => {
+            const task = inspectedTaskId ? (taskById.get(inspectedTaskId) ?? null) : null;
+            if (!task)
+              return (
+                <SheetPanel className="p-6 text-sm text-muted-foreground">
+                  This canonical Task is no longer available.
+                </SheetPanel>
+              );
+            const thread = task.threadId ? (threadById.get(task.threadId) ?? null) : null;
+            const latestReview = task.reviews?.at(-1) ?? null;
+            return (
+              <>
+                <SheetHeader className="border-b border-border/70 pb-4">
+                  <SheetTitle className="text-lg">{task.title}</SheetTitle>
+                  <SheetDescription>
+                    {task.role} · {thread?.modelSelection.model ?? "No agent session"} ·{" "}
+                    {task.status}
+                  </SheetDescription>
+                </SheetHeader>
+                <SheetPanel className="space-y-5 px-5 pb-8">
+                  <section className="space-y-2 rounded-xl border border-border p-3 text-xs">
+                    <p className="text-sm font-medium">Task</p>
+                    <p className="text-muted-foreground">{task.objective}</p>
+                    <dl className="grid gap-2 sm:grid-cols-2">
+                      <div>
+                        <dt className="text-muted-foreground">Task ID</dt>
+                        <dd className="truncate font-mono">{task.id}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Agent session</dt>
+                        <dd className="truncate font-mono">
+                          {task.threadId ?? "Interrupted / not started"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Worktree</dt>
+                        <dd className="truncate font-mono">
+                          {task.workspace?.path ?? task.workspace?.status ?? "Not prepared"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Branch</dt>
+                        <dd className="truncate font-mono">{task.workspace?.branch ?? "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Base commit</dt>
+                        <dd className="truncate font-mono">{task.workspace?.baseCommit ?? "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Review</dt>
+                        <dd>{latestReview?.verdict ?? latestReview?.status ?? "Not requested"}</dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  <section className="space-y-3 rounded-xl border border-border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium">Ownership</p>
+                      <span className="text-xs text-muted-foreground">
+                        {task.ownership?.status ?? "Not configured"}
+                      </span>
+                    </div>
+                    {(["write", "read", "deny"] as const).map((access) => {
+                      const rules =
+                        task.ownership?.rules.filter((rule) => rule.access === access) ?? [];
+                      return (
+                        <div key={access} className="text-xs">
+                          <p className="mb-1 text-[10px] text-muted-foreground">
+                            {access === "write"
+                              ? "Can write"
+                              : access === "read"
+                                ? "Read only"
+                                : "Denied"}
+                          </p>
+                          <p className="font-mono">
+                            {rules.length ? rules.map((rule) => rule.pattern).join(" · ") : "None"}
+                          </p>
+                        </div>
+                      );
+                    })}
+                    {task.ownership?.violations.map((violation) => (
+                      <p key={violation.path} className="text-xs text-destructive">
+                        {violation.path} · {violation.reason}
+                      </p>
+                    ))}
+                  </section>
+
+                  <section className="space-y-2 rounded-xl border border-border p-3">
+                    <p className="text-sm font-medium">Validation and handoff</p>
+                    {(task.qualityGateRuns ?? []).length ? (
+                      task.qualityGateRuns?.map((run) => (
+                        <div key={run.id} className="flex justify-between gap-3 text-xs">
+                          <span>{run.label}</span>
+                          <span className="text-muted-foreground">{run.status}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        No canonical quality runs recorded.
+                      </p>
+                    )}
+                    <div className="border-t border-border/70 pt-2 text-xs">
+                      <span className="text-muted-foreground">Handoff · </span>
+                      {task.handoff?.status ?? "Not prepared"}
+                      {task.handoff?.summary ? (
+                        <p className="mt-1">{task.handoff.summary}</p>
+                      ) : null}
+                    </div>
+                  </section>
+
+                  {task.workspace?.status === "ready" ? (
+                    <TaskChangesPanel
+                      environmentId={project.environmentId}
+                      task={task}
+                      provider={thread?.modelSelection.instanceId}
+                    />
+                  ) : (
+                    <p className="rounded-xl border border-border p-3 text-xs text-muted-foreground">
+                      Task Diff is unavailable because the canonical worktree is{" "}
+                      {task.workspace?.status ?? "not prepared"}.
+                    </p>
+                  )}
+                </SheetPanel>
+              </>
+            );
+          })()}
+        </SheetPopup>
+      </Sheet>
+
+      <Dialog open={taskCreateOpen} onOpenChange={setTaskCreateOpen}>
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>Create Task</DialogTitle>
+            <DialogDescription>
+              Creates a canonical Task and prepares its isolated Git worktree. Panes remain views
+              over that durable runtime object.
+            </DialogDescription>
+          </DialogHeader>
+          <TaskCreateFields
+            title={taskTitle}
+            objective={taskObjective}
+            onTitleChange={setTaskTitle}
+            onObjectiveChange={setTaskObjective}
+            ownershipRules={taskOwnershipRules}
+            onOwnershipRulesChange={setTaskOwnershipRules}
+          />
+          <DialogPanel className="grid gap-4 pt-0 sm:grid-cols-2">
+            <label className="space-y-1.5 text-sm">
+              <span className="font-medium">Role</span>
+              <select
+                value={taskRole}
+                onChange={(event) => setTaskRole(event.currentTarget.value as NebulaTaskRole)}
+                className="w-full rounded-md border border-border bg-background px-2 py-2 text-sm"
+              >
+                {(
+                  ["builder", "tester", "reviewer", "scout", "architect", "integrator"] as const
+                ).map((role) => (
+                  <option key={role} value={role}>
+                    {role[0]!.toUpperCase() + role.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1.5 text-sm">
+              <span className="font-medium">Provider</span>
+              <select
+                value={taskProviderInstanceId}
+                onChange={(event) => setTaskProviderInstanceId(event.currentTarget.value)}
+                className="w-full rounded-md border border-border bg-background px-2 py-2 text-sm"
+              >
+                <option value="">Project default</option>
+                {providerEntries
+                  .filter((entry) => entry.enabled && entry.isAvailable)
+                  .map((entry) => (
+                    <option key={entry.instanceId} value={entry.instanceId}>
+                      {entry.displayName} · {entry.models[0]?.slug ?? "auto"}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="space-y-1.5 text-sm sm:col-span-2">
+              <span className="font-medium">Acceptance criteria</span>
+              <textarea
+                value={taskAcceptanceCriteria}
+                onChange={(event) => setTaskAcceptanceCriteria(event.currentTarget.value)}
+                placeholder="One bounded criterion per line"
+                className="min-h-24 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              />
+            </label>
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTaskCreateOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                taskCreateBusy ||
+                !taskTitle.trim() ||
+                !taskObjective.trim() ||
+                (taskRole === "builder" && !ownershipDraftsValid(taskOwnershipRules))
+              }
+              onClick={() => void createBoundTask()}
+            >
+              {taskCreateBusy ? "Preparing…" : "Create Task"}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
 
       <Dialog open={newWorkspaceOpen} onOpenChange={setNewWorkspaceOpen}>
         <DialogPopup>

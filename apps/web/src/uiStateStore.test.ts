@@ -119,6 +119,36 @@ describe("uiStateStore pure functions", () => {
     expect(panes.find((pane) => pane.id === invalid.id)?.externalServer).toBeNull();
   });
 
+  it("restores canonical Task bindings and keeps legacy panes general", () => {
+    const state = createDefaultTerminalWorkspaceProjectState({
+      projectId: "project-one",
+      workspacePath: "/repo",
+      now: "2026-08-26T12:00:00.000Z",
+    });
+    const workspace = state.workspaces[0]!;
+    const taskPane = createTerminalWorkspacePane({
+      id: "task-shell",
+      type: "shell",
+      title: "Task Shell",
+      taskId: "task-one",
+      workspacePath: "/repo/.nebula/task-one",
+    });
+    const legacyPane = { ...taskPane, id: "legacy-shell", taskId: undefined };
+    const persisted: unknown = {
+      terminalWorkspacesByProjectId: {
+        "project-one": {
+          ...state,
+          workspaces: [{ ...workspace, panes: [taskPane, legacyPane] }],
+        },
+      },
+    };
+    const parsed = parsePersistedState(persisted as Parameters<typeof parsePersistedState>[0]);
+    const panes = parsed.terminalWorkspacesByProjectId["project-one"]!.workspaces[0]!.panes;
+
+    expect(panes.find((pane) => pane.id === "task-shell")?.taskId).toBe("task-one");
+    expect(panes.find((pane) => pane.id === "legacy-shell")?.taskId).toBeNull();
+  });
+
   it("keeps global and project Terminal Center canvases independent", () => {
     const globalKey = "nebula:global-terminal-center";
     const projectKey = "project-one";

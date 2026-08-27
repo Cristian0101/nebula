@@ -60,6 +60,8 @@ export interface TerminalWorkspacePane {
   readonly id: string;
   readonly type: TerminalWorkspacePaneType;
   readonly title: string;
+  /** Durable domain binding. The pane remains a view; Task state stays canonical. */
+  readonly taskId: string | null;
   readonly threadId: string | null;
   readonly providerInstanceId: string | null;
   readonly terminalId: string | null;
@@ -101,6 +103,7 @@ export interface CreateTerminalWorkspacePaneInput {
   readonly type: TerminalWorkspacePaneType;
   readonly title: string;
   readonly workspacePath: string;
+  readonly taskId?: string | null;
   readonly threadId?: string | null;
   readonly providerInstanceId?: string | null;
   readonly terminalId?: string | null;
@@ -175,6 +178,7 @@ export function createTerminalWorkspacePane(
     id: input.id,
     type: input.type,
     title: input.title,
+    taskId: input.taskId ?? null,
     threadId: input.threadId ?? null,
     providerInstanceId: input.providerInstanceId ?? null,
     terminalId: input.terminalId ?? null,

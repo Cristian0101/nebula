@@ -134,6 +134,7 @@ function sanitizeWorkspacePane(value: unknown): TerminalWorkspacePane | null {
     id: pane.id,
     type: pane.type as TerminalWorkspacePane["type"],
     title: typeof pane.title === "string" && pane.title.length > 0 ? pane.title : "Pane",
+    taskId: typeof pane.taskId === "string" ? pane.taskId : null,
     threadId: typeof pane.threadId === "string" ? pane.threadId : null,
     providerInstanceId:
       typeof pane.providerInstanceId === "string" ? pane.providerInstanceId : null,
