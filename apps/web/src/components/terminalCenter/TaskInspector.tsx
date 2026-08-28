@@ -69,6 +69,7 @@ export function TaskInspector({
   const [migrations, setMigrations] = useState("");
   const [risks, setRisks] = useState("");
   const [followUps, setFollowUps] = useState("");
+  const [reviewerInstanceId, setReviewerInstanceId] = useState("");
 
   const availableProviders = useMemo(
     () => providers.filter((provider) => provider.enabled && provider.isAvailable),
@@ -78,8 +79,14 @@ export function TaskInspector({
     availableProviders.find((provider) => provider.instanceId !== builderProviderInstanceId) ??
     availableProviders[0] ??
     null;
-  const latestReview = task.reviews?.at(-1) ?? null;
+  const reviewer =
+    availableProviders.find((provider) => provider.instanceId === reviewerInstanceId) ??
+    preferredReviewer;
   const currentSnapshot = task.reviewSnapshot?.status === "current" ? task.reviewSnapshot : null;
+  const currentReview = currentSnapshot
+    ? ((task.reviews ?? []).findLast((review) => review.snapshotId === currentSnapshot.id) ?? null)
+    : null;
+  const hasStaleReview = (task.reviews?.length ?? 0) > 0 && currentReview === null;
   const snapshotQualityRuns = currentSnapshot
     ? (task.qualityGateRuns ?? []).filter((run) => run.snapshotId === currentSnapshot.id)
     : [];
@@ -94,6 +101,10 @@ export function TaskInspector({
     setRisks(handoff?.knownRisks.join("\n") ?? "");
     setFollowUps(handoff?.followUps.join("\n") ?? "");
   }, [task.handoff]);
+
+  useEffect(() => {
+    if (preferredReviewer) setReviewerInstanceId(preferredReviewer.instanceId);
+  }, [preferredReviewer]);
 
   const runAction = async (label: string, action: () => Promise<{ readonly _tag: string }>) => {
     setBusyAction(label);
@@ -158,7 +169,11 @@ export function TaskInspector({
           </div>
           <div>
             <dt className="text-muted-foreground">Review</dt>
-            <dd>{latestReview?.verdict ?? latestReview?.status ?? "Not requested"}</dd>
+            <dd>
+              {currentReview?.verdict ??
+                currentReview?.status ??
+                (hasStaleReview ? "Stale · review again" : "Not requested")}
+            </dd>
           </div>
           <div>
             <dt className="text-muted-foreground">Worktree</dt>
@@ -372,16 +387,24 @@ export function TaskInspector({
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm font-medium">Independent review</p>
           <span className="text-xs text-muted-foreground">
-            {latestReview?.verdict ?? latestReview?.status ?? "Not requested"}
+            {currentReview?.verdict ??
+              currentReview?.status ??
+              (hasStaleReview ? "Stale · review again" : "Not requested")}
           </span>
         </div>
-        {latestReview ? (
+        {hasStaleReview ? (
+          <p className="text-xs text-muted-foreground">
+            The Task diff changed after the previous verdict. Refresh the handoff and request a new
+            review for this snapshot.
+          </p>
+        ) : null}
+        {currentReview ? (
           <div className="space-y-2 text-xs">
-            <p>{latestReview.summary || "Review is still running."}</p>
+            <p>{currentReview.summary || "Review is still running."}</p>
             <p className="text-muted-foreground">
-              {latestReview.diversity} · {latestReview.reviewerModelSelection.instanceId}
+              {currentReview.diversity} · {currentReview.reviewerModelSelection.instanceId}
             </p>
-            {latestReview.findings.map((finding) => (
+            {currentReview.findings.map((finding) => (
               <div
                 key={`${finding.title}:${finding.file ?? ""}`}
                 className="rounded-lg border border-border/70 p-2"
@@ -392,7 +415,8 @@ export function TaskInspector({
                 <p className="mt-1 text-muted-foreground">{finding.detail}</p>
               </div>
             ))}
-            {latestReview.verdict === "request_changes" && latestReview.findingsSentAt === null ? (
+            {currentReview.verdict === "request_changes" &&
+            currentReview.findingsSentAt === null ? (
               <Button
                 size="xs"
                 variant="outline"
@@ -401,7 +425,7 @@ export function TaskInspector({
                   void runAction("Could not send review findings", () =>
                     sendReviewFindings({
                       environmentId,
-                      input: { taskId: task.id, reviewId: latestReview.id },
+                      input: { taskId: task.id, reviewId: currentReview.id },
                     }),
                   )
                 }
@@ -411,17 +435,33 @@ export function TaskInspector({
             ) : null}
           </div>
         ) : null}
+        <label className="block space-y-1 text-xs">
+          <span>Reviewer provider</span>
+          <select
+            aria-label="Reviewer provider"
+            className="w-full rounded-md border border-border bg-background px-2 py-1.5"
+            value={reviewer?.instanceId ?? ""}
+            onChange={(event) => setReviewerInstanceId(event.currentTarget.value)}
+          >
+            {availableProviders.map((provider) => (
+              <option key={provider.instanceId} value={provider.instanceId}>
+                {provider.displayName}
+                {provider.instanceId === builderProviderInstanceId ? " · same provider" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
         <Button
           size="xs"
           disabled={
             busyAction !== null ||
             !currentSnapshot ||
             task.handoff?.status !== "ready" ||
-            preferredReviewer === null
+            reviewer === null
           }
           onClick={() =>
             currentSnapshot &&
-            preferredReviewer &&
+            reviewer &&
             void runAction("Could not request independent review", () =>
               requestIndependentReview({
                 environmentId,
@@ -430,15 +470,15 @@ export function TaskInspector({
                   snapshotId: currentSnapshot.id,
                   reviewId: TaskReviewId.make(randomUUID()),
                   reviewerModelSelection: {
-                    instanceId: preferredReviewer.instanceId,
-                    model: preferredReviewer.models[0]?.slug ?? "auto",
+                    instanceId: reviewer.instanceId,
+                    model: reviewer.models[0]?.slug ?? "auto",
                   },
                 },
               }),
             )
           }
         >
-          Request review{preferredReviewer ? ` · ${preferredReviewer.displayName}` : ""}
+          Request review{reviewer ? ` · ${reviewer.displayName}` : ""}
         </Button>
       </section>
 
