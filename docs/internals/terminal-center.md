@@ -22,7 +22,7 @@ Supervised provider replacement creates a new Thread with the exact Task worktre
 
 ## Startup reconciliation
 
-`TaskWorkspaceReactor` replays interrupted preparation, verifies every ready worktree path, marks missing paths through a canonical event, and resumes safe removal. Ownership, review, and quality reactors reconcile their own in-flight domain work. Terminal Manager reconstructs session metadata and bounded history but does not claim that a dead PTY or provider process is resumable.
+`TaskWorkspaceReactor` replays interrupted preparation, verifies every ready worktree path, marks missing paths through a canonical event, and resumes safe removal. Ownership, review, and quality reactors reconcile their own in-flight domain work. Terminal Manager reconstructs bounded history but does not claim that a dead PTY or provider process is resumable. Managed port ownership is an in-memory registration scoped to the live PTY and is removed when that terminal exits or closes; it is never reconstructed from a persisted PID. If the operating system later reuses that PID for an unrelated listener, discovery reports the listener as external rather than granting managed Stop or Restart authority.
 
 Terminal layouts restore their `taskId`, Thread, managed terminal, and Preview attachment references. Runtime truth is then re-derived from canonical projections, terminal metadata, filesystem existence, Git state, local port ownership, and HTTP reachability. An external server remains externally owned after hydration. A PID by itself is never used to grant lifecycle control.
 
