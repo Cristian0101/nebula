@@ -128,6 +128,7 @@ import {
   type TerminalWorkspaceProjectState,
 } from "./terminalWorkspace";
 import { WorkspaceTerminalViewport } from "./WorkspaceTerminalViewport";
+import { TaskInspector } from "./TaskInspector";
 
 const ChatView = lazy(() => import("../ChatView"));
 
@@ -601,6 +602,12 @@ export function ProjectTerminalWorkspace({
   const setWorkspaceState = useUiStateStore((store) => store.setTerminalWorkspaceProjectState);
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
+    reportFailure: false,
+  });
+  const stopThreadSession = useAtomCommand(threadEnvironment.stopSession, {
+    reportFailure: false,
+  });
   const createTask = useAtomCommand(taskEnvironment.create, { reportFailure: false });
   const bindTaskThread = useAtomCommand(taskEnvironment.bindThread, { reportFailure: false });
   const activateTask = useAtomCommand(taskEnvironment.activate, { reportFailure: false });
@@ -853,7 +860,11 @@ export function ProjectTerminalWorkspace({
   ]);
 
   const launchProvider = useCallback(
-    async (driverKind: "codex" | "antigravity", task: OrchestrationTask | null = null) => {
+    async (
+      driverKind: "codex" | "antigravity",
+      task: OrchestrationTask | null = null,
+      replaceExisting = false,
+    ) => {
       const entry = providerEntries.find(
         (candidate) =>
           candidate.driverKind === driverKind && candidate.enabled && candidate.isAvailable,
@@ -875,7 +886,7 @@ export function ProjectTerminalWorkspace({
         );
         return;
       }
-      if (task?.threadId) {
+      if (task?.threadId && !replaceExisting) {
         const thread = threadById.get(task.threadId);
         addPane({
           type: "thread",
@@ -920,20 +931,27 @@ export function ProjectTerminalWorkspace({
       if (task) {
         const bound = await bindTaskThread({
           environmentId: project.environmentId,
-          input: { taskId: task.id, threadId },
+          input: {
+            taskId: task.id,
+            threadId,
+            ...(replaceExisting ? { replaceProviderExecution: true, modelSelection } : {}),
+          },
         });
         if (commandFailure(bound)) {
           reportError("Could not bind provider pane", "The canonical Task rejected this Thread.");
           return;
         }
-        const activated = await activateTask({
-          environmentId: project.environmentId,
-          input: { taskId: task.id },
-        });
-        if (commandFailure(activated)) {
-          reportError("Could not start Task", "The canonical Task transition was rejected.");
-          return;
+        if (task.status === "draft") {
+          const activated = await activateTask({
+            environmentId: project.environmentId,
+            input: { taskId: task.id },
+          });
+          if (commandFailure(activated)) {
+            reportError("Could not start Task", "The canonical Task transition was rejected.");
+            return;
+          }
         }
+        const latestReview = task.reviews?.at(-1) ?? null;
         const started = await startThreadTurn({
           environmentId: project.environmentId,
           input: {
@@ -941,7 +959,32 @@ export function ProjectTerminalWorkspace({
             message: {
               messageId: newMessageId(),
               role: "user",
-              text: `Task: ${task.title}\n\nObjective:\n${task.objective}\n\n${taskOwnershipContext(task)}`,
+              text: [
+                `Task: ${task.title}`,
+                `Task ID: ${task.id}`,
+                `Role: ${task.role}`,
+                `Workspace: ${task.workspace!.path!}`,
+                "",
+                "Objective:",
+                task.objective,
+                "",
+                "Acceptance criteria:",
+                ...(task.acceptanceCriteria?.length
+                  ? task.acceptanceCriteria.map((criterion) => `- ${criterion}`)
+                  : ["- None recorded"]),
+                "",
+                taskOwnershipContext(task),
+                ...(replaceExisting
+                  ? [
+                      "",
+                      `This is a supervised replacement for interrupted Thread ${task.threadId}.`,
+                      "Inspect the current Git diff in this same Task worktree before editing.",
+                      latestReview
+                        ? `Latest review: ${latestReview.verdict ?? latestReview.status}. Required changes: ${latestReview.requiredChanges.join("; ") || "None"}.`
+                        : "No review findings are currently attached.",
+                    ]
+                  : []),
+              ].join("\n"),
               attachments: [],
             },
             modelSelection,
@@ -958,7 +1001,7 @@ export function ProjectTerminalWorkspace({
       }
       addPane({
         type: "provider",
-        title: task?.title ?? entry.displayName,
+        title: task ? `${task.title} · ${entry.displayName}` : entry.displayName,
         taskId: task?.id ?? null,
         threadId,
         providerInstanceId: entry.instanceId,
@@ -2844,7 +2887,12 @@ export function ProjectTerminalWorkspace({
                 </SheetPanel>
               );
             const thread = task.threadId ? (threadById.get(task.threadId) ?? null) : null;
-            const latestReview = task.reviews?.at(-1) ?? null;
+            const builderProviderInstanceId = thread?.modelSelection.instanceId ?? null;
+            const builderProvider = builderProviderInstanceId
+              ? providerEntries.find(
+                  (provider) => provider.instanceId === builderProviderInstanceId,
+                )
+              : null;
             return (
               <>
                 <SheetHeader className="border-b border-border/70 pb-4">
@@ -2854,109 +2902,43 @@ export function ProjectTerminalWorkspace({
                     {task.status}
                   </SheetDescription>
                 </SheetHeader>
-                <SheetPanel className="space-y-5 px-5 pb-8">
-                  <section className="space-y-2 rounded-xl border border-border p-3 text-xs">
-                    <p className="text-sm font-medium">Task</p>
-                    <p className="text-muted-foreground">{task.objective}</p>
-                    <dl className="grid gap-2 sm:grid-cols-2">
-                      <div>
-                        <dt className="text-muted-foreground">Task ID</dt>
-                        <dd className="truncate font-mono">{task.id}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Agent session</dt>
-                        <dd className="truncate font-mono">
-                          {task.threadId ?? "Interrupted / not started"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Worktree</dt>
-                        <dd className="truncate font-mono">
-                          {task.workspace?.path ?? task.workspace?.status ?? "Not prepared"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Branch</dt>
-                        <dd className="truncate font-mono">{task.workspace?.branch ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Base commit</dt>
-                        <dd className="truncate font-mono">{task.workspace?.baseCommit ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Review</dt>
-                        <dd>{latestReview?.verdict ?? latestReview?.status ?? "Not requested"}</dd>
-                      </div>
-                    </dl>
-                  </section>
-
-                  <section className="space-y-3 rounded-xl border border-border p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium">Ownership</p>
-                      <span className="text-xs text-muted-foreground">
-                        {task.ownership?.status ?? "Not configured"}
-                      </span>
-                    </div>
-                    {(["write", "read", "deny"] as const).map((access) => {
-                      const rules =
-                        task.ownership?.rules.filter((rule) => rule.access === access) ?? [];
-                      return (
-                        <div key={access} className="text-xs">
-                          <p className="mb-1 text-[10px] text-muted-foreground">
-                            {access === "write"
-                              ? "Can write"
-                              : access === "read"
-                                ? "Read only"
-                                : "Denied"}
-                          </p>
-                          <p className="font-mono">
-                            {rules.length ? rules.map((rule) => rule.pattern).join(" · ") : "None"}
-                          </p>
-                        </div>
-                      );
-                    })}
-                    {task.ownership?.violations.map((violation) => (
-                      <p key={violation.path} className="text-xs text-destructive">
-                        {violation.path} · {violation.reason}
-                      </p>
-                    ))}
-                  </section>
-
-                  <section className="space-y-2 rounded-xl border border-border p-3">
-                    <p className="text-sm font-medium">Validation and handoff</p>
-                    {(task.qualityGateRuns ?? []).length ? (
-                      task.qualityGateRuns?.map((run) => (
-                        <div key={run.id} className="flex justify-between gap-3 text-xs">
-                          <span>{run.label}</span>
-                          <span className="text-muted-foreground">{run.status}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        No canonical quality runs recorded.
-                      </p>
-                    )}
-                    <div className="border-t border-border/70 pt-2 text-xs">
-                      <span className="text-muted-foreground">Handoff · </span>
-                      {task.handoff?.status ?? "Not prepared"}
-                      {task.handoff?.summary ? (
-                        <p className="mt-1">{task.handoff.summary}</p>
-                      ) : null}
-                    </div>
-                  </section>
-
-                  {task.workspace?.status === "ready" ? (
-                    <TaskChangesPanel
-                      environmentId={project.environmentId}
-                      task={task}
-                      provider={thread?.modelSelection.instanceId}
-                    />
-                  ) : (
-                    <p className="rounded-xl border border-border p-3 text-xs text-muted-foreground">
-                      Task Diff is unavailable because the canonical worktree is{" "}
-                      {task.workspace?.status ?? "not prepared"}.
-                    </p>
-                  )}
+                <SheetPanel className="px-5 pb-8">
+                  <TaskInspector
+                    environmentId={project.environmentId}
+                    task={task}
+                    builderProviderInstanceId={builderProviderInstanceId}
+                    builderProviderLabel={
+                      builderProvider?.displayName ?? builderProviderInstanceId ?? "Unassigned"
+                    }
+                    providers={providerEntries}
+                    onInterrupt={async () => {
+                      if (!task.threadId) return;
+                      const result = await interruptThreadTurn({
+                        environmentId: project.environmentId,
+                        input: { threadId: task.threadId },
+                      });
+                      if (commandFailure(result))
+                        reportError(
+                          "Could not interrupt agent",
+                          "The canonical Thread rejected the interruption.",
+                        );
+                    }}
+                    onStop={async () => {
+                      if (!task.threadId) return;
+                      const result = await stopThreadSession({
+                        environmentId: project.environmentId,
+                        input: { threadId: task.threadId },
+                      });
+                      if (commandFailure(result))
+                        reportError(
+                          "Could not stop agent",
+                          "The canonical Thread rejected the stop request.",
+                        );
+                    }}
+                    onReplaceProvider={(provider) =>
+                      launchProvider(provider.driverKind as "codex" | "antigravity", task, true)
+                    }
+                  />
                 </SheetPanel>
               </>
             );

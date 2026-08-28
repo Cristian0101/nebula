@@ -16,7 +16,9 @@ Project Terminal Workspaces persist pane membership, visibility, canonical attac
 
 Task-bound Shell, Tests, managed Dev Server, Logs, and Preview panes inherit the canonical Task worktree path. Provider panes create or reuse the Task's canonical Thread, bind it through `task.bind-thread`, and activate through the orchestration decider. Task Git panes query `TaskChangeSetQuery`; they do not derive a Terminal-specific diff from the repository checkout.
 
-The Task inspector progressively discloses canonical ownership, violations, quality gate runs, structured handoff, immutable review state, and Task Diff. Readiness remains enforced by the orchestration decider: the renderer cannot self-certify a Task by changing a badge.
+The Task inspector progressively discloses canonical ownership, violations, quality gate runs, structured handoff, immutable review state, and Task Diff. Its actions dispatch the existing ownership validation, review preparation, quality run, handoff update, independent review, findings delivery, Thread interruption, and session stop commands. Readiness remains enforced by the orchestration decider: the renderer cannot self-certify a Task by changing a badge.
+
+Supervised provider replacement creates a new Thread with the exact Task worktree and branch, then dispatches `task.bind-thread` with `replaceProviderExecution`. The decider requires an active Task, a distinct Thread, matching provider selection, and exact workspace identity. The replacement prompt carries bounded Task, acceptance, ownership, interruption, and current review context; the existing Git diff stays authoritative.
 
 ## Startup reconciliation
 

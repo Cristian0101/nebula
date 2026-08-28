@@ -408,6 +408,36 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         workspace: { path: "/tmp/worktrees/task-1" },
       });
 
+      const replacementThread = ThreadId.make("replacement-thread");
+      model = yield* applyCommand(model, {
+        type: "thread.create",
+        commandId: CommandId.make("create-replacement-thread"),
+        threadId: replacementThread,
+        projectId: projectA,
+        title: "Replacement builder",
+        modelSelection: { instanceId: ProviderInstanceId.make("antigravity"), model: "test" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: "nebula/manual/task1-isolated-builder",
+        worktreePath: "/tmp/worktrees/task-1",
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.bind-thread",
+        commandId: CommandId.make("replace-isolated-provider"),
+        taskId,
+        threadId: replacementThread,
+        replaceProviderExecution: true,
+        modelSelection: { instanceId: ProviderInstanceId.make("antigravity"), model: "test" },
+        createdAt: now,
+      });
+      expect(model.tasks?.[0]).toMatchObject({
+        id: taskId,
+        status: "active",
+        threadId: replacementThread,
+        workspace: { path: "/tmp/worktrees/task-1" },
+      });
+
       const snapshotId = TaskReviewSnapshotId.make("snapshot-isolated");
       model = yield* applyCommand(model, {
         type: "task.review.prepare",
@@ -526,8 +556,8 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
           taskId,
           status: "completed",
           summary: "Implemented the isolated change.",
-          providerInstanceId: "codex",
-          threadId: isolatedThread,
+          providerInstanceId: "antigravity",
+          threadId: replacementThread,
           branch: "nebula/manual/task1-isolated-builder",
         },
       });

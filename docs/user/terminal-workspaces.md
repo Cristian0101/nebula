@@ -10,9 +10,9 @@ Use **Execution context** in **New Pane** to choose between the repository works
 - A Task-bound pane carries the Task ID and uses the Task's isolated worktree. Shells, approved tests, managed Dev Servers, Logs, Preview, and Task Diff inherit that same context.
 - **Create Task** records a bounded title, objective, role, provider assignment, acceptance criteria, and ownership paths, then asks the canonical workspace manager to prepare the Task worktree.
 
-The pane header keeps Task status and ownership compact. Choose **Task details** to inspect the objective, agent session, worktree, branch, base commit, allowed and denied paths, real quality runs, structured handoff, review result, and canonical Task Diff.
+The pane header keeps Task status and ownership compact. Choose **Task details** to inspect the objective, agent session, worktree, branch, base commit, allowed and denied paths, real quality runs, structured handoff, review result, and canonical Task Diff. The inspector can validate ownership, prepare or refresh the immutable review package, run the Project's configured quality gates, complete the structured handoff, and request independent review.
 
-Changing or replacing a provider does not change the Task. The Task, worktree, changes, validation, and review history remain the durable engineering object.
+Changing or replacing a provider does not change the Task. Interrupt or stop the current session, then choose an available replacement provider from the inspector. Nebula creates a distinct canonical Thread in the same Task worktree and sends bounded recovery context; the Task, worktree, changes, validation, and review history remain the durable engineering object.
 
 ## Add panes
 

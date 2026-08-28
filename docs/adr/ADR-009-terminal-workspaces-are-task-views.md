@@ -12,7 +12,7 @@ Terminal Workspace can arrange provider Threads, shells, development servers, Pr
 
 A Task is the durable engineering object. A Terminal Workspace pane may persist an optional Task ID, but it remains only a view. Task identity, worktree, Thread, ownership rules and validation, TaskChangeSet, quality runs, structured handoff, review snapshot, verdict, restore state, and lifecycle transitions stay in the canonical orchestration domain.
 
-Task-bound writable surfaces execute from the canonical Task worktree. General repository panes remain supported. Provider replacement binds a new canonical Thread to the existing Task instead of replacing Task identity.
+Task-bound writable surfaces execute from the canonical Task worktree. General repository panes remain supported. Provider replacement binds a new canonical Thread to the existing Task instead of replacing Task identity. Quality, handoff, and review controls in Terminal Workspace dispatch canonical orchestration commands and never store readiness in pane state.
 
 ## Consequences
 
