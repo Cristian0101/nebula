@@ -19,8 +19,10 @@ import {
   buildTaskContextPackage,
   deterministicMissionTaskIds,
   missionIntegrationOverlapPaths,
+  missionRunCompletionBlockers,
   planMissionRunScheduling,
   resolveMissionCheckpointState,
+  summarizeMissionReviewCoverage,
 } from "./missionRunner.js";
 
 const now = "2026-08-23T12:00:00.000Z";
@@ -293,6 +295,40 @@ describe("supervised Mission scheduler", () => {
     );
   });
 
+  it("admits the deterministic waiter after release without double-reserving during reconciliation", () => {
+    const tasks = [
+      task("A", "completed"),
+      { ...task("B", "completed"), requiredResourceIds: [resourceId] },
+      { ...task("C"), requiredResourceIds: [resourceId] },
+      task("D"),
+    ];
+    const plan = planMissionRunScheduling({
+      mission,
+      run: { ...run, scheduledTaskIds: [taskId("B")] },
+      tasks,
+      project: {
+        ...project,
+        resourceLeases: [
+          {
+            id: ResourceLeaseId.make("released-lease"),
+            projectId,
+            resourceId,
+            taskId: taskId("B"),
+            status: "released",
+            acquiredAt: now,
+            releasedAt: now,
+          },
+        ],
+      },
+      providerReadyTaskIds: new Set(tasks.map((candidate) => candidate.id)),
+    });
+    expect(plan.scheduledTaskIds).toEqual([taskId("C")]);
+    expect(plan.decisions).toContainEqual(
+      expect.objectContaining({ taskId: taskId("C"), kind: "scheduled" }),
+    );
+    expect(plan.decisions.filter((decision) => decision.kind === "scheduled")).toHaveLength(1);
+  });
+
   it("raises attention when a reserved Task loses provider readiness", () => {
     const tasks = [task("A"), task("B"), task("C"), task("D")];
     const plan = planMissionRunScheduling({
@@ -462,5 +498,223 @@ describe("Swarm Alpha evidence", () => {
     });
     expect(report.filesChanged).toHaveLength(4);
     expect(report.knownRisks).toEqual(["Final follow-up risk"]);
+  });
+
+  it("separates required current review coverage from immutable historical attempts", () => {
+    const snapshotId = TaskReviewSnapshotId.make("current-review");
+    const reviewed = {
+      ...task("A", "completed"),
+      reviewRequired: true,
+      reviewSnapshot: {
+        id: snapshotId,
+        taskId: taskId("A"),
+        baseCommit: "base",
+        checkpointRef: "refs/t3/checkpoints/review" as never,
+        fingerprint: "tree",
+        branchHead: "head",
+        changedFiles: 1,
+        additions: 1,
+        deletions: 0,
+        ownershipStatus: "valid" as const,
+        status: "current" as const,
+        capturedAt: now,
+      },
+      reviews: [
+        {
+          id: "review-stale" as never,
+          taskId: taskId("A"),
+          snapshotId: TaskReviewSnapshotId.make("old-review"),
+          reviewerModelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+          diversity: "cross-provider" as const,
+          status: "stale" as const,
+          verdict: "request_changes" as const,
+          findings: [],
+          criteria: [],
+          securityConcerns: [],
+          requiredChanges: ["Fix it"],
+          summary: "Changes requested",
+          coverage: "complete" as const,
+          failureReason: null,
+          findingsSentAt: null,
+          createdAt: now,
+          completedAt: now,
+        },
+        {
+          id: "review-approved" as never,
+          taskId: taskId("A"),
+          snapshotId,
+          reviewerModelSelection: {
+            instanceId: ProviderInstanceId.make("antigravity"),
+            model: "test",
+          },
+          diversity: "cross-provider" as const,
+          status: "completed" as const,
+          verdict: "approve" as const,
+          findings: [],
+          criteria: [],
+          securityConcerns: [],
+          requiredChanges: [],
+          summary: "Approved",
+          coverage: "complete" as const,
+          failureReason: null,
+          findingsSentAt: null,
+          createdAt: now,
+          completedAt: now,
+        },
+      ],
+    } satisfies OrchestrationTask;
+    expect(summarizeMissionReviewCoverage([reviewed])).toEqual({
+      required: 1,
+      approved: 1,
+      historicalAttempts: 2,
+      changesRequested: 1,
+      stale: 1,
+    });
+  });
+
+  it("blocks canonical Mission completion until reviews, Integration, and final gates are current", () => {
+    const snapshotId = TaskReviewSnapshotId.make("completion-review");
+    const completedTask = {
+      ...task("A", "completed"),
+      reviewRequired: true,
+      reviewSnapshot: {
+        id: snapshotId,
+        taskId: taskId("A"),
+        baseCommit: "base",
+        checkpointRef: "refs/t3/checkpoints/completion" as never,
+        fingerprint: "tree",
+        branchHead: "head",
+        changedFiles: 1,
+        additions: 1,
+        deletions: 0,
+        ownershipStatus: "valid" as const,
+        status: "current" as const,
+        capturedAt: now,
+      },
+      qualityGateRuns: [
+        {
+          id: "task-gate" as never,
+          taskId: taskId("A"),
+          snapshotId,
+          gateId: "test",
+          label: "Test",
+          command: "npm test",
+          required: true,
+          timeoutSeconds: 60,
+          status: "passed" as const,
+          cwd: "/tmp/task",
+          exitCode: 0,
+          startedAt: now,
+          completedAt: now,
+          outputSummary: "passed",
+          outputTruncated: false,
+        },
+      ],
+      reviews: [
+        {
+          id: "completion-approval" as never,
+          taskId: taskId("A"),
+          snapshotId,
+          reviewerModelSelection: {
+            instanceId: ProviderInstanceId.make("antigravity"),
+            model: "test",
+          },
+          diversity: "cross-provider" as const,
+          status: "completed" as const,
+          verdict: "approve" as const,
+          findings: [],
+          criteria: [],
+          securityConcerns: [],
+          requiredChanges: [],
+          summary: "Approved",
+          coverage: "complete" as const,
+          failureReason: null,
+          findingsSentAt: null,
+          createdAt: now,
+          completedAt: now,
+        },
+      ],
+    } satisfies OrchestrationTask;
+    const completionMission = { ...mission, taskIds: [completedTask.id] };
+    const completionRun = {
+      ...run,
+      swarmPolicy: {
+        revision: 1,
+        maxConcurrentTasks: 1,
+        routingProfile: "manual_only",
+        transportRetryLimit: 0,
+        remediationLimit: 0,
+        autoIntegration: true,
+        stopOnConflict: true,
+        independentReviewRequired: true,
+        preapprovedOverlapPaths: [],
+        autoCompleteMission: true,
+        qualityPolicy: null,
+        reviewPolicy: null,
+        frozenAt: now,
+      },
+    } satisfies MissionRun;
+    const finalGate = {
+      id: "final-gate" as never,
+      batchId: "integration" as never,
+      snapshotTreeId: "tree",
+      gateId: "integration-test",
+      label: "Integration test",
+      command: "npm run test:integration",
+      required: true,
+      timeoutSeconds: 60,
+      status: "passed" as const,
+      cwd: "/tmp/integration",
+      exitCode: 0,
+      startedAt: now,
+      completedAt: now,
+      outputSummary: "passed",
+      outputTruncated: false,
+    };
+    const batch = {
+      status: "ready" as const,
+      validationSnapshot: { status: "current" as const },
+      qualityGateRuns: [finalGate],
+    };
+    expect(
+      missionRunCompletionBlockers({
+        mission: completionMission,
+        run: completionRun,
+        tasks: [completedTask],
+        integrationBatch: batch as never,
+      }),
+    ).toEqual([]);
+    expect(
+      missionRunCompletionBlockers({
+        mission: completionMission,
+        run: completionRun,
+        tasks: [completedTask],
+        integrationBatch: null,
+      }),
+    ).toContain("Integration and final validation must be ready on the current snapshot.");
+    expect(
+      missionRunCompletionBlockers({
+        mission: completionMission,
+        run: completionRun,
+        tasks: [completedTask],
+        integrationBatch: {
+          ...batch,
+          qualityGateRuns: [{ ...finalGate, status: "failed" as const }],
+        } as never,
+      }),
+    ).toContain("A required final validation gate is not passed.");
+    expect(
+      missionRunCompletionBlockers({
+        mission: completionMission,
+        run: completionRun,
+        tasks: [
+          {
+            ...completedTask,
+            reviewSnapshot: { ...completedTask.reviewSnapshot!, status: "stale" as const },
+          },
+        ],
+        integrationBatch: batch as never,
+      }),
+    ).toContain(`Task '${completedTask.id}' requires a current approving review.`);
   });
 });

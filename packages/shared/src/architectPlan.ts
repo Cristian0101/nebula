@@ -179,6 +179,17 @@ export function validateArchitectPlan(input: {
       errors.push(issue("team-roster-duplicate", "Starting roster seat keys must be unique."));
   }
   const keys = new Set<string>();
+  const resourceIds = new Set<string>();
+  for (const resource of input.resources) {
+    if (resourceIds.has(resource.id))
+      errors.push(
+        issue(
+          "resource-id-duplicate",
+          `Shared Resource ID '${resource.id}' must be unique within the Project policy.`,
+        ),
+      );
+    resourceIds.add(resource.id);
+  }
   const enabledResources = new Set(
     input.resources.filter((resource) => resource.enabled).map((resource) => resource.id),
   );

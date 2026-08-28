@@ -26,6 +26,7 @@ import {
   buildTaskContextPackage,
   buildMissionFinalReport,
   deterministicMissionTaskIds,
+  missionRunCompletionBlockers,
   missionIntegrationOverlapPaths,
   planMissionRunScheduling,
   type MissionRunSchedulingDecision,
@@ -623,11 +624,12 @@ const make = Effect.gen(function* () {
       return;
     }
     if (task.status === "draft") {
+      const activatedAt = yield* now;
       yield* engine.dispatch({
         type: "task.activate",
         commandId: commandId(run, task.id, taskActivationCommandPhase(task)),
         taskId: task.id,
-        createdAt: run.startedAt,
+        createdAt: activatedAt,
       });
       return;
     }
@@ -1636,6 +1638,37 @@ const make = Effect.gen(function* () {
         }
         if (batch.status !== "ready") return;
         const completedAt = yield* now;
+        const completionBlockers = missionRunCompletionBlockers({
+          mission,
+          run,
+          tasks: missionTasks,
+          integrationBatch: batch,
+        });
+        if (run.swarmPolicy?.autoCompleteMission === true && completionBlockers.length > 0) {
+          yield* updateRun({
+            runId: run.id,
+            status: "attention",
+            currentReadyTaskIds: [],
+            scheduledTaskIds: [],
+            attention: completionBlockers.map((detail) => ({
+              taskId: null,
+              code: "mission_completion_blocked",
+              detail,
+              blocksMission: true,
+            })),
+            integrationBatchId,
+          });
+          return;
+        }
+        if (run.swarmPolicy?.autoCompleteMission === true) {
+          yield* engine.dispatch({
+            type: "mission.complete",
+            commandId: commandId(run, null, `mission-complete:${batch.updatedAt}`),
+            missionId: mission.id,
+            projectId: project.id,
+            createdAt: completedAt,
+          });
+        }
         yield* updateRun({
           runId: run.id,
           status: "completed",
@@ -1649,6 +1682,7 @@ const make = Effect.gen(function* () {
             tasks: missionTasks,
             integrationBranch: batch.branch,
             finalValidation: "ready",
+            integrationQualityGateRuns: batch.qualityGateRuns,
             generatedAt: completedAt,
           }),
           decision: {
@@ -1822,6 +1856,30 @@ const make = Effect.gen(function* () {
 
   const reconcileAll = Effect.fn("MissionRunReactor.reconcileAll")(function* () {
     const model = yield* read();
+    for (const project of model.projects) {
+      const taskById = new Map(
+        (model.tasks ?? [])
+          .filter((task) => task.projectId === project.id)
+          .map((task) => [task.id, task] as const),
+      );
+      const staleLeaseIds = (project.resourceLeases ?? [])
+        .filter((lease) => {
+          if (lease.status !== "held") return false;
+          const owner = taskById.get(lease.taskId);
+          return !owner || owner.status === "completed" || owner.status === "cancelled";
+        })
+        .map((lease) => lease.id)
+        .toSorted();
+      if (staleLeaseIds.length === 0) continue;
+      yield* engine.dispatch({
+        type: "project.resource-leases.reconcile",
+        commandId: CommandId.make(
+          `server:resource-leases:reconcile:${project.id}:${staleLeaseIds.join(",")}`,
+        ),
+        projectId: project.id,
+        createdAt: yield* now,
+      });
+    }
     for (const run of model.missionRuns ?? []) {
       if (run.status === "running" || run.status === "attention" || run.status === "paused") {
         yield* reconcileRun(run.id);

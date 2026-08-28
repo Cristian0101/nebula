@@ -25,7 +25,10 @@ import {
   validateArchitectPlan,
 } from "@t3tools/shared/architectPlan";
 import { createModelSelection } from "@t3tools/shared/model";
-import { resolveMissionCheckpointState } from "@t3tools/shared/missionRunner";
+import {
+  resolveMissionCheckpointState,
+  summarizeMissionReviewCoverage,
+} from "@t3tools/shared/missionRunner";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ActivityIcon,
@@ -1866,11 +1869,15 @@ function WarRoomView({
                                 entry.instanceId === draft.assignedModelSelection?.instanceId,
                             )
                           : false;
-                        const status = taskStatus(task, thread, run, providerAvailable);
-                        const waiting = run.decisions.findLast(
+                        const latestWaiting = run.decisions.findLast(
                           (decision) =>
                             decision.taskId === task?.id && decision.kind.startsWith("waiting_"),
                         );
+                        const waiting = task?.status === "draft" ? latestWaiting : undefined;
+                        const status =
+                          waiting?.kind === "waiting_resource"
+                            ? "Waiting for resource"
+                            : taskStatus(task, thread, run, providerAvailable);
                         return (
                           <article
                             key={draft.key}
@@ -1898,7 +1905,8 @@ function WarRoomView({
                                       ? "success"
                                       : status === "Error" || status === "Provider unavailable"
                                         ? "destructive"
-                                        : status === "Review needed"
+                                        : status === "Review needed" ||
+                                            status === "Waiting for resource"
                                           ? "warning"
                                           : "outline"
                                 }
@@ -2072,8 +2080,8 @@ function ReviewIntegrationView({
         (candidate) => candidate.id === mission.integrationBatchId,
       ) ?? null)
     : null;
-  const reviews = missionTasks.flatMap((task) => task.reviews ?? []);
-  const gateRuns = missionTasks.flatMap((task) => task.qualityGateRuns ?? []);
+  const reviewSummary = summarizeMissionReviewCoverage(missionTasks);
+  const requiredFinalGates = (batch?.qualityGateRuns ?? []).filter((run) => run.required);
   const remediationRounds =
     run?.taskRecovery?.reduce((total, state) => total + state.remediationRounds, 0) ?? 0;
   const changedFiles =
@@ -2085,7 +2093,9 @@ function ReviewIntegrationView({
   return (
     <div className="space-y-3">
       <div>
-        <Badge variant="info">Checkpoint</Badge>
+        <Badge variant={mission.status === "completed" ? "success" : "info"}>
+          {mission.status === "completed" ? "Mission completed" : "Checkpoint"}
+        </Badge>
         <h1 className="mt-2 text-2xl font-semibold">Review & Integration</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Final validation uses retained Task, review, quality, and Integration evidence only.
@@ -2101,14 +2111,13 @@ function ReviewIntegrationView({
         </Surface>
         <Surface className="p-4">
           <p className="text-2xl font-semibold text-success-foreground">
-            {
-              reviews.filter(
-                (review) => review.verdict === "approve" || review.verdict === "approve_with_notes",
-              ).length
-            }{" "}
-            / {reviews.length}
+            {reviewSummary.approved} / {reviewSummary.required}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">Reviews passed</p>
+          <p className="mt-1 text-xs text-muted-foreground">Required reviews approved</p>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            {reviewSummary.historicalAttempts} historical attempts ·{" "}
+            {reviewSummary.changesRequested} changes requested · {reviewSummary.stale} stale
+          </p>
         </Surface>
         <Surface className="p-4">
           <p className="text-2xl font-semibold">{remediationRounds}</p>
@@ -2116,9 +2125,12 @@ function ReviewIntegrationView({
         </Surface>
         <Surface className="p-4">
           <p className="text-2xl font-semibold">
-            {mission.checkpoints?.filter(
-              (checkpoint) => resolveMissionCheckpointState(checkpoint, tasks).state === "passed",
-            ).length ?? 0}{" "}
+            {mission.status === "completed"
+              ? (mission.checkpoints?.length ?? 0)
+              : (mission.checkpoints?.filter(
+                  (checkpoint) =>
+                    resolveMissionCheckpointState(checkpoint, tasks).state === "passed",
+                ).length ?? 0)}{" "}
             / {mission.checkpoints?.length ?? 0}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">Checkpoints passed</p>
@@ -2198,14 +2210,21 @@ function ReviewIntegrationView({
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-muted-foreground">Quality gates</dt>
+                <dt className="text-muted-foreground">Final validation gates</dt>
                 <dd>
-                  {gateRuns.filter((run) => run.status === "passed").length} / {gateRuns.length}
+                  {requiredFinalGates.filter((run) => run.status === "passed").length} /{" "}
+                  {requiredFinalGates.length} passed
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-muted-foreground">Independent review</dt>
-                <dd>{reviews.filter((review) => review.status === "completed").length} complete</dd>
+                <dt className="text-muted-foreground">Current required reviews</dt>
+                <dd>
+                  {reviewSummary.approved} / {reviewSummary.required} approved
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-muted-foreground">Historical review attempts</dt>
+                <dd>{reviewSummary.historicalAttempts}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Integration</dt>
@@ -2780,7 +2799,7 @@ function SwarmWorkspace({
           stopOnConflict: true,
           independentReviewRequired: true,
           preapprovedOverlapPaths: [],
-          autoCompleteMission: false,
+          autoCompleteMission: true,
         },
       });
       const failure = commandError(result);

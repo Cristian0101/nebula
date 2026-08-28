@@ -26,7 +26,7 @@ Completed Tasks satisfy dependencies. A historical completed Task without a reta
 
 Draft graphs are editable. After activation, dependency changes and Task removal require explicit confirmation, only draft Tasks can be removed, and dependencies involving started work cannot be removed. Every accepted change is persisted in Mission activity. There is no casual dependency override.
 
-Cancelling a Mission stops its coordination lifecycle without deleting or cancelling its Tasks, Threads, worktrees, results, or Integration Batch. Completing a Mission is also explicit: every non-cancelled Task must be completed, and a linked Integration Batch must be Ready.
+Cancelling a Mission stops its coordination lifecycle without deleting or cancelling its Tasks, Threads, worktrees, results, or Integration Batch. Manual completion remains explicit. An approved Swarm Run launched with automatic Integration and canonical Mission completion transitions the Mission to **Completed** only after every required Task, current review, required Task gate, Integration step, and required final gate passes. Runs launched without that policy remain visibly **Mission: Active · Latest Run: Completed** rather than implying execution is still running.
 
 When completed Mission Tasks retain approved results, **Create Integration Batch** suggests topological order. Review and reorder it before confirming. The existing Integration workflow still owns overlap acknowledgement, conflict resolution, validation, cleanup, and Ready state.
 
@@ -38,6 +38,9 @@ Shared Resource blocking is implemented separately from dependency readiness. A 
 dependencies but waiting for an exclusive resource held by another Task. Bulk starts serialize
 deterministically: one contender starts and the other remains waiting. Releasing the lease makes it
 resource-ready. A Supervised Run may continue it automatically under the user's prior authorization.
+On runtime startup Nebula preserves leases for legitimate active Tasks, releases leases whose owners
+are terminal or missing, and then recomputes the deterministic wait queue. The War Room names the
+resource and current holder; agents do not coordinate the lock through chat prompts.
 Automatic Task creation outside an approved Architect plan, automatic plan approval, automatic
 `main` merge, unlimited autonomy, and AI conflict resolution are not implemented. Supervised Swarm,
 provider rerouting, bounded remediation, and policy-gated automatic Integration are implemented.

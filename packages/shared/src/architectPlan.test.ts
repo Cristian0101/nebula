@@ -222,6 +222,34 @@ describe("validateArchitectPlan", () => {
     expect(result.status).toBe("valid");
     expect(result.waveCount).toBe(2);
   });
+  it("accepts several Tasks referencing one known resource and rejects unresolved or duplicate IDs", () => {
+    const shared = validate({
+      ...base,
+      tasks: base.tasks.map((task) => ({ ...task, requiredResourceIds: [resourceId] })),
+    });
+    expect(shared.errors.some((issue) => issue.code === "unknown-resource")).toBe(false);
+
+    const unknown = validate({
+      ...base,
+      tasks: [
+        { ...base.tasks[0]!, requiredResourceIds: [SharedResourceId.make("missing")] },
+        base.tasks[1]!,
+      ],
+    });
+    expect(unknown.errors).toContainEqual(
+      expect.objectContaining({ code: "unknown-resource", taskKey: "contract" }),
+    );
+
+    const duplicated = validateArchitectPlan({
+      proposal: base,
+      planningBaseCommit: "a".repeat(40),
+      resources: [...resources, { ...resources[0]! }],
+      validatedAt: now,
+    });
+    expect(duplicated.errors).toContainEqual(
+      expect.objectContaining({ code: "resource-id-duplicate" }),
+    );
+  });
   it("rejects duplicate task keys", () => {
     expect(
       validate({ ...base, tasks: [...base.tasks, { ...base.tasks[0]! }] }).errors.some(

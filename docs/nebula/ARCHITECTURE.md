@@ -179,7 +179,7 @@ The route is desktop-first: the rail and selected workspace form two columns at 
 
 ### Shared resources
 
-Shared resources such as `package.json`, lockfiles, database migrations, global configuration, schemas, and route registries should eventually be explicitly serialized. A lock is deterministic persisted state with acquisition, release, visibility, failure, and recovery semantics. Do not implement locking before Task identity and lifecycle are stable.
+Shared resources such as `package.json`, lockfiles, database migrations, global configuration, schemas, and route registries are explicitly serialized. A lock is deterministic persisted state with acquisition, release, visibility, failure, and restart-recovery semantics. Runtime reconciliation preserves a held lease only for a legitimate active Task and releases terminal or missing-owner leases before deterministic scheduling resumes.
 
 ### Events and authoritative state
 
@@ -219,7 +219,7 @@ Mission activation remains explicit. Manual Task starts remain available. An app
 
 The Run injects a bounded prerequisite context package with explicit Nebula provenance before a dependent Builder turn. After that turn settles, it advances the existing fresh ownership/resource, review snapshot, structured handoff, quality gate, independent Reviewer, and Task completion pipeline. Task-scoped failures block that dependency subgraph while unrelated Tasks may continue. Missing Mission/Project/Task integrity fails the Run closed. Pause prevents new starts without killing active turns; resume recomputes canonical readiness; stop removes only automatic scheduling authority.
 
-Graph edits after activation still require explicit human confirmation and cannot remove started work or prerequisites involving started work. The runner never rewrites the graph, changes assignments or ownership, approves requests, reroutes providers, remediates failures, resolves conflicts, or starts Integration. Run completion reports that the Mission is ready for Integration without creating a Batch.
+Graph edits after activation still require explicit human confirmation and cannot remove started work or prerequisites involving started work. The runner never rewrites the graph, changes assignments or ownership, approves requests, or resolves conflicts. Bounded provider replacement and remediation remain canonical Run transitions. When the frozen policy authorizes automatic Integration and Mission completion, the runner completes the Mission only after current reviews, required Task gates, a Ready Integration snapshot, and required final gates pass. Otherwise the Run and Mission remain separately labeled.
 
 Mission-linked Integration extends the Prompt-9 Batch with an optional `missionId`. A topological Task order is a UI suggestion only; the human confirms or changes the actual Integration order. Standalone historical Batches remain valid.
 

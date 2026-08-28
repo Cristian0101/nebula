@@ -259,6 +259,47 @@ it.layer(NodeServices.layer)("shared resource coordination decider", (it) => {
     }),
   );
 
+  it.effect(
+    "releases a missing-owner lease after restart but preserves a legitimate active holder",
+    () =>
+      Effect.gen(function* () {
+        let model = yield* seed;
+        model = yield* apply(model, activate(taskA));
+        const activeReconcile = yield* Effect.flip(
+          decideOrchestrationCommand({
+            readModel: model,
+            command: {
+              type: "project.resource-leases.reconcile",
+              commandId: CommandId.make("reconcile-active-holder"),
+              projectId,
+              createdAt: now,
+            },
+          }),
+        );
+        expect(activeReconcile.message).toContain("no stale Task leases");
+        expect(model.projects[0]?.resourceLeases?.[0]).toMatchObject({
+          status: "held",
+          taskId: taskA,
+        });
+
+        model = { ...model, tasks: (model.tasks ?? []).filter((task) => task.id !== taskA) };
+        model = yield* apply(model, {
+          type: "project.resource-leases.reconcile",
+          commandId: CommandId.make("reconcile-missing-holder"),
+          projectId,
+          createdAt: now,
+        });
+        expect(model.projects[0]?.resourceLeases?.[0]).toMatchObject({
+          status: "released",
+          taskId: taskA,
+        });
+        model = yield* apply(model, activate(taskB));
+        expect(
+          model.projects[0]?.resourceLeases?.filter((lease) => lease.status === "held"),
+        ).toEqual([expect.objectContaining({ taskId: taskB, resourceId })]);
+      }),
+  );
+
   it.effect("allows Tasks requiring independent resources to remain active together", () =>
     Effect.gen(function* () {
       let model = yield* seed;

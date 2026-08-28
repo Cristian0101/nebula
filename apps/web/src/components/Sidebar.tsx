@@ -1782,7 +1782,7 @@ function SidebarSwarmModeButton({
   const status = activeRun
     ? `${activeRun.status === "paused" ? "Paused" : activeRun.status === "attention" ? "Attention" : `${activeTaskCount} active`}${checkpointLabel ? ` · ${checkpointLabel}` : ""}`
     : latestMission?.status === "completed"
-      ? "Review ready"
+      ? "Completed"
       : latestPlan?.status === "generating"
         ? "Planning"
         : latestPlan?.status === "failed" || latestPlan?.status === "stale"
