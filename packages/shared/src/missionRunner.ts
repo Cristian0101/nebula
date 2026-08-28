@@ -3,6 +3,8 @@ import type {
   MissionRun,
   MissionRunAttention,
   MissionFinalReport,
+  IntegrationBatch,
+  IntegrationQualityGateRun,
   MissionCheckpoint,
   OrchestrationProject,
   OrchestrationTask,
@@ -365,6 +367,7 @@ export function buildMissionFinalReport(input: {
   readonly tasks: ReadonlyArray<OrchestrationTask>;
   readonly integrationBranch: string | null;
   readonly finalValidation: MissionFinalReport["finalValidation"];
+  readonly integrationQualityGateRuns?: ReadonlyArray<IntegrationQualityGateRun>;
   readonly generatedAt: string;
 }): MissionFinalReport {
   const recovery = input.run.taskRecovery ?? [];
@@ -374,6 +377,13 @@ export function buildMissionFinalReport(input: {
   for (const task of input.tasks) {
     if (task.result?.providerInstanceId) providersUsed.add(task.result.providerInstanceId);
   }
+  const reviewSummary = summarizeMissionReviewCoverage(input.tasks);
+  const requiredFinalGates = (input.integrationQualityGateRuns ?? []).filter((run) => run.required);
+  const waitingResourceTaskIds = new Set(
+    input.run.decisions.flatMap((decision) =>
+      decision.kind === "waiting_resource" && decision.taskId ? [decision.taskId] : [],
+    ),
+  );
   return {
     missionObjective: input.mission.objective,
     taskIds: [...input.mission.taskIds],
@@ -393,6 +403,21 @@ export function buildMissionFinalReport(input: {
       0,
     ),
     reviewCount: input.tasks.reduce((count, task) => count + (task.reviews?.length ?? 0), 0),
+    requiredQualityGateCount: requiredFinalGates.length,
+    passedQualityGateCount: requiredFinalGates.filter((run) => run.status === "passed").length,
+    requiredReviewCount: reviewSummary.required,
+    approvedReviewCount: reviewSummary.approved,
+    historicalReviewAttemptCount: reviewSummary.historicalAttempts,
+    reviewChangesRequestedCount: reviewSummary.changesRequested,
+    staleReviewCount: reviewSummary.stale,
+    resourceConflictCount: waitingResourceTaskIds.size,
+    serializedResourceConflictCount: [...waitingResourceTaskIds].filter((taskId) =>
+      input.tasks.some((task) => task.id === taskId && task.status === "completed"),
+    ).length,
+    unresolvedOwnershipViolationCount: input.tasks.filter(
+      (task) =>
+        task.ownership?.status === "violation" || task.resourceCompliance?.status === "violation",
+    ).length,
     filesChanged: [
       ...new Set(
         input.tasks.flatMap((task) => (task.result?.files ?? []).map((file) => file.path)),
@@ -411,6 +436,67 @@ export function buildMissionFinalReport(input: {
     ),
     generatedAt: input.generatedAt,
   };
+}
+
+export function summarizeMissionReviewCoverage(tasks: ReadonlyArray<OrchestrationTask>) {
+  const requiredTasks = tasks.filter((task) => task.reviewRequired === true);
+  const approved = requiredTasks.filter((task) => {
+    if (task.reviewSnapshot?.status !== "current") return false;
+    return (task.reviews ?? []).some(
+      (review) =>
+        review.status === "completed" &&
+        review.snapshotId === task.reviewSnapshot?.id &&
+        (review.verdict === "approve" || review.verdict === "approve_with_notes"),
+    );
+  }).length;
+  const history = tasks.flatMap((task) => task.reviews ?? []);
+  return {
+    required: requiredTasks.length,
+    approved,
+    historicalAttempts: history.length,
+    changesRequested: history.filter((review) => review.verdict === "request_changes").length,
+    stale: history.filter((review) => review.status === "stale").length,
+  };
+}
+
+export function missionRunCompletionBlockers(input: {
+  readonly mission: Mission;
+  readonly run: MissionRun;
+  readonly tasks: ReadonlyArray<OrchestrationTask>;
+  readonly integrationBatch: IntegrationBatch | null;
+}): ReadonlyArray<string> {
+  const blockers: string[] = [];
+  if (input.run.swarmPolicy?.autoCompleteMission !== true)
+    blockers.push("Mission auto-completion is disabled for this Run.");
+  if (
+    input.tasks.length !== input.mission.taskIds.length ||
+    input.tasks.some((task) => task.status !== "completed")
+  )
+    blockers.push("All required Tasks must be completed.");
+  for (const task of input.tasks) {
+    if (task.reviewRequired === true) {
+      const currentApproval =
+        task.reviewSnapshot?.status === "current" &&
+        (task.reviews ?? []).some(
+          (review) =>
+            review.status === "completed" &&
+            review.snapshotId === task.reviewSnapshot?.id &&
+            (review.verdict === "approve" || review.verdict === "approve_with_notes"),
+        );
+      if (!currentApproval) blockers.push(`Task '${task.id}' requires a current approving review.`);
+    }
+    const requiredRuns = (task.qualityGateRuns ?? []).filter(
+      (run) => run.required && run.snapshotId === task.reviewSnapshot?.id,
+    );
+    if (requiredRuns.some((run) => run.status !== "passed"))
+      blockers.push(`Task '${task.id}' has a required quality gate that is not passed.`);
+  }
+  const batch = input.integrationBatch;
+  if (!batch || batch.status !== "ready" || batch.validationSnapshot?.status !== "current")
+    blockers.push("Integration and final validation must be ready on the current snapshot.");
+  else if (batch.qualityGateRuns.some((run) => run.required && run.status !== "passed"))
+    blockers.push("A required final validation gate is not passed.");
+  return blockers;
 }
 
 export function buildTaskContextPackage(input: {

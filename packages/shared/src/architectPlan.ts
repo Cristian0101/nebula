@@ -179,6 +179,17 @@ export function validateArchitectPlan(input: {
       errors.push(issue("team-roster-duplicate", "Starting roster seat keys must be unique."));
   }
   const keys = new Set<string>();
+  const resourceIds = new Set<string>();
+  for (const resource of input.resources) {
+    if (resourceIds.has(resource.id))
+      errors.push(
+        issue(
+          "resource-id-duplicate",
+          `Shared Resource ID '${resource.id}' must be unique within the Project policy.`,
+        ),
+      );
+    resourceIds.add(resource.id);
+  }
   const enabledResources = new Set(
     input.resources.filter((resource) => resource.enabled).map((resource) => resource.id),
   );
@@ -201,6 +212,17 @@ export function validateArchitectPlan(input: {
     const patterns = [...task.ownership.write, ...task.ownership.read, ...task.ownership.deny];
     const reviewOnly = task.role === "reviewer" || task.role === "security_reviewer";
     const coordinationOnly = task.role === "integrator";
+    if (reviewOnly || coordinationOnly) {
+      errors.push(
+        issue(
+          "managed-role-unsupported",
+          reviewOnly
+            ? "Independent review is a policy seat in supervised Swarm runs, not a materialized execution Task. Remove this Task and use the Mission review policy."
+            : "Integrator work is created only after a concrete Integration conflict, not in the initial supervised plan.",
+          task.key,
+        ),
+      );
+    }
     if (!reviewOnly && !coordinationOnly && task.ownership.write.length === 0) {
       errors.push(
         issue(

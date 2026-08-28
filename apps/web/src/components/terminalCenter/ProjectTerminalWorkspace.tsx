@@ -558,10 +558,12 @@ export function ProjectTerminalWorkspace({
   project,
   projectKey,
   displayName,
+  initialTaskId,
 }: {
   readonly project: WorkspaceProject;
   readonly projectKey: string;
   readonly displayName: string;
+  readonly initialTaskId?: string;
 }) {
   const navigate = useNavigate();
   const groups = useSettingsProjectGroups();
@@ -654,6 +656,7 @@ export function ProjectTerminalWorkspace({
   ]);
   const [taskContextId, setTaskContextId] = useState<TaskId | null>(null);
   const [inspectedTaskId, setInspectedTaskId] = useState<TaskId | null>(null);
+  const initialTaskSelectionAppliedRef = useRef<string | null>(null);
   const [taskCreateBusy, setTaskCreateBusy] = useState(false);
   const [addAt, setAddAt] = useState<{ column: number; row: number } | null>(null);
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
@@ -719,6 +722,25 @@ export function ProjectTerminalWorkspace({
     },
     [activeWorkspace, persistProjectState, project.id],
   );
+
+  useEffect(() => {
+    if (!initialTaskId || initialTaskSelectionAppliedRef.current === initialTaskId) return;
+    const task = taskById.get(TaskId.make(initialTaskId));
+    if (!task) return;
+    initialTaskSelectionAppliedRef.current = initialTaskId;
+    setTaskContextId(task.id);
+    setInspectedTaskId(task.id);
+    if (!activeWorkspace) return;
+    const taskPane = activeWorkspace.panes.find((pane) => pane.taskId === task.id);
+    if (!taskPane) return;
+    updateActiveWorkspace((workspace) => ({
+      ...workspace,
+      selectedPaneId: taskPane.id,
+      panes: workspace.panes.map((pane) =>
+        pane.id === taskPane.id ? { ...pane, visible: true } : pane,
+      ),
+    }));
+  }, [activeWorkspace, initialTaskId, taskById, updateActiveWorkspace]);
 
   const addPane = useCallback(
     (

@@ -2,7 +2,13 @@ import { SidebarInset } from "../ui/sidebar";
 import { useSettingsProjectGroups } from "../settings/ProjectSettingsPanel";
 import { ProjectTerminalWorkspace } from "./ProjectTerminalWorkspace";
 
-export function TerminalCenterPage({ projectKey }: { readonly projectKey: string }) {
+export function TerminalCenterPage({
+  projectKey,
+  initialTaskId,
+}: {
+  readonly projectKey: string;
+  readonly initialTaskId?: string;
+}) {
   const groups = useSettingsProjectGroups();
   const group = groups.find((candidate) => candidate.projectKey === projectKey) ?? null;
   if (!group) {
@@ -22,6 +28,7 @@ export function TerminalCenterPage({ projectKey }: { readonly projectKey: string
       project={project}
       projectKey={projectKey}
       displayName={group.displayName}
+      {...(initialTaskId ? { initialTaskId } : {})}
     />
   );
 }

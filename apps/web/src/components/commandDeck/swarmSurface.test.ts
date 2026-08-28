@@ -41,6 +41,14 @@ describe("Swarm product surface", () => {
     expect(workspace).toContain('currentReview?.verdict === "request_changes"');
     expect(workspace).toContain("deriveTerminalAgentPresentation");
     expect(workspace).toContain('status === "Provider unavailable"');
+    expect(workspace).toContain('waiting?.kind === "waiting_resource"');
+    expect(workspace).toContain('"Waiting for resource"');
+    expect(workspace).toContain('task?.status === "draft" ? latestWaiting : undefined');
+    expect(workspace).toContain("Historical review attempts");
+    expect(workspace).toContain("Final validation gates");
+    expect(workspace).toContain(
+      'mission.status === "completed" ? "Mission completed" : "Checkpoint"',
+    );
   });
 
   it("renders cancellation as a preserved safe state rather than a planner failure", () => {

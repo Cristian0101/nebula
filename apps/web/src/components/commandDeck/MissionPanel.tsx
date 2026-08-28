@@ -34,6 +34,7 @@ import {
   Trash2Icon,
   TriangleAlertIcon,
   SquareIcon,
+  TerminalIcon,
   XCircleIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -65,6 +66,7 @@ interface MissionPanelProps {
   readonly unavailableProviderTaskIds: ReadonlySet<TaskId>;
   readonly onStartTask: (task: OrchestrationTask) => Promise<void>;
   readonly onOpenTask: (taskId: TaskId) => void;
+  readonly onOpenTaskWorkspace: (taskId: TaskId) => void;
   readonly onCreateTask: (missionId: MissionId) => void;
   readonly onOpenTerminalCenter: () => void;
 }
@@ -448,7 +450,7 @@ export function MissionPanel(props: MissionPanelProps) {
           stopOnConflict: true,
           independentReviewRequired: true,
           preapprovedOverlapPaths: [],
-          autoCompleteMission: false,
+          autoCompleteMission: autoIntegration,
         },
       }),
     );
@@ -922,7 +924,11 @@ export function MissionPanel(props: MissionPanelProps) {
                   </div>
                   {selectedMissionRun.status === "completed" ? (
                     <p className="mt-3 rounded-md border border-success/25 bg-success/10 p-2 text-xs text-success">
-                      All Mission Tasks completed. Mission ready for Integration.
+                      {selectedMission.status === "completed"
+                        ? "Mission completed after Integration and final validation passed."
+                        : selectedMissionRun.finalReport?.finalValidation === "ready"
+                          ? "Latest Run completed. Mission remains active because canonical auto-completion was disabled for this Run."
+                          : "All Mission Tasks completed. Mission ready for Integration."}
                     </p>
                   ) : null}
                   {selectedMissionRun.attention.length > 0 ? (
@@ -1142,14 +1148,21 @@ export function MissionPanel(props: MissionPanelProps) {
                           <dd>
                             {selectedMissionRun.finalReport.retryCount} retries ·{" "}
                             {selectedMissionRun.finalReport.remediationRoundCount} remediation
-                            rounds
+                            rounds · {selectedMissionRun.finalReport.providerReplacementCount}{" "}
+                            provider replacements
                           </dd>
                         </div>
                         <div>
                           <dt className="text-muted-foreground">Quality and reviews</dt>
                           <dd>
-                            {selectedMissionRun.finalReport.qualityGateCount} gates ·{" "}
-                            {selectedMissionRun.finalReport.reviewCount} reviews
+                            {selectedMissionRun.finalReport.passedQualityGateCount ?? 0} /{" "}
+                            {selectedMissionRun.finalReport.requiredQualityGateCount ?? 0} final
+                            gates passed · {selectedMissionRun.finalReport.approvedReviewCount ?? 0}{" "}
+                            / {selectedMissionRun.finalReport.requiredReviewCount ?? 0} required
+                            reviews approved ·{" "}
+                            {selectedMissionRun.finalReport.historicalReviewAttemptCount ??
+                              selectedMissionRun.finalReport.reviewCount}{" "}
+                            historical attempts
                           </dd>
                         </div>
                         <div>
@@ -1414,6 +1427,14 @@ export function MissionPanel(props: MissionPanelProps) {
                             <Badge size="sm" variant={statusVariant(item.status)}>
                               {item.status}
                             </Badge>
+                            <Button
+                              aria-label={`Open ${item.task.title} in Terminal Center`}
+                              size="icon-xs"
+                              variant="ghost"
+                              onClick={() => props.onOpenTaskWorkspace(item.task.id)}
+                            >
+                              <TerminalIcon />
+                            </Button>
                             {selectedMission.status === "draft" ||
                             (selectedMission.status === "active" &&
                               item.task.status === "draft") ? (

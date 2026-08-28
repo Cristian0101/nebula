@@ -592,22 +592,22 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "project.resource-leases.reconcile": {
       const project = yield* requireProject({ readModel, command, projectId: command.projectId });
-      const terminalTaskIds = new Set(
+      const projectTaskById = new Map(
         (readModel.tasks ?? [])
-          .filter(
-            (task) =>
-              task.projectId === project.id &&
-              (task.status === "completed" || task.status === "cancelled"),
-          )
-          .map((task) => task.id),
+          .filter((task) => task.projectId === project.id)
+          .map((task) => [task.id, task] as const),
       );
       const staleLeases = (project.resourceLeases ?? [])
-        .filter((lease) => lease.status === "held" && terminalTaskIds.has(lease.taskId))
+        .filter((lease) => {
+          if (lease.status !== "held") return false;
+          const owner = projectTaskById.get(lease.taskId);
+          return !owner || owner.status === "completed" || owner.status === "cancelled";
+        })
         .map((lease) => ({ ...lease, status: "released" as const, releasedAt: command.createdAt }));
       if (staleLeases.length === 0)
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: `Project '${project.id}' has no terminal Task leases to reconcile.`,
+          detail: `Project '${project.id}' has no stale Task leases to reconcile.`,
         });
       const events = [];
       for (const taskId of new Set(staleLeases.map((lease) => lease.taskId))) {
@@ -2214,14 +2214,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           });
         }
       }
-      return {
+      const threadBound = {
         ...(yield* withEventBase({
           aggregateKind: "task",
           aggregateId: command.taskId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
         })),
-        type: "task.thread-bound",
+        type: "task.thread-bound" as const,
         payload: {
           taskId: command.taskId,
           threadId: command.threadId,
@@ -2230,6 +2230,102 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
+      if (!replacing) return threadBound;
+      const mission = missionContainingTask(readModel, task.id);
+      const run = (readModel.missionRuns ?? []).find(
+        (candidate) =>
+          candidate.missionId === mission?.id &&
+          (candidate.status === "running" ||
+            candidate.status === "attention" ||
+            candidate.status === "paused"),
+      );
+      if (!run) return threadBound;
+      const existingRecovery = (run.taskRecovery ?? []).find(
+        (candidate) => candidate.taskId === task.id,
+      );
+      if (existingRecovery?.attempts.some((attempt) => attempt.threadId === command.threadId))
+        return threadBound;
+      const previousThread = readModel.threads.find((candidate) => candidate.id === task.threadId);
+      const previousAttempts =
+        existingRecovery?.attempts ??
+        (previousThread && task.threadId
+          ? [
+              {
+                number: 1,
+                kind: "initial" as const,
+                providerInstanceId: previousThread.modelSelection.instanceId,
+                threadId: task.threadId,
+                status: "replaced" as const,
+                failureClass: null,
+                summary: "Provider execution replaced through the canonical Task inspector.",
+                startedAt: task.activatedAt ?? task.updatedAt,
+                completedAt: command.createdAt,
+              },
+            ]
+          : []);
+      const closedAttempts = previousAttempts.map((attempt) =>
+        attempt.status === "active"
+          ? { ...attempt, status: "replaced" as const, completedAt: command.createdAt }
+          : attempt,
+      );
+      const nextNumber = Math.max(0, ...closedAttempts.map((attempt) => attempt.number)) + 1;
+      const nextRecovery = {
+        taskId: task.id,
+        transientRetries: existingRecovery?.transientRetries ?? 0,
+        remediationRounds: existingRecovery?.remediationRounds ?? 0,
+        attempts: [
+          ...closedAttempts,
+          {
+            number: nextNumber,
+            kind: "replacement" as const,
+            providerInstanceId: thread.modelSelection.instanceId,
+            threadId: thread.id,
+            status: "active" as const,
+            failureClass: existingRecovery?.latestFailureClass ?? null,
+            summary: "Provider execution replaced through the canonical Task inspector.",
+            startedAt: command.createdAt,
+            completedAt: null,
+          },
+        ],
+        latestFailureClass: existingRecovery?.latestFailureClass ?? null,
+        latestFailureSignature: existingRecovery?.latestFailureSignature ?? null,
+        attentionRequired: false,
+        updatedAt: command.createdAt,
+      };
+      const replacementDecision = {
+        id: EventId.make(`mission-run:${run.id}:replacement:${task.id}:${thread.id}`),
+        kind: "replacement" as const,
+        taskId: task.id,
+        reason: `${previousThread?.modelSelection.instanceId ?? "unknown provider"} → ${thread.modelSelection.instanceId}. Canonical Task execution Thread replaced.`,
+        sourceTaskIds: [task.id],
+        occurredAt: command.createdAt,
+      };
+      return [
+        threadBound,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "mission",
+            aggregateId: run.missionId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "mission.run.reconciled" as const,
+          payload: {
+            run: {
+              ...run,
+              taskRecovery: existingRecovery
+                ? (run.taskRecovery ?? []).map((candidate) =>
+                    candidate.taskId === task.id ? nextRecovery : candidate,
+                  )
+                : [...(run.taskRecovery ?? []), nextRecovery],
+              decisions: run.decisions.some((decision) => decision.id === replacementDecision.id)
+                ? run.decisions
+                : [...run.decisions, replacementDecision],
+              updatedAt: command.createdAt,
+            },
+          },
+        },
+      ];
     }
 
     case "task.activate": {

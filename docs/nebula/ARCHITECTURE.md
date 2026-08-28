@@ -161,6 +161,10 @@ Command Deck activity is a filtered presentation of durable projected milestones
 
 Terminal Center is a Project route in the existing web client and desktop shell. Provider buttons are derived from the existing configured provider-instance snapshot. Launch creates the same canonical Thread used by chat; isolated launch first composes the existing Task ownership and worktree preparation commands, then binds that Thread without starting a provider turn.
 
+Mission and Command Deck links may carry a canonical Task ID into Terminal Center. The route uses that ID only to select the existing Task execution context, reveal its canonical inspector, and focus a previously attached Task pane. It does not persist a second Mission workspace or duplicate Task runtime state.
+
+Architect plan materialization is limited to writable execution roles (`builder`, `debugger`, and `test_specialist`). Reviewer and security-reviewer capacity is applied through Mission review policy after a Task handoff. Integrator Tasks are synthesized only from a concrete Integration conflict. The validator rejects speculative reviewer or integrator Tasks so approval cannot fail later while coercing them into builder-owned worktrees.
+
 Canvas visibility, positions, layout, viewport, selection, and quick-launch defaults are client-local UI preferences. They never enter Task, Mission, Thread, or provider projections. The focused node mounts the existing Thread workspace, while unselected nodes render shell summaries only. Mission Flow reads the existing Mission DAG waves, and no edge is rendered without a canonical dependency.
 
 ### Quality gates and independent review
@@ -175,7 +179,7 @@ The route is desktop-first: the rail and selected workspace form two columns at 
 
 ### Shared resources
 
-Shared resources such as `package.json`, lockfiles, database migrations, global configuration, schemas, and route registries should eventually be explicitly serialized. A lock is deterministic persisted state with acquisition, release, visibility, failure, and recovery semantics. Do not implement locking before Task identity and lifecycle are stable.
+Shared resources such as `package.json`, lockfiles, database migrations, global configuration, schemas, and route registries are explicitly serialized. A lock is deterministic persisted state with acquisition, release, visibility, failure, and restart-recovery semantics. Runtime reconciliation preserves a held lease only for a legitimate active Task and releases terminal or missing-owner leases before deterministic scheduling resumes.
 
 ### Events and authoritative state
 
@@ -215,7 +219,7 @@ Mission activation remains explicit. Manual Task starts remain available. An app
 
 The Run injects a bounded prerequisite context package with explicit Nebula provenance before a dependent Builder turn. After that turn settles, it advances the existing fresh ownership/resource, review snapshot, structured handoff, quality gate, independent Reviewer, and Task completion pipeline. Task-scoped failures block that dependency subgraph while unrelated Tasks may continue. Missing Mission/Project/Task integrity fails the Run closed. Pause prevents new starts without killing active turns; resume recomputes canonical readiness; stop removes only automatic scheduling authority.
 
-Graph edits after activation still require explicit human confirmation and cannot remove started work or prerequisites involving started work. The runner never rewrites the graph, changes assignments or ownership, approves requests, reroutes providers, remediates failures, resolves conflicts, or starts Integration. Run completion reports that the Mission is ready for Integration without creating a Batch.
+Graph edits after activation still require explicit human confirmation and cannot remove started work or prerequisites involving started work. The runner never rewrites the graph, changes assignments or ownership, approves requests, or resolves conflicts. Bounded provider replacement and remediation remain canonical Run transitions. When the frozen policy authorizes automatic Integration and Mission completion, the runner completes the Mission only after current reviews, required Task gates, a Ready Integration snapshot, and required final gates pass. Otherwise the Run and Mission remain separately labeled.
 
 Mission-linked Integration extends the Prompt-9 Batch with an optional `missionId`. A topological Task order is a UI suggestion only; the human confirms or changes the actual Integration order. Standalone historical Batches remain valid.
 

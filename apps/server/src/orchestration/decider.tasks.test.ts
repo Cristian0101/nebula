@@ -2,6 +2,8 @@ import {
   CommandId,
   CheckpointRef,
   EventId,
+  MissionId,
+  MissionRunId,
   ProjectId,
   ProviderInstanceId,
   TaskId,
@@ -408,6 +410,54 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         workspace: { path: "/tmp/worktrees/task-1" },
       });
 
+      const replacementMissionId = MissionId.make("replacement-mission");
+      const replacementRunId = MissionRunId.make("replacement-run");
+      model = {
+        ...model,
+        missions: [
+          {
+            id: replacementMissionId,
+            projectId: projectA,
+            title: "Replacement accounting",
+            objective: "Replace one provider execution canonically",
+            description: null,
+            status: "active",
+            taskIds: [taskId],
+            dependencies: [],
+            activities: [],
+            integrationBatchId: null,
+            createdAt: now,
+            updatedAt: now,
+            activatedAt: now,
+            completedAt: null,
+            cancelledAt: null,
+          },
+        ],
+        missionRuns: [
+          {
+            id: replacementRunId,
+            missionId: replacementMissionId,
+            projectId: projectA,
+            mode: "supervised_swarm",
+            status: "running",
+            maxConcurrentTasks: 1,
+            currentReadyTaskIds: [],
+            scheduledTaskIds: [taskId],
+            attention: [],
+            attentionReason: null,
+            decisions: [],
+            startedAt: now,
+            pausedAt: null,
+            completedAt: null,
+            stoppedAt: null,
+            failedAt: null,
+            failureReason: null,
+            taskRecovery: [],
+            updatedAt: now,
+          },
+        ],
+      };
+
       const replacementThread = ThreadId.make("replacement-thread");
       model = yield* applyCommand(model, {
         type: "thread.create",
@@ -437,6 +487,20 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
         threadId: replacementThread,
         workspace: { path: "/tmp/worktrees/task-1" },
       });
+      expect(model.missionRuns?.[0]?.taskRecovery?.[0]?.attempts).toEqual([
+        expect.objectContaining({
+          kind: "initial",
+          providerInstanceId: "codex",
+          threadId: isolatedThread,
+          status: "replaced",
+        }),
+        expect.objectContaining({
+          kind: "replacement",
+          providerInstanceId: "antigravity",
+          threadId: replacementThread,
+          status: "active",
+        }),
+      ]);
 
       const snapshotId = TaskReviewSnapshotId.make("snapshot-isolated");
       model = yield* applyCommand(model, {

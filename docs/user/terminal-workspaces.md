@@ -12,6 +12,8 @@ Use **Execution context** in **New Pane** to choose between the repository works
 
 The pane header keeps Task status and ownership compact. Choose **Task details** to inspect the objective, agent session, worktree, branch, base commit, allowed and denied paths, real quality runs, structured handoff, review result, and canonical Task Diff. The inspector can validate ownership, prepare or refresh the immutable review package, run the Project's configured quality gates, complete the structured handoff, and request independent review.
 
+Opening Terminal Center from a Mission Task carries the canonical Task selection into the Workspace. The Task becomes the execution context, its inspector opens immediately, and any existing pane attached to that Task is selected without changing its saved geometry.
+
 Changing or replacing a provider does not change the Task. Interrupt or stop the current session, then choose an available replacement provider from the inspector. Nebula creates a distinct canonical Thread in the same Task worktree and sends bounded recovery context; the Task, worktree, changes, validation, and review history remain the durable engineering object.
 
 ## Add panes

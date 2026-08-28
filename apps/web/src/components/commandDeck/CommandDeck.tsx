@@ -1067,6 +1067,13 @@ export function CommandDeck({
                 setSelectedTaskId(taskId);
                 setDeckSection("tasks");
               }}
+              onOpenTaskWorkspace={(taskId) =>
+                void navigate({
+                  to: "/projects/$projectKey/terminal-center",
+                  params: { projectKey },
+                  search: { taskId },
+                })
+              }
               onCreateTask={(missionId) => {
                 setCreateMissionId(missionId);
                 setCreateOpen(true);
