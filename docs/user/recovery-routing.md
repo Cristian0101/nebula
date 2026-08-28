@@ -4,15 +4,15 @@ Nebula can recover a supervised Mission from a narrow set of failures while keep
 
 ## Failure handling
 
-Nebula classifies failures from runtime evidence before choosing an action. Transport and transient process failures may retry twice by default. Quality-gate failures and an independent review verdict of **Request changes** may return findings to the same Builder Thread for two remediation rounds by default.
+Nebula classifies failures from runtime evidence before choosing an action. Transport and transient process failures may retry once by default. The original failed attempt remains immutable and the retry is a second attempt under the same Task.
 
-Ownership violations, resource violations, workspace failures, rejected reviews, architecture blockers, integration conflicts, and exhausted retry or remediation budgets stop the Run for attention.
+Provider authentication failures, provider execution failures, ownership violations, resource violations, workspace failures, quality failures, review changes requested, rejected reviews, architecture or policy blockers, Integration conflicts, and an exhausted retry budget stop the Run for attention. Nebula does not automatically repeat reasoning work or silently substitute a provider. Quality and review remediation starts only after a deliberate human action.
 
-Every retry and remediation round is retained in the Mission Run. Restarting Nebula resumes reconciliation from that durable ledger rather than resetting a budget.
+Every retry, human-initiated remediation, and replacement attempt is retained in the Mission Run. Restarting Nebula resumes reconciliation from that durable ledger rather than resetting a budget.
 
 ## Provider replacement and Task continuity
 
-When a provider is no longer usable and the selected routing profile permits automatic routing, Nebula may start a replacement provider execution Thread in the same Task worktree. The Task id, Mission membership, ownership rules, resources, workspace, completed history, and current diff do not change.
+When a provider is no longer usable, the Mission operator may replace it from the canonical Task inspector. Nebula starts the replacement provider execution Thread in the same Task worktree. The Task id, Mission membership, ownership rules, resources, workspace, completed history, current diff, handoff, and review findings do not change. Provider availability is shown honestly, and no replacement occurs silently.
 
 Terminal Center shows the current execution Thread as the Task node and labels it with its attempt number. Earlier attempt Threads remain durable and can be added explicitly from **Add existing Thread**, but Nebula does not leave duplicate Task nodes open automatically.
 
@@ -57,7 +57,7 @@ The proposal records affected Tasks and completed Tasks that must be preserved. 
 | Capability                      | Status          |
 | ------------------------------- | --------------- |
 | Bounded transient retry         | IMPLEMENTED     |
-| Bounded remediation             | IMPLEMENTED     |
+| Human-initiated remediation     | IMPLEMENTED     |
 | Provider replacement            | IMPLEMENTED     |
 | Automatic routing policies      | IMPLEMENTED     |
 | Structured provider requests    | IMPLEMENTED     |

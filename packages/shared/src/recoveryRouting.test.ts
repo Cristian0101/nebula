@@ -70,7 +70,7 @@ describe("bounded recovery", () => {
     expect(classifyRuntimeFailure({ source: "ownership" })).toBe("ownership_violation");
   });
 
-  it("retries transient provider failures exactly twice before replacement", () => {
+  it("retries a transient provider failure exactly once before requiring attention", () => {
     expect(
       recoveryAction({
         failureClass: "transport_transient",
@@ -86,36 +86,31 @@ describe("bounded recovery", () => {
         remediationRounds: 0,
         replacementAvailable: true,
       }),
-    ).toBe("retry");
-    expect(
-      recoveryAction({
-        failureClass: "transport_transient",
-        transientRetries: 2,
-        remediationRounds: 0,
-        replacementAvailable: true,
-      }),
-    ).toBe("replace");
+    ).toBe("attention");
   });
 
-  it("bounds quality and request-changes remediation at two rounds", () => {
+  it("requires human remediation for quality and request-changes failures", () => {
     for (const failureClass of ["quality_failure", "review_request_changes"] as const) {
       expect(
         recoveryAction({
           failureClass,
           transientRetries: 0,
-          remediationRounds: 1,
-          replacementAvailable: false,
-        }),
-      ).toBe("remediate");
-      expect(
-        recoveryAction({
-          failureClass,
-          transientRetries: 0,
-          remediationRounds: 2,
+          remediationRounds: 0,
           replacementAvailable: false,
         }),
       ).toBe("attention");
     }
+  });
+
+  it("never silently replaces a provider that requires authentication", () => {
+    expect(
+      recoveryAction({
+        failureClass: "provider_unavailable_auth",
+        transientRetries: 0,
+        remediationRounds: 0,
+        replacementAvailable: true,
+      }),
+    ).toBe("attention");
   });
 
   it("never blindly retries ownership, resource, workspace, or architecture failures", () => {

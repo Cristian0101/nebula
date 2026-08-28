@@ -4,7 +4,11 @@ import {
   type ArchitectMissionDraft,
   type SharedResourceDefinition,
 } from "@t3tools/contracts";
-import { createArchitectTeamConfiguration, validateArchitectPlan } from "./architectPlan.ts";
+import {
+  createArchitectTeamConfiguration,
+  diffArchitectPlanVersions,
+  validateArchitectPlan,
+} from "./architectPlan.ts";
 
 const now = "2026-08-23T12:00:00.000Z";
 const resourceId = SharedResourceId.make("api-schema");
@@ -392,5 +396,28 @@ describe("validateArchitectPlan", () => {
     expect(result.taskCount).toBe(20);
     expect([...chain, ...extra]).toHaveLength(30);
     expect(result.waveCount).toBe(20);
+  });
+
+  it("diffs persisted Plan versions without mutating either version", () => {
+    const current = {
+      ...base,
+      tasks: [
+        {
+          ...base.tasks[0]!,
+          assignedModelSelection: { instanceId: "codex" as never, model: "gpt" },
+          acceptanceCriteria: ["New contract passes"],
+        },
+      ],
+      dependencies: [],
+    } satisfies ArchitectMissionDraft;
+    expect(diffArchitectPlanVersions(base, current)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "provider_changed", taskKey: base.tasks[0]!.key }),
+        expect.objectContaining({ kind: "acceptance_changed", taskKey: base.tasks[0]!.key }),
+        expect.objectContaining({ kind: "task_removed", taskKey: base.tasks[1]!.key }),
+        expect.objectContaining({ kind: "dependency_removed" }),
+      ]),
+    );
+    expect(base.tasks).toHaveLength(2);
   });
 });

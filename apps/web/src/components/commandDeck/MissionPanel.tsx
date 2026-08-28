@@ -22,7 +22,6 @@ import {
   ArrowRightIcon,
   ArrowUpIcon,
   CheckCircle2Icon,
-  CircleDotIcon,
   GitBranchIcon,
   Link2Icon,
   ListTreeIcon,
@@ -55,6 +54,8 @@ import {
 } from "../ui/dialog";
 import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { MissionCommandCenter } from "./MissionCommandCenter";
+import { missionTaskStateLabel } from "./missionCommandCenterViewModel";
 
 interface MissionPanelProps {
   readonly environmentId: EnvironmentId;
@@ -93,10 +94,12 @@ function statusVariant(status: string) {
 
 function MissionGraph({
   mission,
+  run,
   plan,
   onOpenTask,
 }: {
   readonly mission: Mission;
+  readonly run: MissionRun | null;
   readonly plan: ReturnType<typeof computeMissionPlan>;
   readonly onOpenTask: (taskId: TaskId) => void;
 }) {
@@ -161,6 +164,7 @@ function MissionGraph({
         {plan.tasks.map((item) => {
           const position = positions.get(item.task.id);
           if (!position) return null;
+          const stateLabel = missionTaskStateLabel(item, run, plan.integration);
           return (
             <button
               key={item.task.id}
@@ -168,7 +172,7 @@ function MissionGraph({
               onClick={() => onOpenTask(item.task.id)}
               className="absolute w-[196px] rounded-lg border border-border bg-card p-2.5 text-left shadow-sm transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               style={{ left: position.x, top: position.y }}
-              aria-label={`${item.task.title}, ${item.status}, wave ${item.wave}`}
+              aria-label={`${item.task.title}, ${stateLabel}, wave ${item.wave}`}
             >
               <span className="block truncate text-sm font-medium">{item.task.title}</span>
               <span className="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
@@ -176,7 +180,7 @@ function MissionGraph({
                   {item.task.modelSelection?.instanceId ?? "Unassigned"} · {item.task.role}
                 </span>
                 <Badge size="sm" variant={statusVariant(item.status)}>
-                  {item.status}
+                  {stateLabel}
                 </Badge>
               </span>
             </button>
@@ -218,8 +222,8 @@ export function MissionPanel(props: MissionPanelProps) {
   const [autonomyMode, setAutonomyMode] = useState<"manual" | "assisted" | "supervised_swarm">(
     "manual",
   );
-  const [retryBudget, setRetryBudget] = useState(2);
-  const [remediationBudget, setRemediationBudget] = useState(2);
+  const [retryBudget, setRetryBudget] = useState(1);
+  const [remediationBudget, setRemediationBudget] = useState(0);
   const [autoIntegration, setAutoIntegration] = useState(true);
 
   const createMission = useAtomCommand(projectEnvironment.createMission, { reportFailure: false });
@@ -882,6 +886,46 @@ export function MissionPanel(props: MissionPanelProps) {
             </header>
 
             <div className="space-y-4 p-4">
+              <MissionCommandCenter
+                mission={selectedMission}
+                run={selectedMissionRun}
+                plan={plan}
+                tasks={tasks}
+                repository={project.repositoryIdentity?.displayName ?? project.title}
+                onOpenTask={props.onOpenTask}
+                onOpenTaskRecovery={props.onOpenTaskWorkspace}
+                onOpenIntegration={() =>
+                  document
+                    .getElementById(`mission-integration-${selectedMission.id}`)
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                }
+                onOpenTerminalCenter={props.onOpenTerminalCenter}
+                onResolveCoordinationRequest={(request, resolution, answer) =>
+                  void run("Could not resolve request", () =>
+                    resolveCoordinationRequest({
+                      environmentId,
+                      input: {
+                        runId: selectedMissionRun!.id,
+                        requestId: request.id,
+                        resolution,
+                        ...(answer !== undefined ? { answer } : {}),
+                      },
+                    }),
+                  )
+                }
+                onResolveReplan={(proposal, resolution) =>
+                  void run("Could not resolve replan proposal", () =>
+                    resolveReplan({
+                      environmentId,
+                      input: {
+                        runId: selectedMissionRun!.id,
+                        proposalId: proposal.id,
+                        resolution,
+                      },
+                    }),
+                  )
+                }
+              />
               {selectedMissionRun ? (
                 <section
                   className="rounded-lg border border-border/70 bg-muted/20 p-3"
@@ -931,261 +975,6 @@ export function MissionPanel(props: MissionPanelProps) {
                           : "All Mission Tasks completed. Mission ready for Integration."}
                     </p>
                   ) : null}
-                  {selectedMissionRun.attention.length > 0 ? (
-                    <ul className="mt-3 space-y-1 text-xs text-warning">
-                      {selectedMissionRun.attention.map((item) => (
-                        <li key={`${item.taskId ?? "mission"}:${item.code}`}>
-                          {item.taskId
-                            ? `${taskById.get(item.taskId)?.title ?? item.taskId}: `
-                            : ""}
-                          {item.detail}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {(selectedMissionRun.taskRecovery ?? []).length > 0 ? (
-                    <details className="mt-3 text-xs" open>
-                      <summary className="cursor-pointer text-muted-foreground">
-                        Execution attempts
-                      </summary>
-                      <div className="mt-2 space-y-2">
-                        {(selectedMissionRun.taskRecovery ?? []).map((state) => (
-                          <div key={state.taskId} className="rounded-md bg-background/65 p-2">
-                            <p className="text-foreground">
-                              {taskById.get(state.taskId)?.title ?? state.taskId} · retries{" "}
-                              {state.transientRetries}/
-                              {selectedMissionRun.recoveryPolicy?.transportRetryLimit ?? 2} ·
-                              remediation {state.remediationRounds}/
-                              {selectedMissionRun.recoveryPolicy?.remediationLimit ?? 2}
-                            </p>
-                            {state.attempts.map((attempt) => (
-                              <p
-                                key={`${attempt.threadId}:${attempt.number}`}
-                                className="mt-1 text-muted-foreground"
-                              >
-                                Attempt {attempt.number} — {attempt.providerInstanceId} ·{" "}
-                                {attempt.kind} · {attempt.status}
-                              </p>
-                            ))}
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  ) : null}
-                  {(selectedMissionRun.coordinationRequests ?? []).some(
-                    (request) => request.status === "pending",
-                  ) ? (
-                    <div className="mt-3 space-y-2">
-                      {(selectedMissionRun.coordinationRequests ?? [])
-                        .filter((request) => request.status === "pending")
-                        .map((request) => (
-                          <div
-                            key={request.id}
-                            className="rounded-md border border-warning/30 bg-warning/10 p-2 text-xs"
-                          >
-                            <p className="text-foreground">{request.kind.replaceAll("_", " ")}</p>
-                            <p className="mt-1 text-muted-foreground">{request.reason}</p>
-                            {request.kind === "ownership_request" ? (
-                              <p className="mt-2 text-warning">
-                                Approve or deny this in the Task ownership request workflow.
-                              </p>
-                            ) : (
-                              <div className="mt-2 flex gap-2">
-                                <Button
-                                  size="xs"
-                                  onClick={() => {
-                                    const answer =
-                                      request.kind === "contract_question" ||
-                                      request.kind === "dependency_question"
-                                        ? window.prompt(
-                                            "Answer from an approved contract or human decision",
-                                          )
-                                        : null;
-                                    if (
-                                      (request.kind === "contract_question" ||
-                                        request.kind === "dependency_question") &&
-                                      !answer
-                                    )
-                                      return;
-                                    void run("Could not resolve request", () =>
-                                      resolveCoordinationRequest({
-                                        environmentId,
-                                        input: {
-                                          runId: selectedMissionRun.id,
-                                          requestId: request.id,
-                                          resolution: answer ? "answered" : "approved",
-                                          answer,
-                                        },
-                                      }),
-                                    );
-                                  }}
-                                >
-                                  {request.kind.includes("question") ? "Answer" : "Approve"}
-                                </Button>
-                                <Button
-                                  size="xs"
-                                  variant="outline"
-                                  onClick={() =>
-                                    void run("Could not deny request", () =>
-                                      resolveCoordinationRequest({
-                                        environmentId,
-                                        input: {
-                                          runId: selectedMissionRun.id,
-                                          requestId: request.id,
-                                          resolution: "denied",
-                                        },
-                                      }),
-                                    )
-                                  }
-                                >
-                                  Deny
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                    </div>
-                  ) : null}
-                  {(selectedMissionRun.replanProposals ?? []).some(
-                    (proposal) => proposal.status === "pending",
-                  ) ? (
-                    <div className="mt-3 space-y-2">
-                      {(selectedMissionRun.replanProposals ?? [])
-                        .filter((proposal) => proposal.status === "pending")
-                        .map((proposal) => (
-                          <div
-                            key={proposal.id}
-                            className="rounded-md border border-warning/30 p-2 text-xs"
-                          >
-                            <p className="text-foreground">
-                              Replan proposal · {proposal.scope.replaceAll("_", " ")}
-                            </p>
-                            <p className="mt-1 text-muted-foreground">{proposal.summary}</p>
-                            <p className="mt-1 text-muted-foreground">
-                              Completed Task history preserved:{" "}
-                              {proposal.preservedCompletedTaskIds.length}
-                            </p>
-                            <div className="mt-2 flex gap-2">
-                              <Button
-                                size="xs"
-                                onClick={() =>
-                                  void run("Could not approve replan proposal", () =>
-                                    resolveReplan({
-                                      environmentId,
-                                      input: {
-                                        runId: selectedMissionRun.id,
-                                        proposalId: proposal.id,
-                                        resolution: "approved",
-                                      },
-                                    }),
-                                  )
-                                }
-                              >
-                                Approve proposal
-                              </Button>
-                              <Button
-                                size="xs"
-                                variant="outline"
-                                onClick={() =>
-                                  void run("Could not reject replan proposal", () =>
-                                    resolveReplan({
-                                      environmentId,
-                                      input: {
-                                        runId: selectedMissionRun.id,
-                                        proposalId: proposal.id,
-                                        resolution: "rejected",
-                                      },
-                                    }),
-                                  )
-                                }
-                              >
-                                Reject
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  ) : null}
-                  {selectedMissionRun.decisions.length > 0 ? (
-                    <details className="mt-3 text-xs">
-                      <summary className="cursor-pointer text-muted-foreground">
-                        Scheduler decisions ({selectedMissionRun.decisions.length})
-                      </summary>
-                      <ol className="mt-2 max-h-40 space-y-1 overflow-auto">
-                        {selectedMissionRun.decisions
-                          .toReversed()
-                          .slice(0, 30)
-                          .map((decision) => (
-                            <li
-                              key={decision.id}
-                              className="rounded-md bg-background/65 px-2 py-1.5"
-                            >
-                              <span className="text-foreground">
-                                {decision.taskId
-                                  ? (taskById.get(decision.taskId)?.title ?? decision.taskId)
-                                  : "Mission"}
-                              </span>{" "}
-                              <span className="text-muted-foreground">— {decision.reason}</span>
-                            </li>
-                          ))}
-                      </ol>
-                    </details>
-                  ) : null}
-                  {selectedMissionRun.finalReport ? (
-                    <details className="mt-3 text-xs" open>
-                      <summary className="cursor-pointer font-medium text-foreground">
-                        Final Mission report
-                      </summary>
-                      <dl className="mt-2 grid gap-2 rounded-md bg-background/65 p-2 sm:grid-cols-2">
-                        <div>
-                          <dt className="text-muted-foreground">Providers used</dt>
-                          <dd>
-                            {selectedMissionRun.finalReport.providersUsed.join(", ") || "None"}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-muted-foreground">Recovery</dt>
-                          <dd>
-                            {selectedMissionRun.finalReport.retryCount} retries ·{" "}
-                            {selectedMissionRun.finalReport.remediationRoundCount} remediation
-                            rounds · {selectedMissionRun.finalReport.providerReplacementCount}{" "}
-                            provider replacements
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-muted-foreground">Quality and reviews</dt>
-                          <dd>
-                            {selectedMissionRun.finalReport.passedQualityGateCount ?? 0} /{" "}
-                            {selectedMissionRun.finalReport.requiredQualityGateCount ?? 0} final
-                            gates passed · {selectedMissionRun.finalReport.approvedReviewCount ?? 0}{" "}
-                            / {selectedMissionRun.finalReport.requiredReviewCount ?? 0} required
-                            reviews approved ·{" "}
-                            {selectedMissionRun.finalReport.historicalReviewAttemptCount ??
-                              selectedMissionRun.finalReport.reviewCount}{" "}
-                            historical attempts
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-muted-foreground">Final validation</dt>
-                          <dd>
-                            {selectedMissionRun.finalReport.finalValidation.replaceAll("_", " ")}
-                          </dd>
-                        </div>
-                        <div className="sm:col-span-2">
-                          <dt className="text-muted-foreground">Integration branch</dt>
-                          <dd>
-                            {selectedMissionRun.finalReport.integrationBranch ?? "Not requested"}
-                          </dd>
-                        </div>
-                        <div className="sm:col-span-2">
-                          <dt className="text-muted-foreground">Files changed</dt>
-                          <dd>
-                            {selectedMissionRun.finalReport.filesChanged.join(", ") || "None"}
-                          </dd>
-                        </div>
-                      </dl>
-                    </details>
-                  ) : null}
                 </section>
               ) : null}
               {!plan.graph.valid ? (
@@ -1197,21 +986,6 @@ export function MissionPanel(props: MissionPanelProps) {
                   <TriangleAlertIcon className="mr-2 inline size-4" />
                   {plan.graph.error}
                 </div>
-              ) : null}
-              {plan.attention.length > 0 ? (
-                <section
-                  className="rounded-lg border border-warning/30 bg-warning/10 p-3"
-                  aria-label="Mission attention"
-                >
-                  <h3 className="flex items-center gap-2 text-sm font-medium text-warning">
-                    <TriangleAlertIcon className="size-4" /> Needs attention
-                  </h3>
-                  <ul className="mt-2 space-y-1 text-xs text-warning">
-                    {[...new Set(plan.attention)].map((reason) => (
-                      <li key={reason}>{reason}</li>
-                    ))}
-                  </ul>
-                </section>
               ) : null}
               {selectedMission.status === "draft" || selectedMission.status === "active" ? (
                 <div className="grid gap-3 rounded-lg border border-border/70 p-3 xl:grid-cols-2">
@@ -1357,6 +1131,7 @@ export function MissionPanel(props: MissionPanelProps) {
                 {view === "graph" ? (
                   <MissionGraph
                     mission={selectedMission}
+                    run={selectedMissionRun}
                     plan={plan}
                     onOpenTask={props.onOpenTask}
                   />
@@ -1380,7 +1155,11 @@ export function MissionPanel(props: MissionPanelProps) {
                                 >
                                   <span className="truncate text-sm">{item.task.title}</span>
                                   <Badge size="sm" variant={statusVariant(item.status)}>
-                                    {item.status}
+                                    {missionTaskStateLabel(
+                                      item,
+                                      selectedMissionRun,
+                                      plan.integration,
+                                    )}
                                   </Badge>
                                 </button>
                                 {item.blockerReasons.length > 0 ? (
@@ -1425,7 +1204,7 @@ export function MissionPanel(props: MissionPanelProps) {
                           </button>
                           <div className="flex items-center gap-1">
                             <Badge size="sm" variant={statusVariant(item.status)}>
-                              {item.status}
+                              {missionTaskStateLabel(item, selectedMissionRun, plan.integration)}
                             </Badge>
                             <Button
                               aria-label={`Open ${item.task.title} in Terminal Center`}
@@ -1569,29 +1348,10 @@ export function MissionPanel(props: MissionPanelProps) {
                 </section>
 
                 <div className="space-y-4">
-                  <section className="rounded-lg border border-border/70 p-3">
-                    <h3 className="flex items-center gap-2 text-sm font-medium">
-                      <ActivityIcon className="size-4 text-primary" />
-                      Mission activity
-                    </h3>
-                    <ol className="mt-2 max-h-52 space-y-2 overflow-auto">
-                      {selectedMission.activities
-                        .toReversed()
-                        .slice(0, 20)
-                        .map((activity) => (
-                          <li key={activity.id} className="flex gap-2 text-xs">
-                            <CircleDotIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                            <span>
-                              <span className="text-foreground">{activity.summary}</span>
-                              <span className="ml-2 text-muted-foreground">
-                                {new Date(activity.occurredAt).toLocaleString()}
-                              </span>
-                            </span>
-                          </li>
-                        ))}
-                    </ol>
-                  </section>
-                  <section className="rounded-lg border border-border/70 p-3">
+                  <section
+                    id={`mission-integration-${selectedMission.id}`}
+                    className="scroll-mt-4 rounded-lg border border-border/70 p-3"
+                  >
                     <h3 className="text-sm font-medium">Integrate Mission results</h3>
                     {plan.integration ? (
                       <>

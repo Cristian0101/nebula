@@ -8,6 +8,7 @@ import {
   providerSupportsStructuredReview,
   reviewSnapshotCoversLatestTurn,
   shouldReconcileMissionRunEventType,
+  shouldInterruptCancelledTaskProvider,
   taskActivationCommandPhase,
 } from "./MissionRunReactor.ts";
 
@@ -29,6 +30,40 @@ describe("MissionRunReactor recovery", () => {
       missionProviderTurnInFlight({
         session: { status: "ready" },
         latestTurn: { state: "completed" },
+      }),
+    ).toBe(false);
+  });
+
+  it("interrupts only the cancelled Task's own in-flight provider turn", () => {
+    const taskThreadId = "thread-a" as never;
+    expect(
+      shouldInterruptCancelledTaskProvider({
+        taskThreadId,
+        thread: {
+          id: taskThreadId,
+          session: { status: "running" },
+          latestTurn: { state: "running" },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldInterruptCancelledTaskProvider({
+        taskThreadId,
+        thread: {
+          id: "thread-b" as never,
+          session: { status: "running" },
+          latestTurn: { state: "running" },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      shouldInterruptCancelledTaskProvider({
+        taskThreadId,
+        thread: {
+          id: taskThreadId,
+          session: { status: "ready" },
+          latestTurn: { state: "completed" },
+        },
       }),
     ).toBe(false);
   });

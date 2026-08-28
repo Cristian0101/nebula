@@ -202,6 +202,23 @@ export function missionProviderTurnInFlight(thread: {
   );
 }
 
+export function shouldInterruptCancelledTaskProvider(input: {
+  readonly taskThreadId: ThreadId | null;
+  readonly thread:
+    | {
+        readonly id: ThreadId;
+        readonly session: { readonly status: string } | null;
+        readonly latestTurn: { readonly state: string } | null;
+      }
+    | undefined;
+}): boolean {
+  return (
+    input.taskThreadId !== null &&
+    input.thread?.id === input.taskThreadId &&
+    missionProviderTurnInFlight(input.thread)
+  );
+}
+
 export function reviewSnapshotCoversLatestTurn(
   task: { readonly reviewSnapshot?: { readonly capturedAt: string } | null | undefined },
   thread: { readonly latestTurn?: { readonly requestedAt: string } | null | undefined },
@@ -1683,6 +1700,11 @@ const make = Effect.gen(function* () {
             integrationBranch: batch.branch,
             finalValidation: "ready",
             integrationQualityGateRuns: batch.qualityGateRuns,
+            integrationHumanChangeCount: batch.humanChanges.length,
+            planHumanEditCount:
+              project.architectPlans
+                ?.find((plan) => plan.id === mission.architectPlanProposalId)
+                ?.revisions.filter((revision) => revision.source === "human").length ?? 0,
             generatedAt: completedAt,
           }),
           decision: {
@@ -1709,6 +1731,10 @@ const make = Effect.gen(function* () {
           tasks: missionTasks,
           integrationBranch: null,
           finalValidation: "not_requested",
+          planHumanEditCount:
+            project.architectPlans
+              ?.find((plan) => plan.id === mission.architectPlanProposalId)
+              ?.revisions.filter((revision) => revision.source === "human").length ?? 0,
           generatedAt: completedAt,
         }),
         decision: {
@@ -1887,6 +1913,23 @@ const make = Effect.gen(function* () {
     }
   });
 
+  const interruptCancelledTaskProvider = Effect.fn(
+    "MissionRunReactor.interruptCancelledTaskProvider",
+  )(function* (event: Extract<OrchestrationEvent, { type: "task.cancelled" }>) {
+    const model = yield* read();
+    const task = (model.tasks ?? []).find((candidate) => candidate.id === event.payload.taskId);
+    if (!task?.threadId) return;
+    const thread = model.threads.find((candidate) => candidate.id === task.threadId);
+    if (!shouldInterruptCancelledTaskProvider({ taskThreadId: task.threadId, thread })) return;
+    yield* engine.dispatch({
+      type: "thread.turn.interrupt",
+      commandId: CommandId.make(`server:task-cancel:${task.id}:${event.eventId}:interrupt`),
+      threadId: task.threadId,
+      ...(thread?.latestTurn?.turnId ? { turnId: thread.latestTurn.turnId } : {}),
+      createdAt: event.payload.cancelledAt,
+    });
+  });
+
   const nudgeAfterTurnDiff = Effect.fn("MissionRunReactor.nudgeAfterTurnDiff")(function* () {
     const model = yield* read();
     for (const run of model.missionRuns ?? []) {
@@ -1904,7 +1947,8 @@ const make = Effect.gen(function* () {
   });
 
   const worker = yield* makeDrainableWorker((event: OrchestrationEvent | null) =>
-    reconcileAll().pipe(
+    (event?.type === "task.cancelled" ? interruptCancelledTaskProvider(event) : Effect.void).pipe(
+      Effect.andThen(reconcileAll()),
       Effect.andThen(
         event?.type === "thread.turn-diff-completed" ? nudgeAfterTurnDiff() : Effect.void,
       ),

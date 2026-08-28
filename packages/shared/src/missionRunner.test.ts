@@ -485,6 +485,8 @@ describe("Swarm Alpha evidence", () => {
       tasks,
       integrationBranch: "nebula/integration/swarm-alpha",
       finalValidation: "ready",
+      integrationHumanChangeCount: 1,
+      planHumanEditCount: 2,
       generatedAt: "2026-08-23T12:10:00.000Z",
     });
     expect(report).toMatchObject({
@@ -493,6 +495,7 @@ describe("Swarm Alpha evidence", () => {
       providerReplacementCount: 1,
       retryCount: 1,
       remediationRoundCount: 1,
+      humanInterventionCount: 5,
       finalValidation: "ready",
       elapsedMilliseconds: 600_000,
     });

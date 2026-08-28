@@ -1608,8 +1608,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             failedAt: null,
             failureReason: null,
             recoveryPolicy: {
-              transportRetryLimit: command.transportRetryLimit ?? 2,
-              remediationLimit: command.remediationLimit ?? 2,
+              transportRetryLimit: command.transportRetryLimit ?? 1,
+              remediationLimit: command.remediationLimit ?? 0,
               routingProfile:
                 command.routingProfile ??
                 mission.routingProfile ??

@@ -368,6 +368,8 @@ export function buildMissionFinalReport(input: {
   readonly integrationBranch: string | null;
   readonly finalValidation: MissionFinalReport["finalValidation"];
   readonly integrationQualityGateRuns?: ReadonlyArray<IntegrationQualityGateRun>;
+  readonly integrationHumanChangeCount?: number;
+  readonly planHumanEditCount?: number;
   readonly generatedAt: string;
 }): MissionFinalReport {
   const recovery = input.run.taskRecovery ?? [];
@@ -384,6 +386,26 @@ export function buildMissionFinalReport(input: {
       decision.kind === "waiting_resource" && decision.taskId ? [decision.taskId] : [],
     ),
   );
+  const providerReplacementCount = recovery.reduce(
+    (count, state) =>
+      count + state.attempts.filter((attempt) => attempt.kind === "replacement").length,
+    0,
+  );
+  const remediationRoundCount = recovery.reduce(
+    (count, state) => count + state.remediationRounds,
+    0,
+  );
+  const resolvedCoordinationCount = (input.run.coordinationRequests ?? []).filter(
+    (request) => request.status !== "pending" && request.resolvedAt !== null,
+  ).length;
+  const resolvedOwnershipCount = input.tasks.reduce(
+    (count, task) =>
+      count +
+      (task.ownershipRequests ?? []).filter(
+        (request) => request.status !== "pending" && request.status !== "cancelled",
+      ).length,
+    0,
+  );
   return {
     missionObjective: input.mission.objective,
     taskIds: [...input.mission.taskIds],
@@ -391,13 +413,9 @@ export function buildMissionFinalReport(input: {
       .filter((task) => task.status === "completed")
       .map((task) => task.id),
     providersUsed: [...providersUsed].toSorted(),
-    providerReplacementCount: recovery.reduce(
-      (count, state) =>
-        count + state.attempts.filter((attempt) => attempt.kind === "replacement").length,
-      0,
-    ),
+    providerReplacementCount,
     retryCount: recovery.reduce((count, state) => count + state.transientRetries, 0),
-    remediationRoundCount: recovery.reduce((count, state) => count + state.remediationRounds, 0),
+    remediationRoundCount,
     qualityGateCount: input.tasks.reduce(
       (count, task) => count + (task.qualityGateRuns?.length ?? 0),
       0,
@@ -425,9 +443,13 @@ export function buildMissionFinalReport(input: {
     ].toSorted(),
     integrationBranch: input.integrationBranch,
     finalValidation: input.finalValidation,
-    humanInterventionCount: input.run.decisions.filter(
-      (decision) => decision.kind === "attention" || decision.kind === "request",
-    ).length,
+    humanInterventionCount:
+      providerReplacementCount +
+      remediationRoundCount +
+      resolvedCoordinationCount +
+      resolvedOwnershipCount +
+      (input.integrationHumanChangeCount ?? 0) +
+      (input.planHumanEditCount ?? 0),
     knownRisks: [...new Set(input.tasks.flatMap((task) => task.result?.knownRisks ?? []))],
     followUps: [...new Set(input.tasks.flatMap((task) => task.result?.followUps ?? []))],
     elapsedMilliseconds: Math.max(
