@@ -201,6 +201,17 @@ export function validateArchitectPlan(input: {
     const patterns = [...task.ownership.write, ...task.ownership.read, ...task.ownership.deny];
     const reviewOnly = task.role === "reviewer" || task.role === "security_reviewer";
     const coordinationOnly = task.role === "integrator";
+    if (reviewOnly || coordinationOnly) {
+      errors.push(
+        issue(
+          "managed-role-unsupported",
+          reviewOnly
+            ? "Independent review is a policy seat in supervised Swarm runs, not a materialized execution Task. Remove this Task and use the Mission review policy."
+            : "Integrator work is created only after a concrete Integration conflict, not in the initial supervised plan.",
+          task.key,
+        ),
+      );
+    }
     if (!reviewOnly && !coordinationOnly && task.ownership.write.length === 0) {
       errors.push(
         issue(

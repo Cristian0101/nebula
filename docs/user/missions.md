@@ -10,6 +10,10 @@ Open **Command Deck → Missions**, create a Mission, then create a canonical Ta
 
 Graph view shows dependency lines, Task status, provider, role, and computed wave. Waves are deterministic topological layers: independent Tasks appear together and later waves wait for every prerequisite. Waves are derived from the current graph and Task state. Approved Architect Missions may also create a durable [Supervised Mission Run](supervised-runs.md); manual Missions keep the explicit start flow.
 
+Select a Task title or graph node to inspect that same canonical Task in Command Deck. Use the Terminal Center action beside a Task to open its Task-bound execution context directly; Nebula selects the Task, reveals its inspector, and restores an existing Task pane when one is already present. No Mission-only workspace or copied Task state is created.
+
+Supervised plans materialize only Tasks that can execute in a writable Task worktree. Independent reviewers are assigned by Mission policy after a Task handoff, and an integrator Task is created only when a concrete Integration conflict needs resolution. They do not appear as speculative read-only Tasks in the initial plan.
+
 ## Activate and start work
 
 Activate a valid non-empty draft Mission when the authored graph is ready. Activation does not start anything. A draft Task is **Ready** only when every prerequisite is completed and its provider, ownership, and workspace start configuration is valid. Otherwise Command Deck shows explicit blockers or configuration attention.

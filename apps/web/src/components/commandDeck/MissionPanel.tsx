@@ -34,6 +34,7 @@ import {
   Trash2Icon,
   TriangleAlertIcon,
   SquareIcon,
+  TerminalIcon,
   XCircleIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -65,6 +66,7 @@ interface MissionPanelProps {
   readonly unavailableProviderTaskIds: ReadonlySet<TaskId>;
   readonly onStartTask: (task: OrchestrationTask) => Promise<void>;
   readonly onOpenTask: (taskId: TaskId) => void;
+  readonly onOpenTaskWorkspace: (taskId: TaskId) => void;
   readonly onCreateTask: (missionId: MissionId) => void;
   readonly onOpenTerminalCenter: () => void;
 }
@@ -1414,6 +1416,14 @@ export function MissionPanel(props: MissionPanelProps) {
                             <Badge size="sm" variant={statusVariant(item.status)}>
                               {item.status}
                             </Badge>
+                            <Button
+                              aria-label={`Open ${item.task.title} in Terminal Center`}
+                              size="icon-xs"
+                              variant="ghost"
+                              onClick={() => props.onOpenTaskWorkspace(item.task.id)}
+                            >
+                              <TerminalIcon />
+                            </Button>
                             {selectedMission.status === "draft" ||
                             (selectedMission.status === "active" &&
                               item.task.status === "draft") ? (

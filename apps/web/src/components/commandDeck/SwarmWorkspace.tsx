@@ -13,6 +13,7 @@ import {
   type OrchestrationProject,
   type OrchestrationTask,
   type OrchestrationThreadShell,
+  type TaskId,
 } from "@t3tools/contracts";
 import {
   squashAtomCommandFailure,
@@ -1555,6 +1556,24 @@ function TeamPlanView({
             </Surface>
           ) : null}
 
+          {(plan.validation?.errors.length ?? 0) > 0 ? (
+            <Surface className="border-destructive/35 bg-destructive/[0.05] p-4">
+              <h2 className="flex items-center gap-2 text-sm font-medium">
+                <AlertCircleIcon className="size-4 text-destructive" /> Plan blockers
+              </h2>
+              <ul className="mt-3 space-y-2 text-xs text-muted-foreground">
+                {plan.validation?.errors.map((error) => (
+                  <li key={`${error.code}:${error.taskKey ?? ""}`}>
+                    {error.taskKey
+                      ? `${proposal.tasks.find((task) => task.key === error.taskKey)?.title ?? error.taskKey}: `
+                      : ""}
+                    {error.message}
+                  </li>
+                ))}
+              </ul>
+            </Surface>
+          ) : null}
+
           {approvalError ? (
             <Surface className="border-destructive/35 bg-destructive/[0.05] p-4">
               <h2 className="text-sm font-medium">Team Plan could not be created</h2>
@@ -1727,9 +1746,13 @@ function WarRoomView({
         "completed",
     ),
   ).length;
-  const openTerminal = (thread: OrchestrationThreadShell) => {
+  const openTerminal = (thread: OrchestrationThreadShell, taskId: TaskId) => {
     setTerminalSelection(project.id, thread.id);
-    void navigate({ to: "/projects/$projectKey/terminal-center", params: { projectKey } });
+    void navigate({
+      to: "/projects/$projectKey/terminal-center",
+      params: { projectKey },
+      search: { taskId },
+    });
   };
   const openThread = (thread: OrchestrationThreadShell) =>
     void navigate({
@@ -1896,7 +1919,7 @@ function WarRoomView({
                                 <span className="text-muted-foreground">Why?</span> {waiting.reason}
                               </div>
                             ) : null}
-                            {thread ? (
+                            {thread && task ? (
                               <div className="mt-3 flex flex-wrap gap-1.5">
                                 <Button
                                   size="xs"
@@ -1908,7 +1931,7 @@ function WarRoomView({
                                 <Button
                                   size="xs"
                                   variant="ghost"
-                                  onClick={() => openTerminal(thread)}
+                                  onClick={() => openTerminal(thread, task.id)}
                                 >
                                   <TerminalIcon /> Terminal Center
                                 </Button>

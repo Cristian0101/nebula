@@ -159,7 +159,7 @@ describe("validateArchitectPlan", () => {
     );
   });
 
-  it("keeps writable manual-shell Tasks blocked until an explicit WRITE path is assigned", () => {
+  it("keeps writable Tasks blocked and rejects policy-only roles from materialization", () => {
     const result = validateArchitectPlan({
       proposal: {
         ...base,
@@ -183,8 +183,8 @@ describe("validateArchitectPlan", () => {
     expect(result.errors).toContainEqual(
       expect.objectContaining({ code: "ownership-write-empty", taskKey: "contract" }),
     );
-    expect(result.errors).not.toContainEqual(
-      expect.objectContaining({ code: "ownership-write-empty", taskKey: "server" }),
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({ code: "managed-role-unsupported", taskKey: "server" }),
     );
   });
 

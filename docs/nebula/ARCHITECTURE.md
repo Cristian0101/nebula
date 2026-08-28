@@ -161,6 +161,10 @@ Command Deck activity is a filtered presentation of durable projected milestones
 
 Terminal Center is a Project route in the existing web client and desktop shell. Provider buttons are derived from the existing configured provider-instance snapshot. Launch creates the same canonical Thread used by chat; isolated launch first composes the existing Task ownership and worktree preparation commands, then binds that Thread without starting a provider turn.
 
+Mission and Command Deck links may carry a canonical Task ID into Terminal Center. The route uses that ID only to select the existing Task execution context, reveal its canonical inspector, and focus a previously attached Task pane. It does not persist a second Mission workspace or duplicate Task runtime state.
+
+Architect plan materialization is limited to writable execution roles (`builder`, `debugger`, and `test_specialist`). Reviewer and security-reviewer capacity is applied through Mission review policy after a Task handoff. Integrator Tasks are synthesized only from a concrete Integration conflict. The validator rejects speculative reviewer or integrator Tasks so approval cannot fail later while coercing them into builder-owned worktrees.
+
 Canvas visibility, positions, layout, viewport, selection, and quick-launch defaults are client-local UI preferences. They never enter Task, Mission, Thread, or provider projections. The focused node mounts the existing Thread workspace, while unselected nodes render shell summaries only. Mission Flow reads the existing Mission DAG waves, and no edge is rendered without a canonical dependency.
 
 ### Quality gates and independent review
