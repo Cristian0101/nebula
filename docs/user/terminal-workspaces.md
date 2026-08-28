@@ -2,6 +2,18 @@
 
 A Terminal Workspace is a persistent arrangement of live tools for one Project. The Default Workspace begins with a Shell already rooted in the Project. Choose **New Workspace** to create another independent arrangement.
 
+## General panes and Task-bound panes
+
+Use **Execution context** in **New Pane** to choose between the repository workspace and a canonical Task.
+
+- A general pane is rooted in the selected repository checkout and does not require engineering Task metadata. It remains useful for exploration, brainstorming, Git history, and externally owned servers.
+- A Task-bound pane carries the Task ID and uses the Task's isolated worktree. Shells, approved tests, managed Dev Servers, Logs, Preview, and Task Diff inherit that same context.
+- **Create Task** records a bounded title, objective, role, provider assignment, acceptance criteria, and ownership paths, then asks the canonical workspace manager to prepare the Task worktree.
+
+The pane header keeps Task status and ownership compact. Choose **Task details** to inspect the objective, agent session, worktree, branch, base commit, allowed and denied paths, real quality runs, structured handoff, review result, and canonical Task Diff. The inspector can validate ownership, prepare or refresh the immutable review package, run the Project's configured quality gates, complete the structured handoff, and request independent review.
+
+Changing or replacing a provider does not change the Task. Interrupt or stop the current session, then choose an available replacement provider from the inspector. Nebula creates a distinct canonical Thread in the same Task worktree and sends bounded recovery context; the Task, worktree, changes, validation, and review history remain the durable engineering object.
+
 ## Add panes
 
 Choose any empty cell or **New Pane**, then select:
@@ -13,11 +25,18 @@ Choose any empty cell or **New Pane**, then select:
 - **Tests** for an explicitly approved test or watch command.
 - **Logs** for the stream of an existing approved process.
 - **Git Status** for the selected checkout's branch and working-tree evidence.
+- **Task Diff** for the canonical base-to-Task-worktree change set when the pane is Task-bound. Unrelated repository checkout changes are excluded.
 - **Existing Thread** to restore or add an existing canonical conversation.
 
 The drawer also lists reachable **Existing Local Servers**. **Attach & Preview** adds an externally owned server pane and its Preview without starting a duplicate process. **Detach** removes both panes and leaves that process untouched.
 
 Closing a pane and terminating its underlying process are separate actions. Hiding never silently ends useful work.
+
+## Recovery boundaries
+
+Terminal Workspace restores pane layout and Task attachments after reload. Canonical startup reconciliation verifies that recorded Task worktrees still exist; a missing worktree is reported instead of silently recreated. Managed Dev Server state is derived again from terminal metadata and HTTP discovery, while externally attached servers remain external and never gain stop or restart controls.
+
+Provider and PTY processes are not promised to survive every Nebula application or machine restart. When exact process resumption is unavailable, the Task, worktree, changed files, terminal history, and review state remain preserved, while the process or agent session is shown as stopped, exited, missing, or interrupted. Recovery never resets a Task worktree.
 
 ## Arrange panes
 

@@ -46,10 +46,28 @@ describe("Terminal Workspace composition", () => {
       expect.objectContaining({
         type: "shell",
         terminalId: "workspace-shell-1",
+        taskId: null,
         workspacePath: "/projects/160",
         visible: true,
       }),
     ]);
+  });
+
+  it("persists an optional canonical Task binding without changing pane identity", () => {
+    const pane = createTerminalWorkspacePane({
+      id: "task-shell",
+      type: "shell",
+      title: "Task Shell",
+      taskId: "task-campaign-ui",
+      workspacePath: "/repo/.nebula/task-campaign-ui",
+      now,
+    });
+
+    expect(pane).toMatchObject({
+      id: "task-shell",
+      taskId: "task-campaign-ui",
+      workspacePath: "/repo/.nebula/task-campaign-ui",
+    });
   });
 
   it("migrates only persisted legacy canvas membership", () => {

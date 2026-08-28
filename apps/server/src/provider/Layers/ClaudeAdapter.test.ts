@@ -2,18 +2,24 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeEvents from "node:events";
+import * as NodeStream from "node:stream";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import type {
   Options as ClaudeQueryOptions,
   PermissionMode,
   PermissionResult,
   SDKMessage,
   SDKUserMessage,
+  SpawnOptions,
+  SpawnedProcess,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   ApprovalRequestId,
   ClaudeSettings,
+  EnvironmentId,
   ProviderDriverKind,
   ProviderItemId,
   ProviderRuntimeEvent,
@@ -34,10 +40,16 @@ import * as TestClock from "effect/testing/TestClock";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
-import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import {
+  CLAUDE_MCP_AUTHORIZATION_HEADER,
+  CLAUDE_MCP_BEARER_TOKEN_ENV_VAR,
+  makeClaudeAdapter,
+  type ClaudeAdapterLiveOptions,
+} from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
@@ -273,6 +285,101 @@ const THREAD_ID = ThreadId.make("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
 
 describe("ClaudeAdapterLive", () => {
+  it("serializes only the environment placeholder into the Claude SDK argv", () => {
+    const secret = "TEST_PROVIDER_SECRET_DO_NOT_LOG";
+    let spawnOptions: SpawnOptions | undefined;
+    const runtime = query({
+      prompt: {
+        async *[Symbol.asyncIterator]() {
+          yield* [];
+        },
+      },
+      options: {
+        cwd: "/tmp/claude-adapter-test",
+        pathToClaudeCodeExecutable: "/bin/echo",
+        env: {
+          ...process.env,
+          [CLAUDE_MCP_BEARER_TOKEN_ENV_VAR]: secret,
+        },
+        mcpServers: {
+          "t3-code": {
+            type: "http",
+            url: "http://127.0.0.1:43123/mcp",
+            headers: { Authorization: CLAUDE_MCP_AUTHORIZATION_HEADER },
+          },
+        },
+        spawnClaudeCodeProcess: (options) => {
+          spawnOptions = options;
+          const process = new NodeEvents.EventEmitter() as NodeEvents.EventEmitter & SpawnedProcess;
+          Object.assign(process, {
+            stdin: new NodeStream.PassThrough(),
+            stdout: new NodeStream.PassThrough(),
+            killed: false,
+            exitCode: null,
+            kill: () => true,
+          });
+          return process;
+        },
+      },
+    });
+
+    try {
+      assert.equal(spawnOptions !== undefined, true);
+      assert.equal(
+        spawnOptions?.args.some((argument) => argument.includes(secret)),
+        false,
+      );
+      assert.equal(
+        spawnOptions?.args.some((argument) =>
+          argument.includes(`\${${CLAUDE_MCP_BEARER_TOKEN_ENV_VAR}}`),
+        ),
+        true,
+      );
+      assert.equal(spawnOptions?.env[CLAUDE_MCP_BEARER_TOKEN_ENV_VAR], secret);
+    } finally {
+      runtime.close();
+    }
+  });
+
+  it.effect("keeps the provider-session bearer token out of Claude process arguments", () => {
+    const harness = makeHarness();
+    const secret = "TEST_PROVIDER_SECRET_DO_NOT_LOG";
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => McpProviderSession.clearMcpProviderSession(THREAD_ID)),
+      );
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("local"),
+        threadId: THREAD_ID,
+        providerSessionId: "provider-session-test",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        endpoint: "http://127.0.0.1:43123/mcp",
+        authorizationHeader: `Bearer ${secret}`,
+      });
+
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      const options = harness.getLastCreateQueryInput()?.options;
+      const serializedMcpConfig = JSON.stringify({ mcpServers: options?.mcpServers });
+      assert.equal(serializedMcpConfig.includes(secret), false);
+      const mcpServer = options?.mcpServers?.["t3-code"];
+      assert.equal(
+        mcpServer?.type === "http" ? mcpServer.headers?.Authorization : undefined,
+        CLAUDE_MCP_AUTHORIZATION_HEADER,
+      );
+      assert.equal(options?.env?.[CLAUDE_MCP_BEARER_TOKEN_ENV_VAR], secret);
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("returns validation error for non-claude provider on startSession", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

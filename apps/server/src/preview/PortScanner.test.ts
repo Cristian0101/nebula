@@ -653,6 +653,46 @@ effectIt.effect("aborts HTTP and HTTPS probes when they time out", () => {
   }).pipe(Effect.provide(layer));
 });
 
+effectIt.effect("does not adopt an unrelated listener after its PID is reused", () => {
+  const reusedPid = 43_210;
+  const fetchFn = ((
+    _input: Parameters<typeof globalThis.fetch>[0],
+    _init?: Parameters<typeof globalThis.fetch>[1],
+  ) =>
+    Promise.resolve(
+      new Response("<html />", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+    )) as typeof globalThis.fetch;
+  const layer = makeLsofScannerLayer({ pid: () => reusedPid, fetch: fetchFn });
+
+  return Effect.gen(function* () {
+    const managed = yield* Effect.gen(function* () {
+      const processA = yield* PortScanner.PortDiscovery;
+      yield* processA.registerTerminalProcesses({
+        threadId: "task-a-thread",
+        terminalId: "task-a-dev-server",
+        processIds: [reusedPid],
+      });
+      return yield* processA.scan();
+    }).pipe(Effect.scoped, Effect.provide(layer));
+    expect(managed[0]?.terminal).toEqual({
+      threadId: "task-a-thread",
+      terminalId: "task-a-dev-server",
+    });
+
+    // Process A and its Nebula runtime exit. Recovery creates a fresh
+    // discovery identity map; unrelated process B may reuse the same OS PID,
+    // but no persisted PID is adopted as managed ownership.
+    const unrelatedProcessB = yield* Effect.gen(function* () {
+      const recoveredNebula = yield* PortScanner.PortDiscovery;
+      return yield* recoveredNebula.scan();
+    }).pipe(Effect.scoped, Effect.provide(layer));
+    expect(unrelatedProcessB[0]).toMatchObject({ pid: reusedPid, terminal: null });
+  });
+});
+
 effectIt.effect("does not swallow process probe defects", () =>
   Effect.gen(function* () {
     const defect = new Error("unexpected process probe defect");

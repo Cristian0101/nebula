@@ -303,6 +303,9 @@ export interface ClaudeAdapterLiveOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
 
+export const CLAUDE_MCP_BEARER_TOKEN_ENV_VAR = "T3_MCP_BEARER_TOKEN";
+export const CLAUDE_MCP_AUTHORIZATION_HEADER = `Bearer \${${CLAUDE_MCP_BEARER_TOKEN_ENV_VAR}}`;
+
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -4143,6 +4146,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(ultracode ? { ultracode: true } : {}),
       };
       const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+      const sessionEnvironment = mcpSession
+        ? {
+            ...claudeEnvironment,
+            [CLAUDE_MCP_BEARER_TOKEN_ENV_VAR]: mcpSession.authorizationHeader.replace(
+              /^Bearer\s+/,
+              "",
+            ),
+          }
+        : claudeEnvironment;
       // The attachments dir grant lets the agent Read/copy pasted images at
       // the paths ProviderService injects into the turn text, without an
       // approval prompt. It is a leaf directory holding only attachment
@@ -4173,7 +4185,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
-        env: claudeEnvironment,
+        env: sessionEnvironment,
         additionalDirectories,
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
         ...(mcpSession
@@ -4183,7 +4195,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
                   type: "http",
                   url: mcpSession.endpoint,
                   headers: {
-                    Authorization: mcpSession.authorizationHeader,
+                    // Claude Code expands MCP header environment references in
+                    // the child process. Keep the session credential out of the
+                    // SDK's inline --mcp-config argument, which is observable in
+                    // ps, lsof, and Activity Monitor.
+                    Authorization: CLAUDE_MCP_AUTHORIZATION_HEADER,
                   },
                 },
               },

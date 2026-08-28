@@ -6,12 +6,25 @@ Project and Global Terminal Center are local UI compositions over canonical serv
 
 - A node references an `OrchestrationThreadShell` and renders only lightweight projection fields.
 - Agent panes reference canonical Thread IDs and mount the existing embedded `ChatView` when their saved geometry can support a transcript and composer. Compact panes render a lightweight projection until selected or enlarged. Preview Stage attaches the same Thread view; it does not clone provider state.
+- A Task-bound pane persists only an optional canonical `taskId` alongside its view attachments. It resolves Task state from the orchestration projection and resolves execution paths from `NebulaTaskWorkspace`. The pane never owns Task status, ownership, diff, quality, handoff, or review state.
 - Task and Mission badges come from existing projections. Mission Flow uses canonical dependency waves.
 - Hiding a node updates canvas membership only; it never deletes the Thread.
 
 Canvas state lives in the client UI store under a stable key. Project canvases use the Project ID. Global Terminal Center uses `nebula:global-terminal-center`, which keeps membership, positions, layout, viewport, selection, and quick-launch state separate from every Project canvas.
 
 Project Terminal Workspaces persist pane membership, visibility, canonical attachments, Grid and Freeform geometry, grid density, selection, focus, and viewport per Project. Grid sanitization clamps invalid values, removes duplicate pane IDs, clears invalid selection, reflows collisions, and hides overflow above the bounded sixteen-pane surface. Focus and maximize never mutate pane geometry.
+
+Task-bound Shell, Tests, managed Dev Server, Logs, and Preview panes inherit the canonical Task worktree path. Provider panes create or reuse the Task's canonical Thread, bind it through `task.bind-thread`, and activate through the orchestration decider. Task Git panes query `TaskChangeSetQuery`; they do not derive a Terminal-specific diff from the repository checkout.
+
+The Task inspector progressively discloses canonical ownership, violations, quality gate runs, structured handoff, immutable review state, and Task Diff. Its actions dispatch the existing ownership validation, review preparation, quality run, handoff update, independent review, findings delivery, Thread interruption, and session stop commands. Readiness remains enforced by the orchestration decider: the renderer cannot self-certify a Task by changing a badge.
+
+Supervised provider replacement creates a new Thread with the exact Task worktree and branch, then dispatches `task.bind-thread` with `replaceProviderExecution`. The decider requires an active Task, a distinct Thread, matching provider selection, and exact workspace identity. The replacement prompt carries bounded Task, acceptance, ownership, interruption, and current review context; the existing Git diff stays authoritative.
+
+## Startup reconciliation
+
+`TaskWorkspaceReactor` replays interrupted preparation, verifies every ready worktree path, marks missing paths through a canonical event, and resumes safe removal. Ownership, review, and quality reactors reconcile their own in-flight domain work. Terminal Manager reconstructs bounded history but does not claim that a dead PTY or provider process is resumable. Managed port ownership is an in-memory registration scoped to the live PTY and is removed when that terminal exits or closes; it is never reconstructed from a persisted PID. If the operating system later reuses that PID for an unrelated listener, discovery reports the listener as external rather than granting managed Stop or Restart authority.
+
+Terminal layouts restore their `taskId`, Thread, managed terminal, and Preview attachment references. Runtime truth is then re-derived from canonical projections, terminal metadata, filesystem existence, Git state, local port ownership, and HTTP reachability. An external server remains externally owned after hydration. A PID by itself is never used to grant lifecycle control.
 
 ## Dev Server lifecycle
 
