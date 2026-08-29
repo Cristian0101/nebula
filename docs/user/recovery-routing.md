@@ -8,13 +8,15 @@ Nebula classifies failures from runtime evidence before choosing an action. Tran
 
 Provider authentication failures, provider execution failures, ownership violations, resource violations, workspace failures, quality failures, review changes requested, rejected reviews, architecture or policy blockers, Integration conflicts, and an exhausted retry budget stop the Run for attention. Nebula does not automatically repeat reasoning work or silently substitute a provider. Quality and review remediation starts only after a deliberate human action.
 
-Every retry, human-initiated remediation, and replacement attempt is retained in the Mission Run. Restarting Nebula resumes reconciliation from that durable ledger rather than resetting a budget.
+Every retry, human-initiated remediation, and replacement attempt is retained in the Mission Run. An execution attempt becomes terminal when its Task completes or is cancelled; replacing a provider marks the previous attempt `replaced` before the new attempt becomes active. Restarting Nebula resumes reconciliation from that durable ledger rather than resetting a budget, so there is never more than one active execution attempt for a Task.
 
 ## Provider replacement and Task continuity
 
 When a provider is no longer usable, the Mission operator may replace it from the canonical Task inspector. Nebula starts the replacement provider execution Thread in the same Task worktree. The Task id, Mission membership, ownership rules, resources, workspace, completed history, current diff, handoff, and review findings do not change. Provider availability is shown honestly, and no replacement occurs silently.
 
 Terminal Center shows the current execution Thread as the Task node and labels it with its attempt number. Earlier attempt Threads remain durable and can be added explicitly from **Add existing Thread**, but Nebula does not leave duplicate Task nodes open automatically.
+
+Provider subprocesses are not assumed to survive a Nebula runtime restart. When an active replacement Thread is known to have died with the runtime, startup reconciliation marks that replacement attempt `interrupted` once and moves the Task to **Needs Attention**. The operator can then choose **Continue Task** when the provider supports it or **Replace Agent** to start a new attempt. Later reconciliation passes do not redispatch the interrupted replacement or create another attempt.
 
 Replacement context contains the Task and Mission objective, current changed-file evidence when snapshotted, latest handoff, gate and review findings, and a previous-provider summary. It does not reconstruct or transfer hidden reasoning.
 

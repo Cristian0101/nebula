@@ -6,6 +6,7 @@ import {
   filterMissionTimeline,
   missionAttentionItems,
   missionProgressSummary,
+  missionRecoverySummary,
   missionTaskStateLabel,
 } from "./missionCommandCenterViewModel";
 
@@ -209,5 +210,109 @@ describe("Mission Command Center view model", () => {
     ];
     expect(filterMissionTimeline(activities, "reviews", "changes")).toEqual([activities[0]]);
     expect(filterMissionTimeline(activities, "resources", "registry")).toEqual([activities[1]]);
+  });
+
+  it("does not show recovery UI for a normal persisted Mission open", () => {
+    const plan = computeMissionPlan({ mission, tasks: [task()] });
+    expect(
+      missionRecoverySummary({
+        plan,
+        run: run({
+          taskRecovery: [
+            {
+              taskId: "task-a" as never,
+              transientRetries: 0,
+              remediationRounds: 0,
+              attempts: [],
+              latestFailureClass: null,
+              latestFailureSignature: null,
+              attentionRequired: false,
+              updatedAt: timestamp,
+            },
+          ],
+        }),
+      }),
+    ).toBeNull();
+  });
+
+  it("does not keep a recovery banner on a completed persisted Mission", () => {
+    const plan = computeMissionPlan({ mission, tasks: [task({ status: "completed" })] });
+    expect(
+      missionRecoverySummary({
+        plan,
+        run: run({
+          status: "completed",
+          completedAt: timestamp,
+          decisions: [
+            {
+              id: "old-recovery-event" as never,
+              kind: "recovery",
+              taskId: "task-a" as never,
+              reason: "Replacement attempt was interrupted by runtime restart.",
+              sourceTaskIds: ["task-a" as never],
+              occurredAt: timestamp,
+            },
+          ],
+          taskRecovery: [
+            {
+              taskId: "task-a" as never,
+              transientRetries: 0,
+              remediationRounds: 0,
+              attempts: [],
+              latestFailureClass: "transport_transient",
+              latestFailureSignature: "runtime-restart",
+              attentionRequired: true,
+              updatedAt: timestamp,
+            },
+          ],
+        }),
+      }),
+    ).toBeNull();
+  });
+
+  it("shows recovery UI only for a canonical interrupted restart reconciliation", () => {
+    const plan = computeMissionPlan({ mission, tasks: [task({ status: "active" })] });
+    expect(
+      missionRecoverySummary({
+        plan,
+        run: run({
+          status: "attention",
+          decisions: [
+            {
+              id: "recovery-event" as never,
+              kind: "recovery",
+              taskId: "task-a" as never,
+              reason: "Replacement attempt was interrupted by runtime restart.",
+              sourceTaskIds: ["task-a" as never],
+              occurredAt: timestamp,
+            },
+          ],
+          taskRecovery: [
+            {
+              taskId: "task-a" as never,
+              transientRetries: 1,
+              remediationRounds: 0,
+              attempts: [
+                {
+                  number: 2,
+                  kind: "replacement",
+                  providerInstanceId: "codex" as never,
+                  threadId: "thread-replacement" as never,
+                  status: "interrupted",
+                  failureClass: "transport_transient",
+                  summary: "Provider process did not survive server restart.",
+                  startedAt: timestamp,
+                  completedAt: timestamp,
+                },
+              ],
+              latestFailureClass: "transport_transient",
+              latestFailureSignature: "runtime-restart",
+              attentionRequired: true,
+              updatedAt: timestamp,
+            },
+          ],
+        }),
+      }),
+    ).toMatchObject({ interruptedAttempts: 1, recoveredAt: timestamp });
   });
 });

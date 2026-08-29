@@ -1628,8 +1628,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                 mission.routingProfile ??
                 project.routingProfile ??
                 "manual_only",
-              transportRetryLimit: command.transportRetryLimit ?? 2,
-              remediationLimit: command.remediationLimit ?? 2,
+              transportRetryLimit: command.transportRetryLimit ?? 1,
+              remediationLimit: command.remediationLimit ?? 0,
               autoIntegration: command.autoIntegration ?? false,
               stopOnConflict: command.stopOnConflict ?? true,
               independentReviewRequired:

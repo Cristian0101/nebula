@@ -176,6 +176,29 @@ describe("supervised Mission scheduler", () => {
     expect(released.scheduledTaskIds).toEqual([taskId("B"), taskId("C")]);
   });
 
+  it("keeps Integration-only gates out of Task checkpoint readiness", () => {
+    const completed = {
+      ...task("A", "completed"),
+      reviewSnapshot: { id: "snapshot-a" },
+      qualityGateRuns: [{ gateId: "task-gate", snapshotId: "snapshot-a", status: "passed" }],
+    } as never;
+    const checkpoint = {
+      key: "task-ready",
+      name: "Task ready for Integration",
+      requiredTaskIds: [taskId("A")],
+      unlockTaskIds: [taskId("B")],
+      requiredGateIds: ["task-gate", "integration-gate"],
+      reviewsRequired: false,
+      humanApprovalRequired: false,
+      humanApprovedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    } as never;
+    expect(
+      resolveMissionCheckpointState(checkpoint, [completed], new Set(["task-gate"])).state,
+    ).toBe("passed");
+  });
+
   it("requires every checkpoint that unlocks the same Task to pass", () => {
     const tasks = [task("A", "completed"), task("B", "completed"), task("C"), task("D")];
     const approved = {
@@ -495,7 +518,9 @@ describe("Swarm Alpha evidence", () => {
       providerReplacementCount: 1,
       retryCount: 1,
       remediationRoundCount: 1,
-      humanInterventionCount: 5,
+      humanInterventionCount: 4,
+      attemptCount: 2,
+      baseCommit: null,
       finalValidation: "ready",
       elapsedMilliseconds: 600_000,
     });

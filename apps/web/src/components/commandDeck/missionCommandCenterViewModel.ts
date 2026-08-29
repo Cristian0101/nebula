@@ -259,7 +259,11 @@ export function missionTaskStateLabel(
   if (item.task.status === "cancelled") return "Cancelled";
   if (item.task.workspace?.status === "failed" || item.task.workspace?.status === "missing")
     return "Failed";
-  if (latestAttempt?.status === "failed" && recovery?.attentionRequired) return "Interrupted";
+  if (
+    (latestAttempt?.status === "failed" || latestAttempt?.status === "interrupted") &&
+    recovery?.attentionRequired
+  )
+    return "Interrupted";
   if (integration?.tasks.some((task) => task.taskId === item.task.id && task.status === "applied"))
     return "Integrated";
   if (item.task.status === "completed")
@@ -284,10 +288,19 @@ export function missionRecoverySummary(input: {
   readonly plan: MissionPlan;
   readonly run: MissionRun | null;
 }) {
-  if (!input.run) return null;
+  if (!input.run || input.run.status === "completed" || input.run.status === "stopped") return null;
+  const recoveryDecision = input.run.decisions.findLast((decision) => decision.kind === "recovery");
+  const interruptedRecovery = (input.run.taskRecovery ?? []).some(
+    (state) =>
+      state.attentionRequired && state.attempts.some((attempt) => attempt.status === "interrupted"),
+  );
+  if (!recoveryDecision || !interruptedRecovery) return null;
   const failedAttempts = (input.run.taskRecovery ?? []).flatMap((state) =>
     state.attempts.filter(
-      (attempt) => attempt.status === "failed" || attempt.status === "replaced",
+      (attempt) =>
+        attempt.status === "failed" ||
+        attempt.status === "interrupted" ||
+        attempt.status === "replaced",
     ),
   ).length;
   const preservedWorktrees = input.plan.tasks.filter(
@@ -300,6 +313,7 @@ export function missionRecoverySummary(input: {
     readyTasks: input.plan.readyTaskIds.length,
     waitingResources: input.plan.tasks.filter((item) => item.status === "resource-blocked").length,
     integrationState: input.plan.integration?.status ?? "not_started",
+    recoveredAt: recoveryDecision.occurredAt,
   };
 }
 

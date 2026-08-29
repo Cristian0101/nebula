@@ -42,9 +42,13 @@ If the linked Batch fails or is cancelled, the Mission keeps that evidence visib
 
 Cancelling an individual Task preserves its worktree initially and releases its resource claims through the canonical Task lifecycle. Dependents remain blocked with a concrete cancelled-prerequisite reason. Cancelling a Mission preserves its Tasks and worktrees; removal remains an explicit later action.
 
-After a client or server restart, the Command Center renders the reconstructed persisted state and a reconciliation summary: preserved Tasks and worktrees, interrupted or replaced attempts, ready Tasks, resource waits, and Integration state. Integration startup reconciliation skips already-applied Task commits, resumes only the next durable item, and turns an interrupted final-validation process into an explicit rerun requirement.
+After a client or server restart, the Command Center reconstructs the persisted state. A recovery banner appears only when that restart produced an actionable reconciliation result, such as an interrupted provider attempt requiring attention. Simply reopening a persisted Mission does not claim that a recovery occurred. Dismissing the banner hides the summary without deleting the durable recovery decision or attempt history.
+
+Integration startup reconciliation compares the persisted item state with the artifact commit, recorded applied commit, Integration branch HEAD, and current worktree. It skips already-applied Task commits, resumes only the next durable pending item, and turns an interrupted final-validation process into an explicit rerun requirement. A conflict remains **Integration blocked** until a human resolves it; Nebula never silently auto-resolves it.
 
 The Mission timeline filters and searches the canonical Mission activity history locally. Task attempt history remains under the same Task and distinguishes transient retry from provider replacement.
+
+When the canonical completion criteria pass, Nebula persists both the Mission and Run as **Completed** and stores the factual final report with the Run. Mission History reconstructs the Plan, graph, Tasks, attempts, reviews, Integration Batch, final gates, exact Integration SHA, and final report from canonical events after reload, runtime restart, or a new frontend session. The report counts deliberate operator actions such as provider replacement, sent review remediation, resolved ownership or coordination requests, Integration intervention, and human Plan edits; automatic scheduling and bounded retry are not human interventions.
 
 ## Current limitations
 

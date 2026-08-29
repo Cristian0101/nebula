@@ -59,6 +59,7 @@ export type MissionCheckpointState =
 export function resolveMissionCheckpointState(
   checkpoint: MissionCheckpoint,
   tasks: ReadonlyArray<OrchestrationTask>,
+  taskGateIds?: ReadonlySet<string>,
 ): {
   readonly state: MissionCheckpointState;
   readonly blockerTaskIds: ReadonlyArray<TaskId>;
@@ -75,8 +76,11 @@ export function resolveMissionCheckpointState(
       blockerTaskIds: pendingTasks,
       detail: `Waiting for checkpoint '${checkpoint.name}' prerequisite Tasks.`,
     };
+  const requiredTaskGateIds = taskGateIds
+    ? checkpoint.requiredGateIds.filter((gateId) => taskGateIds.has(gateId))
+    : checkpoint.requiredGateIds;
   const gateBlocked = required.filter((task) =>
-    checkpoint.requiredGateIds.some(
+    requiredTaskGateIds.some(
       (gateId) =>
         !task?.qualityGateRuns?.some(
           (run) =>
@@ -190,7 +194,10 @@ export function planMissionRunScheduling(input: {
   readonly mission: Mission;
   readonly run: MissionRun;
   readonly tasks: ReadonlyArray<OrchestrationTask>;
-  readonly project: Pick<OrchestrationProject, "sharedResources" | "resourceLeases">;
+  readonly project: Pick<
+    OrchestrationProject,
+    "sharedResources" | "resourceLeases" | "qualityPolicy"
+  >;
   readonly providerReadyTaskIds: ReadonlySet<TaskId>;
   readonly blockedTaskIds?: ReadonlySet<TaskId>;
   readonly autoRoutableTaskIds?: ReadonlySet<TaskId>;
@@ -210,10 +217,15 @@ export function planMissionRunScheduling(input: {
         ...(checkpointsByUnlockedTask.get(taskId) ?? []),
         checkpoint,
       ]);
+  const taskGateIds = new Set(
+    (input.project.qualityPolicy?.gates ?? [])
+      .filter((gate) => gate.enabled && gate.scope !== "integration")
+      .map((gate) => gate.id),
+  );
   const checkpointStateByKey = new Map(
     (input.mission.checkpoints ?? []).map((checkpoint) => [
       checkpoint.key,
-      resolveMissionCheckpointState(checkpoint, input.tasks),
+      resolveMissionCheckpointState(checkpoint, input.tasks, taskGateIds),
     ]),
   );
   const scheduled = new Set(
@@ -369,6 +381,9 @@ export function buildMissionFinalReport(input: {
   readonly finalValidation: MissionFinalReport["finalValidation"];
   readonly integrationQualityGateRuns?: ReadonlyArray<IntegrationQualityGateRun>;
   readonly integrationHumanChangeCount?: number;
+  readonly integrationConflictCount?: number;
+  readonly finalIntegrationCommit?: string | null;
+  readonly planVersion?: number;
   readonly planHumanEditCount?: number;
   readonly generatedAt: string;
 }): MissionFinalReport {
@@ -406,12 +421,26 @@ export function buildMissionFinalReport(input: {
       ).length,
     0,
   );
+  const reviewRemediationCount = input.tasks.reduce(
+    (count, task) =>
+      count +
+      (task.reviews ?? []).filter(
+        (review) => review.verdict === "request_changes" && review.findingsSentAt !== null,
+      ).length,
+    0,
+  );
+  const ownershipViolationCount = input.tasks.filter(
+    (task) =>
+      task.ownership?.status === "violation" || task.resourceCompliance?.status === "violation",
+  ).length;
   return {
     missionObjective: input.mission.objective,
+    ...(input.planVersion ? { planVersion: input.planVersion } : {}),
     taskIds: [...input.mission.taskIds],
     completedTaskIds: input.tasks
       .filter((task) => task.status === "completed")
       .map((task) => task.id),
+    attemptCount: recovery.reduce((count, state) => count + state.attempts.length, 0),
     providersUsed: [...providersUsed].toSorted(),
     providerReplacementCount,
     retryCount: recovery.reduce((count, state) => count + state.transientRetries, 0),
@@ -429,23 +458,26 @@ export function buildMissionFinalReport(input: {
     reviewChangesRequestedCount: reviewSummary.changesRequested,
     staleReviewCount: reviewSummary.stale,
     resourceConflictCount: waitingResourceTaskIds.size,
+    resourceWaitCount: waitingResourceTaskIds.size,
     serializedResourceConflictCount: [...waitingResourceTaskIds].filter((taskId) =>
       input.tasks.some((task) => task.id === taskId && task.status === "completed"),
     ).length,
-    unresolvedOwnershipViolationCount: input.tasks.filter(
-      (task) =>
-        task.ownership?.status === "violation" || task.resourceCompliance?.status === "violation",
-    ).length,
+    ownershipViolationCount,
+    unresolvedOwnershipViolationCount: ownershipViolationCount,
+    integrationConflictCount: input.integrationConflictCount ?? 0,
     filesChanged: [
       ...new Set(
         input.tasks.flatMap((task) => (task.result?.files ?? []).map((file) => file.path)),
       ),
     ].toSorted(),
     integrationBranch: input.integrationBranch,
+    baseCommit: input.mission.baseCommit ?? null,
+    finalIntegrationCommit: input.finalIntegrationCommit ?? null,
     finalValidation: input.finalValidation,
+    finalGateResults: [...(input.integrationQualityGateRuns ?? [])],
     humanInterventionCount:
       providerReplacementCount +
-      remediationRoundCount +
+      reviewRemediationCount +
       resolvedCoordinationCount +
       resolvedOwnershipCount +
       (input.integrationHumanChangeCount ?? 0) +

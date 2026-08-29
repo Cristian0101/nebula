@@ -12,6 +12,7 @@ import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import {
   createDeterministicTaskArtifact,
+  orderedRemainingIntegrationTasks,
   taskIntegrationArtifactRef,
 } from "./IntegrationReactor.ts";
 
@@ -31,6 +32,21 @@ it("encodes Task artifact IDs into valid Git refs", () => {
   expect(taskIntegrationArtifactRef("task-artifact:task-result:task/snapshot")).toBe(
     "refs/t3/integration-artifacts/task-artifact%3Atask-result%3Atask%2Fsnapshot",
   );
+});
+
+it("resumes with B after restart when A is already durably applied", () => {
+  const tasks = [
+    { taskId: "task-a", order: 0, status: "applied", appliedCommit: "applied-a" },
+    { taskId: "task-b", order: 1, status: "pending", appliedCommit: null },
+    { taskId: "task-c", order: 2, status: "pending", appliedCommit: null },
+  ] as never;
+  const firstRecovery = orderedRemainingIntegrationTasks({ tasks });
+  const secondRecovery = orderedRemainingIntegrationTasks({ tasks });
+
+  expect(firstRecovery.map((task) => task.taskId)).toEqual(["task-b", "task-c"]);
+  expect(firstRecovery[0]?.taskId).toBe("task-b");
+  expect(secondRecovery).toEqual(firstRecovery);
+  expect(secondRecovery.some((task) => task.taskId === "task-a")).toBe(false);
 });
 
 it.layer(layer)("deterministic Task Integration artifacts", (it) => {
@@ -191,6 +207,109 @@ it.layer(layer)("deterministic Task Integration artifacts", (it) => {
           `${(yield* fs.readFileString(path.join(integrationCwd, "codex.txt"))).trim()}${(yield* fs.readFileString(path.join(integrationCwd, "antigravity.txt"))).trim()}`,
         ).toBe("AB");
       }).pipe(Effect.scoped),
+  );
+
+  it.effect("does not reapply A when restart recovery resumes with B", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const git = yield* GitVcsDriver.GitVcsDriver;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "nebula-integration-restart-" });
+      const integrationCwd = yield* fs.makeTempDirectoryScoped({
+        prefix: "nebula-integration-restart-worktree-",
+      });
+      yield* fs.remove(integrationCwd, { recursive: true, force: true });
+      const run = (directory: string, args: ReadonlyArray<string>) =>
+        git.execute({ operation: "IntegrationReactor.restartTest", cwd: directory, args });
+      yield* run(cwd, ["init", "-b", "main"]);
+      yield* run(cwd, ["config", "user.email", "nebula@test.invalid"]);
+      yield* run(cwd, ["config", "user.name", "Nebula Test"]);
+      yield* fs.writeFileString(path.join(cwd, "base.txt"), "base\n");
+      yield* run(cwd, ["add", "."]);
+      yield* run(cwd, ["commit", "-m", "base"]);
+      const baseCommit = (yield* run(cwd, ["rev-parse", "HEAD"])).stdout.trim();
+
+      const artifactFor = Effect.fn("IntegrationReactor.test.restartArtifact")(function* (
+        id: string,
+      ) {
+        yield* run(cwd, ["switch", "--detach", baseCommit]);
+        yield* fs.writeFileString(path.join(cwd, `${id}.txt`), `${id}\n`);
+        yield* run(cwd, ["add", "."]);
+        yield* run(cwd, ["commit", "-m", `snapshot ${id}`]);
+        const snapshotCommit = (yield* run(cwd, ["rev-parse", "HEAD"])).stdout.trim();
+        const checkpointRef = `refs/t3/checkpoints/tasks/${id}/review/${id}`;
+        yield* run(cwd, ["update-ref", checkpointRef, snapshotCommit]);
+        return yield* createDeterministicTaskArtifact({
+          sourceRepository: cwd,
+          artifactId: `restart-${id}`,
+          checkpointRef,
+          baseCommit,
+          taskTitle: `Task ${id}`,
+          taskId: id,
+          taskResultId: `result-${id}`,
+          snapshotId: `snapshot-${id}`,
+          completedAt: "2026-08-29T12:00:00.000Z",
+          git,
+        });
+      });
+      const artifactA = yield* artifactFor("A");
+      const artifactB = yield* artifactFor("B");
+      const artifactC = yield* artifactFor("C");
+      yield* run(cwd, ["switch", "--detach", baseCommit]);
+      yield* run(cwd, [
+        "worktree",
+        "add",
+        "-b",
+        "nebula/integration/restart-proof",
+        integrationCwd,
+        baseCommit,
+      ]);
+      yield* run(integrationCwd, ["cherry-pick", artifactA.commit]);
+      const appliedA = (yield* run(integrationCwd, ["rev-parse", "HEAD"])).stdout.trim();
+      const persisted = {
+        tasks: [
+          {
+            taskId: "A",
+            order: 0,
+            status: "applied",
+            artifact: artifactA,
+            appliedCommit: appliedA,
+          },
+          {
+            taskId: "B",
+            order: 1,
+            status: "pending",
+            artifact: artifactB,
+            appliedCommit: null,
+          },
+          {
+            taskId: "C",
+            order: 2,
+            status: "pending",
+            artifact: artifactC,
+            appliedCommit: null,
+          },
+        ],
+      } as never;
+
+      const recovered = orderedRemainingIntegrationTasks(persisted);
+      expect(recovered[0]?.taskId).toBe("B");
+      for (const selected of recovered) {
+        yield* run(integrationCwd, ["cherry-pick", selected.artifact!.commit]);
+      }
+      const messages = (yield* run(integrationCwd, [
+        "log",
+        "--format=%B%x00",
+        `${baseCommit}..HEAD`,
+      ])).stdout;
+      expect(messages.match(/Nebula-Task: A/g)).toHaveLength(1);
+      expect(messages.match(/Nebula-Task: B/g)).toHaveLength(1);
+      expect(messages.match(/Nebula-Task: C/g)).toHaveLength(1);
+      expect(
+        (yield* run(integrationCwd, ["rev-list", "--count", `${baseCommit}..HEAD`])).stdout.trim(),
+      ).toBe("3");
+      expect((yield* run(integrationCwd, ["rev-parse", "HEAD~2"])).stdout.trim()).toBe(appliedA);
+    }).pipe(Effect.scoped),
   );
 
   it.effect("pauses on a real conflict and abort preserves already applied history", () =>

@@ -12,6 +12,7 @@ import {
   type MissionRun,
   type MissionRunAttention,
   type MissionRunDecision,
+  type FailureClass,
   type RoutingDecision,
   type TaskRecoveryState,
   type OrchestrationEvent,
@@ -51,6 +52,7 @@ import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { MissionRunReactor, type MissionRunReactorShape } from "../Services/MissionRunReactor.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { redactQualityGateOutput } from "./TaskQualityReactor.ts";
 
 const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "mission.run.started",
@@ -256,6 +258,127 @@ export function activeReplacementOwnsProviderTurn(
   );
 }
 
+export function replacementAttemptOwnsTurnStart(
+  state: TaskRecoveryState,
+  threadId: ThreadId,
+): boolean {
+  const activeAttempt = state.attempts.findLast((attempt) => attempt.status === "active");
+  return activeAttempt?.kind === "replacement" && activeAttempt.threadId === threadId;
+}
+
+export function finalizeTerminalTaskAttempts(input: {
+  readonly recovery: ReadonlyArray<TaskRecoveryState>;
+  readonly tasks: ReadonlyArray<
+    Pick<OrchestrationTask, "id" | "status" | "completedAt" | "cancelledAt" | "updatedAt">
+  >;
+}): ReadonlyArray<TaskRecoveryState> {
+  const taskById = new Map(input.tasks.map((task) => [task.id, task] as const));
+  return input.recovery.map((state) => {
+    const task = taskById.get(state.taskId);
+    if (!task || (task.status !== "completed" && task.status !== "cancelled")) return state;
+    const terminalStatus =
+      task.status === "completed" ? ("completed" as const) : ("cancelled" as const);
+    const completedAt = task.completedAt ?? task.cancelledAt ?? task.updatedAt;
+    const hasActiveAttempt = state.attempts.some((attempt) => attempt.status === "active");
+    if (!hasActiveAttempt && !state.attentionRequired) return state;
+    return {
+      ...state,
+      attempts: hasActiveAttempt
+        ? state.attempts.map((attempt) =>
+            attempt.status === "active"
+              ? {
+                  ...attempt,
+                  status: terminalStatus,
+                  summary:
+                    task.status === "completed"
+                      ? "Provider execution completed with the canonical Task."
+                      : "Provider execution cancelled with the canonical Task.",
+                  completedAt,
+                }
+              : attempt,
+          )
+        : state.attempts,
+      attentionRequired: false,
+      updatedAt: completedAt,
+    };
+  });
+}
+
+export function interruptRestartedReplacementAttempt(input: {
+  readonly state: TaskRecoveryState;
+  readonly thread: Pick<OrchestrationThread, "id" | "latestTurn" | "session"> | undefined;
+  readonly interruptedAt: string;
+  readonly failureSignature: string;
+}): TaskRecoveryState | null {
+  const attempt = input.state.attempts.findLast(
+    (candidate) => candidate.kind === "replacement" && candidate.status === "active",
+  );
+  const rawDetail = input.thread?.session?.lastError ?? "";
+  if (
+    !attempt ||
+    input.thread?.id !== attempt.threadId ||
+    input.thread.latestTurn?.state !== "error" ||
+    !/did not survive (?:a )?server restart/i.test(rawDetail)
+  )
+    return null;
+  return {
+    ...input.state,
+    attempts: input.state.attempts.map((candidate) =>
+      candidate.number === attempt.number && candidate.status === "active"
+        ? {
+            ...candidate,
+            status: "interrupted" as const,
+            failureClass: "transport_transient" as const,
+            summary:
+              redactQualityGateOutput(rawDetail) ||
+              "Provider process did not survive server restart.",
+            completedAt: input.interruptedAt,
+          }
+        : candidate,
+    ),
+    latestFailureClass: "transport_transient",
+    latestFailureSignature: input.failureSignature,
+    attentionRequired: true,
+    updatedAt: input.interruptedAt,
+  };
+}
+
+export function interruptedReplacementRequiresAttention(state: TaskRecoveryState): boolean {
+  const latestAttempt = state.attempts.at(-1);
+  return (
+    state.attentionRequired &&
+    latestAttempt?.kind === "replacement" &&
+    latestAttempt.status === "interrupted"
+  );
+}
+
+export function finalizeAttemptForAttention(input: {
+  readonly state: TaskRecoveryState;
+  readonly failureClass: FailureClass;
+  readonly detail: string;
+  readonly completedAt: string;
+  readonly failureSignature: string;
+}): TaskRecoveryState {
+  return {
+    ...input.state,
+    attempts: input.state.attempts.map((attempt) =>
+      attempt.status === "active"
+        ? {
+            ...attempt,
+            status: "failed" as const,
+            failureClass: input.failureClass,
+            summary: input.detail,
+            completedAt: input.completedAt,
+          }
+        : attempt,
+    ),
+    latestFailureClass: input.failureClass,
+    latestFailureSignature: input.failureSignature,
+    attentionRequired: true,
+    updatedAt: input.completedAt,
+  };
+}
+
 export function providerSupportsStructuredReview(instance: {
   readonly textGeneration: { readonly generateStructured?: unknown };
 }): boolean {
@@ -267,7 +390,9 @@ export function providerExecutionFailureDetail(
 ): string | null {
   if (!thread) return null;
   if (thread.latestTurn?.state === "error" || thread.session?.status === "error")
-    return thread.session?.lastError ?? "Builder provider execution failed.";
+    return redactQualityGateOutput(
+      thread.session?.lastError ?? "Builder provider execution failed.",
+    );
   if (thread.latestTurn?.state !== "completed") return null;
   const assistantMessage = thread.messages.findLast(
     (message) => message.role === "assistant" && message.turnId === thread.latestTurn?.turnId,
@@ -279,7 +404,7 @@ export function providerExecutionFailureDetail(
     )
   )
     return null;
-  return detail.slice(0, 1_000);
+  return redactQualityGateOutput(detail.slice(0, 1_000));
 }
 
 const activeTaskAttention = (
@@ -686,6 +811,7 @@ const make = Effect.gen(function* () {
       });
       return;
     }
+    if (replacementAttemptOwnsTurnStart(recovery, thread.id)) return;
     const mission = (model.missions ?? []).find((candidate) => candidate.id === run.missionId);
     if (!mission) return;
     const context = buildTaskContextPackage({
@@ -821,40 +947,6 @@ const make = Effect.gen(function* () {
       yield* nudgeAfterProjectionStep();
       return true;
     }
-    if (
-      thread.latestTurn?.state === "error" &&
-      /did not survive (?:a )?server restart/i.test(thread.session?.lastError ?? "")
-    ) {
-      yield* engine.dispatch({
-        type: "thread.turn.start",
-        commandId: commandId(
-          input.run,
-          input.task.id,
-          `replacement-resume:${attempt.number}:${thread.latestTurn.turnId}`,
-        ),
-        threadId: thread.id,
-        message: {
-          messageId: MessageId.make(
-            `mission-run:${input.run.id}:task:${input.task.id}:replacement-resume:${attempt.number}:${thread.latestTurn.turnId}`,
-          ),
-          role: "user",
-          text: recoveryMessage({
-            task: input.task,
-            failureClass: "transport_transient",
-            detail: thread.session?.lastError ?? input.detail,
-            replacement: true,
-            previousProvider: attempt.providerInstanceId,
-          }),
-          attachments: [],
-        },
-        modelSelection,
-        titleSeed: input.task.title,
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        createdAt: yield* now,
-      });
-      return true;
-    }
     if (thread.latestTurn === null && thread.messages.length === 0) {
       yield* engine.dispatch({
         type: "thread.turn.start",
@@ -893,36 +985,53 @@ const make = Effect.gen(function* () {
     const { run, model, task, thread } = input;
     const state = (run.taskRecovery ?? []).find((candidate) => candidate.taskId === task.id);
     if (!state) return false;
+    if (interruptedReplacementRequiresAttention(state)) return false;
     const activeReplacement = state.attempts.findLast(
       (attempt) => attempt.kind === "replacement" && attempt.status === "active",
     );
     if (activeReplacementOwnsProviderTurn(state, thread)) return true;
     if (thread && missionProviderTurnInFlight(thread)) return false;
-    const replacementNeedsContinuation =
-      activeReplacement !== undefined &&
-      (!thread ||
-        (thread.latestTurn === null && thread.messages.length === 0) ||
-        (thread.latestTurn?.state === "error" &&
-          /did not survive (?:a )?server restart/i.test(thread.session?.lastError ?? "")));
-    if (activeReplacement && replacementNeedsContinuation) {
-      yield* Effect.logInfo("continuing active provider replacement", {
-        taskId: task.id,
-        attempt: activeReplacement.number,
-        providerInstanceId: activeReplacement.providerInstanceId,
-        replacementThreadId: activeReplacement.threadId,
-        boundThreadId: task.threadId,
-        workspacePath: task.workspace?.path ?? null,
+    const restartFailureSignature = `transport_transient:${thread?.id ?? activeReplacement?.threadId ?? "no-thread"}:${thread?.latestTurn?.turnId ?? "no-turn"}:${task.reviewSnapshot?.id ?? "no-snapshot"}:runtime-restart`;
+    const interrupted = interruptRestartedReplacementAttempt({
+      state,
+      thread,
+      interruptedAt: yield* now,
+      failureSignature: restartFailureSignature,
+    });
+    if (interrupted) {
+      const nextTaskRecovery = (run.taskRecovery ?? []).map((candidate) =>
+        candidate.taskId === task.id ? interrupted : candidate,
+      );
+      const detail = redactQualityGateOutput(
+        thread?.session?.lastError ?? "Provider process did not survive server restart.",
+      );
+      yield* updateRun({
+        runId: run.id,
+        status: "attention",
+        currentReadyTaskIds: run.currentReadyTaskIds,
+        scheduledTaskIds: run.scheduledTaskIds,
+        attention: [
+          ...run.attention.filter((item) => item.taskId !== task.id),
+          {
+            taskId: task.id,
+            code: "provider_interrupted",
+            detail: `${detail} Continue the Task or replace its provider explicitly.`,
+            blocksMission: false,
+          },
+        ],
+        taskRecovery: nextTaskRecovery,
+        decision: {
+          id: EventId.make(
+            `mission-run:${run.id}:recovery:${task.id}:${activeReplacement?.number ?? "unknown"}`,
+          ),
+          kind: "recovery",
+          taskId: task.id,
+          reason: `Replacement attempt ${activeReplacement?.number ?? "unknown"} was interrupted by runtime restart and requires explicit continuation.`,
+          sourceTaskIds: [task.id],
+          occurredAt: interrupted.updatedAt,
+        },
       });
-      return yield* continueReplacement({
-        run,
-        model,
-        task,
-        state,
-        detail:
-          activeReplacement.summary ||
-          state.latestFailureClass ||
-          "Continue the active provider replacement.",
-      });
+      return true;
     }
     if (!thread) return false;
     const gate = requiredGateFailure(task);
@@ -994,13 +1103,13 @@ const make = Effect.gen(function* () {
       replacementAvailable,
     });
     if (action === "attention") {
-      const next = {
-        ...state,
-        latestFailureClass: failureClass,
-        latestFailureSignature: signature,
-        attentionRequired: true,
-        updatedAt: yield* now,
-      } satisfies TaskRecoveryState;
+      const next = finalizeAttemptForAttention({
+        state,
+        failureClass,
+        detail,
+        completedAt: yield* now,
+        failureSignature: signature,
+      });
       yield* updateRun({
         runId: run.id,
         status: "attention",
@@ -1541,6 +1650,25 @@ const make = Effect.gen(function* () {
       });
       return;
     }
+    const currentTaskRecovery = run.taskRecovery ?? [];
+    const finalizedTaskRecovery = finalizeTerminalTaskAttempts({
+      recovery: currentTaskRecovery,
+      tasks: missionTasks,
+    });
+    const taskRecoveryFinalized = finalizedTaskRecovery.some(
+      (state, index) => state !== currentTaskRecovery[index],
+    );
+    if (taskRecoveryFinalized && run.status !== "paused") {
+      yield* updateRun({
+        runId: run.id,
+        status: run.status === "attention" ? "attention" : "running",
+        currentReadyTaskIds: run.currentReadyTaskIds,
+        scheduledTaskIds: run.scheduledTaskIds,
+        attention: run.attention,
+        taskRecovery: finalizedTaskRecovery,
+      });
+      return;
+    }
     if (
       run.swarmPolicy &&
       (JSON.stringify(run.swarmPolicy.qualityPolicy) !==
@@ -1701,12 +1829,21 @@ const make = Effect.gen(function* () {
             finalValidation: "ready",
             integrationQualityGateRuns: batch.qualityGateRuns,
             integrationHumanChangeCount: batch.humanChanges.length,
+            integrationConflictCount: batch.humanChanges.filter((change) =>
+              change.summary.startsWith("Resolved conflicts while applying Task"),
+            ).length,
+            finalIntegrationCommit: batch.validationSnapshot?.headCommit ?? null,
+            planVersion:
+              project.architectPlans
+                ?.find((plan) => plan.id === mission.architectPlanProposalId)
+                ?.revisions.at(-1)?.number ?? 1,
             planHumanEditCount:
               project.architectPlans
                 ?.find((plan) => plan.id === mission.architectPlanProposalId)
                 ?.revisions.filter((revision) => revision.source === "human").length ?? 0,
             generatedAt: completedAt,
           }),
+          ...(taskRecoveryFinalized ? { taskRecovery: finalizedTaskRecovery } : {}),
           decision: {
             id: EventId.make(`mission-run:${run.id}:completed`),
             kind: "completed",
@@ -1731,12 +1868,18 @@ const make = Effect.gen(function* () {
           tasks: missionTasks,
           integrationBranch: null,
           finalValidation: "not_requested",
+          finalIntegrationCommit: null,
+          planVersion:
+            project.architectPlans
+              ?.find((plan) => plan.id === mission.architectPlanProposalId)
+              ?.revisions.at(-1)?.number ?? 1,
           planHumanEditCount:
             project.architectPlans
               ?.find((plan) => plan.id === mission.architectPlanProposalId)
               ?.revisions.filter((revision) => revision.source === "human").length ?? 0,
           generatedAt: completedAt,
         }),
+        ...(taskRecoveryFinalized ? { taskRecovery: finalizedTaskRecovery } : {}),
         decision: {
           id: EventId.make(`mission-run:${run.id}:completed`),
           kind: "completed",

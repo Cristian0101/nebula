@@ -348,14 +348,29 @@ export function MissionCommandCenter({
           <summary className="cursor-pointer text-sm font-medium">Final Mission report</summary>
           <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
             <div>
+              <dt className="text-muted-foreground">Objective</dt>
+              <dd>{run.finalReport.missionObjective}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Plan and Tasks</dt>
+              <dd>
+                v{run.finalReport.planVersion ?? 1} · {run.finalReport.completedTaskIds.length} /{" "}
+                {run.finalReport.taskIds.length} complete
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Duration</dt>
+              <dd>{Math.round(run.finalReport.elapsedMilliseconds / 1000)}s</dd>
+            </div>
+            <div>
               <dt className="text-muted-foreground">Providers</dt>
               <dd>{run.finalReport.providersUsed.join(", ") || "None"}</dd>
             </div>
             <div>
               <dt className="text-muted-foreground">Recovery</dt>
               <dd>
-                {run.finalReport.retryCount} retries · {run.finalReport.providerReplacementCount}{" "}
-                replacements
+                {run.finalReport.attemptCount ?? 0} attempts · {run.finalReport.retryCount} retries
+                · {run.finalReport.providerReplacementCount} replacements
               </dd>
             </div>
             <div>
@@ -365,6 +380,7 @@ export function MissionCommandCenter({
                 {run.finalReport.requiredReviewCount ?? 0} current ·{" "}
                 {run.finalReport.historicalReviewAttemptCount ?? run.finalReport.reviewCount}{" "}
                 historical
+                {` · ${run.finalReport.reviewChangesRequestedCount ?? 0} changes requested`}
               </dd>
             </div>
             <div>
@@ -386,6 +402,30 @@ export function MissionCommandCenter({
             <div>
               <dt className="text-muted-foreground">Integration branch</dt>
               <dd>{run.finalReport.integrationBranch ?? "Not requested"}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Base SHA</dt>
+              <dd>{run.finalReport.baseCommit?.slice(0, 12) ?? "Not recorded"}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Final Integration SHA</dt>
+              <dd>{run.finalReport.finalIntegrationCommit?.slice(0, 12) ?? "Not requested"}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Final gates</dt>
+              <dd>
+                {
+                  (run.finalReport.finalGateResults ?? []).filter(
+                    (gate) => gate.required && gate.status === "passed",
+                  ).length
+                }{" "}
+                / {(run.finalReport.finalGateResults ?? []).filter((gate) => gate.required).length}{" "}
+                passed
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Integration conflicts</dt>
+              <dd>{run.finalReport.integrationConflictCount ?? 0}</dd>
             </div>
           </dl>
         </details>

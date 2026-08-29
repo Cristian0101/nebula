@@ -47,6 +47,11 @@ type IntegrationEvent = Extract<
 export const taskIntegrationArtifactRef = (artifactId: string) =>
   `refs/t3/integration-artifacts/${encodeURIComponent(artifactId)}`;
 
+export const orderedRemainingIntegrationTasks = (batch: Pick<IntegrationBatch, "tasks">) =>
+  batch.tasks
+    .toSorted((left, right) => left.order - right.order)
+    .filter((task) => task.status !== "applied");
+
 export const createDeterministicTaskArtifact = Effect.fn(
   "IntegrationReactor.createDeterministicTaskArtifact",
 )(function* (input: {
@@ -364,8 +369,7 @@ const make = Effect.gen(function* () {
     let batch = context.batch;
     if (!batch || batch.status !== "applying" || !batch.workspacePath) return;
     const workspacePath = batch.workspacePath;
-    for (const selected of batch.tasks.toSorted((left, right) => left.order - right.order)) {
-      if (selected.status === "applied") continue;
+    for (const selected of orderedRemainingIntegrationTasks(batch)) {
       const cherryPickHead = yield* execute(
         workspacePath,
         "Integration.reconcileCherryPick",
