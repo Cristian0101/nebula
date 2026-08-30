@@ -13,7 +13,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 import { computeMissionPlan, validateMissionGraph } from "@t3tools/shared/missionGraph";
-import { projectTaskRisks } from "@t3tools/shared/missionRunner";
+import { canRetryIntegrationOperation, projectTaskRisks } from "@t3tools/shared/missionRunner";
 import { validateArchitectPlan } from "@t3tools/shared/architectPlan";
 import {
   analyzeReplanImpact,
@@ -1762,11 +1762,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "mission.run.reconcile": {
       const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      const completedReportRefresh =
+        run?.status === "completed" &&
+        command.status === "completed" &&
+        command.completedAt === run.completedAt &&
+        command.decision == null &&
+        command.finalReport != null &&
+        JSON.stringify(command.currentReadyTaskIds) === JSON.stringify(run.currentReadyTaskIds) &&
+        JSON.stringify(command.scheduledTaskIds) === JSON.stringify(run.scheduledTaskIds) &&
+        JSON.stringify(command.attention) === JSON.stringify(run.attention) &&
+        command.attentionReason === run.attentionReason &&
+        command.failureReason === run.failureReason &&
+        (command.integrationBatchId === undefined ||
+          command.integrationBatchId === run.integrationBatchId);
       if (
         !run ||
-        run.status === "completed" ||
         run.status === "stopped" ||
-        run.status === "failed"
+        run.status === "failed" ||
+        (run.status === "completed" && !completedReportRefresh)
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -2664,10 +2677,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Integration Batch '${command.batchId}' does not exist.`,
         });
       }
-      if (command.type === "integration.continue" && batch.status !== "conflict") {
+      if (
+        command.type === "integration.continue" &&
+        batch.status !== "conflict" &&
+        !canRetryIntegrationOperation(batch)
+      ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: "Only a conflicted Integration Batch can continue.",
+          detail:
+            "Only a conflicted or safely retryable operation-failed Integration Batch can continue.",
         });
       }
       if (

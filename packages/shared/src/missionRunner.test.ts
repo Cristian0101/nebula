@@ -17,6 +17,9 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildMissionFinalReport,
   buildTaskContextPackage,
+  canRetryIntegrationOperation,
+  currentMissionRunTaskIds,
+  currentMissionRunTasks,
   deterministicMissionTaskIds,
   missionIntegrationOverlapPaths,
   missionRunCompletionBlockers,
@@ -244,6 +247,103 @@ describe("supervised Mission scheduler", () => {
     expect(deterministicMissionTaskIds(mission)).toEqual(["A", "B", "C", "D"]);
   });
 
+  it("keeps superseded Tasks historical while excluding them from current completion and Integration", () => {
+    const frontendId = taskId("FRONTEND");
+    const supersededServiceId = taskId("SERVICE_V1");
+    const registryId = taskId("REGISTRY");
+    const serviceId = taskId("SERVICE_V2");
+    const replannedMission = {
+      ...mission,
+      taskIds: [frontendId, supersededServiceId, registryId, serviceId],
+      dependencies: [
+        {
+          missionId,
+          prerequisiteTaskId: registryId,
+          dependentTaskId: serviceId,
+          createdAt: now,
+        },
+      ],
+      currentPlanVersion: 2,
+    };
+    const tasks = [
+      task("FRONTEND", "completed"),
+      {
+        ...task("SERVICE_V1", "cancelled"),
+        replan: {
+          planVersion: 2,
+          state: "superseded",
+          replanProposalId: "replan-1",
+          supersededByTaskId: serviceId,
+          updatedAt: now,
+        },
+      } as never,
+      {
+        ...task("REGISTRY", "completed"),
+        replan: {
+          planVersion: 2,
+          state: "current",
+          replanProposalId: "replan-1",
+          supersededByTaskId: null,
+          updatedAt: now,
+        },
+      } as never,
+      {
+        ...task("SERVICE_V2", "completed"),
+        replan: {
+          planVersion: 2,
+          state: "current",
+          replanProposalId: "replan-1",
+          supersededByTaskId: null,
+          updatedAt: now,
+        },
+      } as never,
+    ];
+
+    expect(currentMissionRunTasks(tasks).map((candidate) => candidate.id)).toEqual([
+      frontendId,
+      registryId,
+      serviceId,
+    ]);
+    expect(
+      currentMissionRunTasks(tasks).every((candidate) => candidate.status === "completed"),
+    ).toBe(true);
+    expect(currentMissionRunTaskIds(replannedMission, tasks)).toEqual([
+      frontendId,
+      registryId,
+      serviceId,
+    ]);
+  });
+
+  it("allows only preserved operation failures with unapplied artifacts to retry", () => {
+    type RetryBatch = Parameters<typeof canRetryIntegrationOperation>[0];
+    const integrationTask = (
+      status: RetryBatch["tasks"][number]["status"],
+      order: number,
+    ): RetryBatch["tasks"][number] => ({
+      taskId: `retry-task-${order}` as never,
+      taskResultId: `retry-result-${order}` as never,
+      snapshotId: `retry-snapshot-${order}` as never,
+      order,
+      status,
+      artifact: null,
+      appliedCommit: null,
+    });
+    const retryable: RetryBatch = {
+      status: "failed",
+      failureCode: "integration-operation-failed",
+      workspacePath: "/tmp/integration",
+      tasks: [integrationTask("applied", 0), integrationTask("pending", 1)],
+    };
+
+    expect(canRetryIntegrationOperation(retryable)).toBe(true);
+    expect(canRetryIntegrationOperation({ ...retryable, failureCode: "quality-gate-failed" })).toBe(
+      false,
+    );
+    expect(
+      canRetryIntegrationOperation({ ...retryable, tasks: [integrationTask("applied", 0)] }),
+    ).toBe(false);
+  });
+
   it("advances a dependency wave and respects the active writable concurrency cap", () => {
     const tasks = [task("A", "completed"), task("B"), task("C"), task("D")];
     const plan = planMissionRunScheduling({
@@ -306,6 +406,50 @@ describe("supervised Mission scheduler", () => {
     expect(released.scheduledTaskIds).toEqual([serviceId]);
     expect(released.decisions).toContainEqual(
       expect.objectContaining({ taskId: serviceId, kind: "scheduled" }),
+    );
+  });
+
+  it("releases scheduling capacity held by a superseded cancelled Task", () => {
+    const frontendId = taskId("FRONTEND");
+    const supersededServiceId = taskId("SERVICE_V1");
+    const registryId = taskId("REGISTRY");
+    const serviceId = taskId("SERVICE_V2");
+    const replannedMission = {
+      ...mission,
+      taskIds: [frontendId, supersededServiceId, registryId, serviceId],
+      dependencies: [
+        {
+          missionId,
+          prerequisiteTaskId: registryId,
+          dependentTaskId: serviceId,
+          createdAt: now,
+        },
+      ],
+      currentPlanVersion: 2,
+    };
+    const plan = planMissionRunScheduling({
+      mission: replannedMission,
+      run: {
+        ...run,
+        maxConcurrentTasks: 2,
+        scheduledTaskIds: [frontendId, supersededServiceId],
+      },
+      tasks: [
+        task("FRONTEND", "completed"),
+        task("SERVICE_V1", "cancelled"),
+        task("REGISTRY"),
+        task("SERVICE_V2"),
+      ],
+      project,
+      providerReadyTaskIds: new Set([registryId, serviceId]),
+    });
+
+    expect(plan.scheduledTaskIds).toEqual([registryId]);
+    expect(plan.decisions).toContainEqual(
+      expect.objectContaining({ taskId: registryId, kind: "scheduled" }),
+    );
+    expect(plan.decisions).toContainEqual(
+      expect.objectContaining({ taskId: serviceId, kind: "waiting_dependency" }),
     );
   });
 
@@ -459,6 +603,8 @@ describe("supervised Mission scheduler", () => {
     expect(context.text).toContain("packages/contracts/src/api.ts");
     expect(context.text.length).toBeLessThanOrEqual(16_000);
     expect(context.text).toContain("excludes provider transcripts, hidden reasoning, credentials");
+    expect(context.text).toContain('"type":"nebula_coordination_request"');
+    expect(context.text).toContain('"kind":"replan_request"');
   });
 
   it("injects the current Plan-v2 objective and canonical dependency handoff, not obsolete Plan-v1 intent", () => {
@@ -878,6 +1024,7 @@ describe("Swarm Alpha evidence", () => {
     });
 
     expect(report.taskIds).toEqual([planV2Service.id]);
+    expect(report.supersededTaskCount).toBe(1);
     expect(report.historicalRisks).toEqual([historicalRisk]);
     expect(report.remainingRisks).toEqual([historicalRisk]);
   });
@@ -944,6 +1091,26 @@ describe("Swarm Alpha evidence", () => {
         "Integration proof is incomplete because src/notification-policy.js is missing.",
         "Builder-reported evidence: None retained.",
       ],
+    });
+  });
+
+  it("resolves superseded untracked-artifact and failed-validation risks after final evidence", () => {
+    expect(
+      reconcileMissionRisks({
+        historicalRisks: [
+          "README.md's full validation sequence does not pass in this snapshot.",
+          "src/registry.js and test/registry.test.js are untracked.",
+        ],
+        explicitResolvedRisks: new Set(),
+        integratedFiles: ["src/registry.js", "test/registry.test.js"],
+        finalEvidenceComplete: true,
+      }),
+    ).toEqual({
+      resolvedRisks: [
+        "README.md's full validation sequence does not pass in this snapshot.",
+        "src/registry.js and test/registry.test.js are untracked.",
+      ],
+      remainingRisks: [],
     });
   });
 
@@ -1140,6 +1307,17 @@ describe("Swarm Alpha evidence", () => {
     expect(
       missionRunCompletionBlockers({
         mission: completionMission,
+        run: completionRun,
+        tasks: [completedTask],
+        integrationBatch: batch as never,
+      }),
+    ).toEqual([]);
+    expect(
+      missionRunCompletionBlockers({
+        mission: {
+          ...completionMission,
+          taskIds: ["superseded-task" as never, completedTask.id],
+        },
         run: completionRun,
         tasks: [completedTask],
         integrationBatch: batch as never,

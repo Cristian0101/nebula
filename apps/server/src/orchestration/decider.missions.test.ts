@@ -55,6 +55,119 @@ it("treats keeping an interrupted replacement provider as explicit continuation"
   ).toBe(false);
 });
 
+it.effect("allows a completed Run to refresh only its persisted final report", () =>
+  Effect.gen(function* () {
+    let model = yield* seed;
+    model = {
+      ...model,
+      projects: model.projects.map((project) =>
+        project.id === projectId ? { ...project, architectPlans: [approvedPlan] } : project,
+      ),
+    };
+    model = yield* apply(model, {
+      ...createMission(missionId, proposalId),
+      taskIds: [taskA],
+    });
+    model = yield* apply(model, {
+      type: "mission.activate",
+      commandId: CommandId.make("activate-report-refresh-mission"),
+      missionId,
+      projectId,
+      createdAt: now,
+    });
+    model = yield* apply(model, {
+      type: "mission.run.start",
+      commandId: CommandId.make("start-report-refresh-run"),
+      runId,
+      missionId,
+      projectId,
+      maxConcurrentTasks: 1,
+      createdAt: now,
+    });
+    const report = {
+      missionObjective: "Complete the Mission",
+      taskIds: [taskA],
+      completedTaskIds: [taskA],
+      providersUsed: [ProviderInstanceId.make("codex")],
+      providerReplacementCount: 0,
+      retryCount: 0,
+      remediationRoundCount: 0,
+      qualityGateCount: 0,
+      reviewCount: 0,
+      filesChanged: ["src/result.ts"],
+      integrationBranch: null,
+      finalValidation: "not_requested" as const,
+      humanInterventionCount: 0,
+      knownRisks: ["Historical risk"],
+      historicalRisks: ["Historical risk"],
+      resolvedRisks: [],
+      remainingRisks: ["Historical risk"],
+      followUps: [],
+      elapsedMilliseconds: 0,
+      generatedAt: now,
+    };
+    model = yield* apply(model, {
+      type: "mission.run.reconcile",
+      commandId: CommandId.make("complete-report-refresh-run"),
+      runId,
+      status: "completed",
+      currentReadyTaskIds: [],
+      scheduledTaskIds: [],
+      attention: [],
+      attentionReason: null,
+      decision: null,
+      completedAt: now,
+      failureReason: null,
+      finalReport: report,
+      createdAt: now,
+    });
+    model = yield* apply(model, {
+      type: "mission.run.reconcile",
+      commandId: CommandId.make("refresh-completed-report"),
+      runId,
+      status: "completed",
+      currentReadyTaskIds: [],
+      scheduledTaskIds: [],
+      attention: [],
+      attentionReason: null,
+      decision: null,
+      completedAt: now,
+      failureReason: null,
+      finalReport: {
+        ...report,
+        resolvedRisks: ["Historical risk"],
+        remainingRisks: [],
+      },
+      createdAt: now,
+    });
+    expect(model.missionRuns?.[0]?.finalReport).toMatchObject({
+      resolvedRisks: ["Historical risk"],
+      remainingRisks: [],
+    });
+
+    const invalid = yield* Effect.flip(
+      decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "mission.run.reconcile",
+          commandId: CommandId.make("reopen-completed-report-run"),
+          runId,
+          status: "running",
+          currentReadyTaskIds: [],
+          scheduledTaskIds: [],
+          attention: [],
+          attentionReason: null,
+          decision: null,
+          completedAt: null,
+          failureReason: null,
+          createdAt: now,
+        },
+      }),
+    );
+    expect(invalid.message).toContain("not reconcilable");
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 const persistedEvent = (
   sequence: number,
   input: Omit<OrchestrationEvent, "sequence" | "eventId" | "commandId">,

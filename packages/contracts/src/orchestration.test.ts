@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  IntegrationUpdatedPayload,
   ModelSelection,
   OrchestrationCommand,
   OrchestrationDispatchCommandError,
@@ -56,6 +57,43 @@ const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationComma
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
 const decodeDispatchCommandError = Schema.decodeUnknownEffect(OrchestrationDispatchCommandError);
+const decodeIntegrationUpdatedPayload = Schema.decodeUnknownEffect(IntegrationUpdatedPayload);
+
+it.effect("accepts a guarded Integration operation retry update", () =>
+  Effect.gen(function* () {
+    const updatedAt = "2026-08-30T17:16:00.000Z";
+    const parsed = yield* decodeIntegrationUpdatedPayload({
+      projectId: "project-integration-retry",
+      reason: "operation-retried",
+      batch: {
+        id: "batch-integration-retry",
+        projectId: "project-integration-retry",
+        title: "Integration retry",
+        baseCommit: "a".repeat(40),
+        sourceRepository: "/tmp/source",
+        branch: "nebula/integration/retry",
+        workspacePath: "/tmp/integration",
+        status: "applying",
+        tasks: [],
+        overlapPaths: [],
+        overlapsAcknowledged: false,
+        conflict: null,
+        validationSnapshot: null,
+        qualityGateRuns: [],
+        humanChanges: [],
+        failureCode: null,
+        failureReason: null,
+        createdAt: updatedAt,
+        updatedAt,
+        readyAt: null,
+        removedAt: null,
+      },
+    });
+
+    assert.strictEqual(parsed.reason, "operation-retried");
+    assert.strictEqual(parsed.batch.status, "applying");
+  }),
+);
 
 it.effect("decodes a dispatch error after its bootstrap thread was deleted", () =>
   Effect.gen(function* () {

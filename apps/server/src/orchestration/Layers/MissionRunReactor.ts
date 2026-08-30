@@ -26,6 +26,8 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import {
   buildTaskContextPackage,
   buildMissionFinalReport,
+  currentMissionRunTaskIds,
+  currentMissionRunTasks,
   deterministicMissionTaskIds,
   missionRunCompletionBlockers,
   missionIntegrationOverlapPaths,
@@ -46,6 +48,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
 import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -587,6 +590,12 @@ export function providerExecutionFailureDetail(
   return redactQualityGateOutput(detail.slice(0, 1_000));
 }
 
+export function needsTerminalThreadHydration(
+  thread: Pick<OrchestrationThread, "latestTurn" | "messages"> | undefined,
+): boolean {
+  return thread?.latestTurn?.state === "completed" && thread.messages.length === 0;
+}
+
 const activeTaskAttention = (
   task: OrchestrationTask,
   thread: OrchestrationThread | undefined,
@@ -647,6 +656,14 @@ const make = Effect.gen(function* () {
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
   const read = () => snapshots.getCommandReadModel();
+
+  const hydrateTerminalThread = Effect.fn("MissionRunReactor.hydrateTerminalThread")(function* (
+    thread: OrchestrationThread | undefined,
+  ) {
+    if (!thread || !needsTerminalThreadHydration(thread)) return thread;
+    const detail = yield* snapshots.getThreadDetailSnapshot(thread.id, { turnLimit: 1 });
+    return Option.isSome(detail) ? detail.value.thread : thread;
+  });
 
   const providerReady = Effect.fn("MissionRunReactor.providerReady")(function* (
     task: OrchestrationTask,
@@ -784,6 +801,7 @@ const make = Effect.gen(function* () {
     readonly replanProposals?: MissionRun["replanProposals"];
     readonly integrationBatchId?: MissionRun["integrationBatchId"];
     readonly finalReport?: MissionRun["finalReport"];
+    readonly completedAt?: string | null;
   }) {
     const createdAt = yield* now;
     yield* engine.dispatch({
@@ -796,7 +814,7 @@ const make = Effect.gen(function* () {
       attention: [...input.attention],
       attentionReason: input.attention[0]?.detail ?? null,
       decision: input.decision ?? null,
-      completedAt: input.status === "completed" ? createdAt : null,
+      completedAt: input.status === "completed" ? (input.completedAt ?? createdAt) : null,
       failureReason: input.failureReason ?? null,
       ...(input.taskRecovery ? { taskRecovery: [...input.taskRecovery] } : {}),
       ...(input.routingDecisions ? { routingDecisions: [...input.routingDecisions] } : {}),
@@ -811,6 +829,60 @@ const make = Effect.gen(function* () {
       createdAt,
     });
   });
+
+  const refreshCompletedFinalReport = Effect.fn("MissionRunReactor.refreshCompletedFinalReport")(
+    function* (model: OrchestrationReadModel, run: MissionRun) {
+      if (run.status !== "completed" || !run.finalReport) return;
+      const mission = (model.missions ?? []).find((candidate) => candidate.id === run.missionId);
+      const project = model.projects.find((candidate) => candidate.id === run.projectId);
+      if (!mission || !project) return;
+      const missionTasks = mission.taskIds.flatMap((taskId) => {
+        const task = (model.tasks ?? []).find((candidate) => candidate.id === taskId);
+        return task ? [task] : [];
+      });
+      if (missionTasks.length !== mission.taskIds.length) return;
+      const batch = (project.integrationBatches ?? []).find(
+        (candidate) => candidate.id === (run.integrationBatchId ?? mission.integrationBatchId),
+      );
+      const architectPlan = project.architectPlans?.find(
+        (plan) => plan.id === mission.architectPlanProposalId,
+      );
+      const refreshed = buildMissionFinalReport({
+        mission,
+        run,
+        tasks: missionTasks,
+        integrationBranch: batch?.branch ?? null,
+        finalValidation:
+          batch?.status === "ready"
+            ? "ready"
+            : run.finalReport.finalValidation === "not_requested"
+              ? "not_requested"
+              : "failed",
+        integrationQualityGateRuns: batch?.qualityGateRuns ?? [],
+        integrationHumanChanges: batch?.humanChanges ?? [],
+        integrationConflictCount:
+          batch?.humanChanges.filter((change) =>
+            change.summary.startsWith("Resolved conflicts while applying Task"),
+          ).length ?? 0,
+        finalIntegrationCommit: batch?.validationSnapshot?.headCommit ?? null,
+        planVersion: mission.currentPlanVersion ?? architectPlan?.revisions.at(-1)?.number ?? 1,
+        planHumanEditCount:
+          architectPlan?.revisions.filter((revision) => revision.source === "human").length ?? 0,
+        generatedAt: run.finalReport.generatedAt,
+      });
+      if (JSON.stringify(refreshed) === JSON.stringify(run.finalReport)) return;
+      yield* updateRun({
+        runId: run.id,
+        status: "completed",
+        currentReadyTaskIds: run.currentReadyTaskIds,
+        scheduledTaskIds: run.scheduledTaskIds,
+        attention: run.attention,
+        integrationBatchId: run.integrationBatchId ?? null,
+        finalReport: refreshed,
+        completedAt: run.completedAt,
+      });
+    },
+  );
 
   const persistDecision = Effect.fn("MissionRunReactor.persistDecision")(function* (input: {
     readonly run: MissionRun;
@@ -2092,6 +2164,8 @@ const make = Effect.gen(function* () {
       });
       return;
     }
+    const currentMissionTasks = currentMissionRunTasks(missionTasks);
+    const currentMissionTaskIds = currentMissionRunTaskIds(mission, missionTasks);
     const currentTaskRecovery = run.taskRecovery ?? [];
     const finalizedTaskRecovery = finalizeTerminalTaskAttempts({
       recovery: currentTaskRecovery,
@@ -2135,7 +2209,7 @@ const make = Effect.gen(function* () {
       });
       return;
     }
-    if (missionTasks.every((task) => task.status === "completed")) {
+    if (currentMissionTasks.every((task) => task.status === "completed")) {
       const autoIntegration = run.swarmPolicy?.autoIntegration === true;
       if (autoIntegration) {
         const integrationBatchId =
@@ -2146,7 +2220,7 @@ const make = Effect.gen(function* () {
           (candidate) => candidate.id === integrationBatchId,
         );
         if (!batch) {
-          const overlapPaths = missionIntegrationOverlapPaths(missionTasks);
+          const overlapPaths = missionIntegrationOverlapPaths(currentMissionTasks);
           const approved = new Set(run.swarmPolicy?.preapprovedOverlapPaths ?? []);
           const unapproved = overlapPaths.filter((path) => !approved.has(path));
           if (unapproved.length > 0) {
@@ -2172,7 +2246,7 @@ const make = Effect.gen(function* () {
             commandId: commandId(run, null, "integration-create"),
             batchId: integrationBatchId,
             projectId: project.id,
-            taskIds: deterministicMissionTaskIds(mission),
+            taskIds: currentMissionTaskIds,
             acknowledgeOverlaps: overlapPaths.length > 0,
             missionId: mission.id,
             createdAt,
@@ -2189,7 +2263,7 @@ const make = Effect.gen(function* () {
               kind: "pipeline",
               taskId: null,
               reason: "All Tasks completed. Automatic Integration started in Mission DAG order.",
-              sourceTaskIds: deterministicMissionTaskIds(mission),
+              sourceTaskIds: currentMissionTaskIds,
               occurredAt: createdAt,
             },
           });
@@ -2228,7 +2302,7 @@ const make = Effect.gen(function* () {
         const completionBlockers = missionRunCompletionBlockers({
           mission,
           run,
-          tasks: missionTasks,
+          tasks: currentMissionTasks,
           integrationBatch: batch,
         });
         if (run.swarmPolicy?.autoCompleteMission === true && completionBlockers.length > 0) {
@@ -2293,7 +2367,7 @@ const make = Effect.gen(function* () {
             kind: "completed",
             taskId: null,
             reason: "All Mission Tasks completed and Integration passed final validation.",
-            sourceTaskIds: mission.taskIds,
+            sourceTaskIds: currentMissionTaskIds,
             occurredAt: completedAt,
           },
         });
@@ -2331,7 +2405,7 @@ const make = Effect.gen(function* () {
           kind: "completed",
           taskId: null,
           reason: "All Mission Tasks completed. Mission is ready for Integration.",
-          sourceTaskIds: mission.taskIds,
+          sourceTaskIds: currentMissionTaskIds,
           occurredAt: completedAt,
         },
       });
@@ -2339,6 +2413,12 @@ const make = Effect.gen(function* () {
     }
 
     const threadById = new Map(model.threads.map((thread) => [thread.id, thread] as const));
+    for (const task of missionTasks) {
+      if (task.status !== "active" || !task.threadId) continue;
+      const thread = threadById.get(task.threadId);
+      const hydrated = yield* hydrateTerminalThread(thread);
+      if (hydrated) threadById.set(hydrated.id, hydrated);
+    }
     const recoveryHandled = new Set<TaskId>();
     let attention: MissionRunAttention[] = [];
     for (const task of missionTasks) {
@@ -2526,6 +2606,8 @@ const make = Effect.gen(function* () {
     for (const run of model.missionRuns ?? []) {
       if (run.status === "running" || run.status === "attention" || run.status === "paused") {
         yield* reconcileRun(run.id);
+      } else if (run.status === "completed") {
+        yield* refreshCompletedFinalReport(model, run);
       }
     }
   });

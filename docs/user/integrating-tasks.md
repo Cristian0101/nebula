@@ -29,6 +29,8 @@ If Git reports a conflict, the Batch pauses and Command Deck lists the unresolve
 
 Nebula does not auto-resolve conflicts or auto-commit unrelated external changes. If an editor changes the Integration worktree outside conflict resolution, validation fails closed until the state is reviewed and committed explicitly.
 
+If an internal Git operation fails after the Integration workspace has been prepared, Nebula keeps the branch, worktree, applied artifacts, and pending order. **Retry operation** is available only for that safely retryable operation-failed state. It resumes from the first pending artifact and does not reapply already recorded commits. Validation failures, conflicts, cancelled Batches, removed workspaces, and Batches without pending artifacts do not expose this action.
+
 ## Final validation and Ready
 
 After all artifacts apply, Nebula captures the Integration HEAD and tree and runs only enabled, exact approved Project gates in the Integration worktree. A required failure prevents Ready. If a gate changes HEAD, the tree, or the worktree, the validation snapshot becomes stale and the Batch fails. When no gates are configured, Command Deck says so instead of inventing a pass.

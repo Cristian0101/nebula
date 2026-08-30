@@ -2853,6 +2853,7 @@ const IntegrationUpdateCommand = Schema.Struct({
     "cancelled",
     "workspace-removed",
     "reconciled",
+    "operation-retried",
   ]),
   createdAt: IsoDateTime,
 });
@@ -3191,6 +3192,7 @@ export const IntegrationUpdatedPayload = Schema.Struct({
     "cancelled",
     "workspace-removed",
     "reconciled",
+    "operation-retried",
   ]),
 });
 

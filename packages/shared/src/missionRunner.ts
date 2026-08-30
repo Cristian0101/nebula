@@ -50,6 +50,31 @@ export function deterministicMissionTaskIds(mission: Mission): ReadonlyArray<Tas
     .map(({ taskId }) => taskId);
 }
 
+export function currentMissionRunTasks(
+  tasks: ReadonlyArray<OrchestrationTask>,
+): ReadonlyArray<OrchestrationTask> {
+  return tasks.filter((task) => task.replan?.state !== "superseded");
+}
+
+export function currentMissionRunTaskIds(
+  mission: Mission,
+  tasks: ReadonlyArray<OrchestrationTask>,
+): ReadonlyArray<TaskId> {
+  const currentTaskIds = new Set(currentMissionRunTasks(tasks).map((task) => task.id));
+  return deterministicMissionTaskIds(mission).filter((taskId) => currentTaskIds.has(taskId));
+}
+
+export function canRetryIntegrationOperation(
+  batch: Pick<IntegrationBatch, "status" | "failureCode" | "workspacePath" | "tasks">,
+): boolean {
+  return (
+    batch.status === "failed" &&
+    batch.failureCode === "integration-operation-failed" &&
+    batch.workspacePath !== null &&
+    batch.tasks.some((task) => task.status === "pending" || task.status === "applying")
+  );
+}
+
 export type MissionCheckpointState =
   | "pending_tasks"
   | "pending_gates"
@@ -237,7 +262,10 @@ export function planMissionRunScheduling(input: {
     ]),
   );
   const scheduled = new Set(
-    input.run.scheduledTaskIds.filter((taskId) => taskById.get(taskId)?.status !== "completed"),
+    input.run.scheduledTaskIds.filter((taskId) => {
+      const status = taskById.get(taskId)?.status;
+      return status !== "completed" && status !== "cancelled";
+    }),
   );
   const activeTaskIds = input.mission.taskIds.filter(
     (taskId) => taskById.get(taskId)?.status === "active",
@@ -382,8 +410,11 @@ export function missionIntegrationOverlapPaths(
 }
 
 const missingArtifactRiskPattern =
-  /\b(?:absent|missing|does not exist|neither .+ exists|not currently executable|incomplete)\b/i;
-const repositoryPathPattern = /\b(?:apps|docs|packages|src|tests)\/[a-z0-9_./-]+\.[a-z0-9]+\b/gi;
+  /\b(?:absent|missing|does not exist|neither .+ exists|not currently executable|incomplete|untracked)\b/i;
+const repositoryPathPattern =
+  /\b(?:apps|docs|packages|src|test|tests)\/[a-z0-9_./-]+\.[a-z0-9]+\b/gi;
+const failedValidationRiskPattern =
+  /\b(?:full|required|final|integration|unit)\b.{0,80}\b(?:validation|test|suite|gate)\b.{0,80}\b(?:does not pass|did not pass|failed|not (?:run|executable))\b/i;
 const missingRequiredTestEvidenceRiskPattern =
   /(?:\b(?:missing|absent|no)\b.{0,80}\b(?:required|focused|canonical)?\s*(?:test|quality gate)\s+evidence\b|\b(?:required|focused|canonical)?\s*(?:test|quality gate)\s+evidence\b.{0,80}\b(?:missing|absent|not (?:run|recorded|retained|available))\b)/i;
 
@@ -459,11 +490,14 @@ export function reconcileMissionRisks(input: {
   };
   const hasCanonicalReplacementEvidence = (risk: string) =>
     input.finalEvidenceComplete && /^builder-reported evidence:\s*none retained\.?$/i.test(risk);
+  const hasCurrentValidationEvidence = (risk: string) =>
+    input.finalEvidenceComplete && failedValidationRiskPattern.test(risk);
   const resolvedRisks = input.historicalRisks.filter(
     (risk) =>
       input.explicitResolvedRisks.has(risk) ||
       hasIntegratedArtifactEvidence(risk) ||
-      hasCanonicalReplacementEvidence(risk),
+      hasCanonicalReplacementEvidence(risk) ||
+      hasCurrentValidationEvidence(risk),
   );
   const resolved = new Set(resolvedRisks);
   return {
@@ -679,13 +713,7 @@ export function missionRunCompletionBlockers(input: {
   const requiredTasks = input.tasks.filter((task) => task.replan?.state !== "superseded");
   if (input.run.swarmPolicy?.autoCompleteMission !== true)
     blockers.push("Mission auto-completion is disabled for this Run.");
-  if (
-    requiredTasks.length !==
-      input.mission.taskIds.filter(
-        (taskId) => input.tasks.find((task) => task.id === taskId)?.replan?.state !== "superseded",
-      ).length ||
-    requiredTasks.some((task) => task.status !== "completed")
-  )
+  if (requiredTasks.some((task) => task.status !== "completed"))
     blockers.push("All required Tasks must be completed.");
   for (const task of requiredTasks) {
     if (task.reviewRequired === true) {
@@ -781,6 +809,11 @@ export function buildTaskContextPackage(input: {
     `Task specification: current Plan-v${input.task.replan?.planVersion ?? input.mission.currentPlanVersion ?? 1} execution intent`,
     "Acceptance criteria:",
     ...lines(input.task.acceptanceCriteria ?? [], 20),
+    "",
+    "Structured coordination protocol:",
+    "If repository evidence invalidates the current Plan and work must stop for a bounded replan, include this exact JSON shape in the final assistant response. Replace the placeholder strings with bounded evidence; do not rename keys, change type/kind, or wrap it in an alternative XML protocol.",
+    '{"type":"nebula_coordination_request","kind":"replan_request","reason":"Why the current Plan cannot execute without guessing","scope":"mission_subgraph","trigger":"assumption_invalidated","evidence":[{"kind":"repository_fact","summary":"Short evidence summary","expected":"The contract or artifact the Plan assumed","observed":"What the repository actually contains","source":"Repository-relative paths or other bounded canonical evidence"}]}',
+    "A replan request requires a non-empty reason, trigger, and at least one evidence item. Do not edit outside Write scope while waiting for replanning.",
     "",
     ...prerequisiteSections,
     "Resource context:",

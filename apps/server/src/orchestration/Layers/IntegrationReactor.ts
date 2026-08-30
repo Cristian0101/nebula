@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { canRetryIntegrationOperation } from "@t3tools/shared/missionRunner";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -19,6 +20,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { boundedGitRefPathSegment } from "../../checkpointing/Utils.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
@@ -45,7 +47,7 @@ type IntegrationEvent = Extract<
 >;
 
 export const taskIntegrationArtifactRef = (artifactId: string) =>
-  `refs/t3/integration-artifacts/${encodeURIComponent(artifactId)}`;
+  `refs/t3/integration-artifacts/${boundedGitRefPathSegment(encodeURIComponent(artifactId), artifactId)}`;
 
 export const orderedRemainingIntegrationTasks = (batch: Pick<IntegrationBatch, "tasks">) =>
   batch.tasks
@@ -536,6 +538,18 @@ const make = Effect.gen(function* () {
     batchId: IntegrationBatchId,
   ) {
     const { batch } = yield* readBatch(projectId, batchId);
+    if (batch && canRetryIntegrationOperation(batch)) {
+      const retried: IntegrationBatch = {
+        ...batch,
+        status: "applying",
+        failureCode: null,
+        failureReason: null,
+        updatedAt: yield* now,
+      };
+      yield* update(projectId, retried, "operation-retried");
+      yield* applyRemaining(projectId, batchId);
+      return;
+    }
     if (!batch?.workspacePath || batch.status !== "conflict" || !batch.conflict) return;
     const unresolved = yield* unresolvedFiles(batch.workspacePath);
     if (unresolved.length > 0) {

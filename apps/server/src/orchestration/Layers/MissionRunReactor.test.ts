@@ -11,6 +11,7 @@ import {
   interruptedReplacementRequiresAttention,
   isRequiredGateFailureStatus,
   missionProviderTurnInFlight,
+  needsTerminalThreadHydration,
   providerCapabilityMismatchForAttempt,
   providerExecutionFailureDetail,
   providerSupportsStructuredReview,
@@ -633,6 +634,27 @@ describe("MissionRunReactor recovery", () => {
         ],
       } as never),
     ).toBeNull();
+  });
+
+  it("hydrates terminal Task threads when the command snapshot omits message bodies", () => {
+    expect(
+      needsTerminalThreadHydration({
+        latestTurn: { state: "completed" },
+        messages: [],
+      } as never),
+    ).toBe(true);
+    expect(
+      needsTerminalThreadHydration({
+        latestTurn: { state: "running" },
+        messages: [],
+      } as never),
+    ).toBe(false);
+    expect(
+      needsTerminalThreadHydration({
+        latestTurn: { state: "completed" },
+        messages: [{ role: "assistant", text: "Already hydrated." }],
+      } as never),
+    ).toBe(false);
   });
 
   it("redacts secrets before provider recovery evidence is serialized", () => {

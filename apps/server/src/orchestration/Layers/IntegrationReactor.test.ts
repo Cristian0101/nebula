@@ -77,7 +77,7 @@ it("extracts only explicit non-sensitive Integration risk-resolution trailers", 
 });
 
 it.layer(layer)("deterministic Task Integration artifacts", (it) => {
-  it.effect("materializes the approved tree once without checking it out", () =>
+  it.effect("materializes a long-ID approved tree once without checking it out", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -104,9 +104,13 @@ it.layer(layer)("deterministic Task Integration artifacts", (it) => {
       yield* run(["update-ref", checkpointRef, approvedCommit]);
       yield* run(["switch", "--detach", baseCommit]);
 
+      const artifactId = Array.from(
+        { length: 12 },
+        (_, index) => `task-artifact:mission-replan-${index}`,
+      ).join(":");
       const input = {
         sourceRepository: cwd,
-        artifactId: "artifact-a",
+        artifactId,
         checkpointRef,
         baseCommit,
         taskTitle: "Approved Task",
@@ -127,7 +131,7 @@ it.layer(layer)("deterministic Task Integration artifacts", (it) => {
       expect((yield* run(["rev-parse", `${first.commit}^`])).stdout.trim()).toBe(baseCommit);
       expect((yield* run(["rev-parse", "HEAD"])).stdout.trim()).toBe(baseCommit);
       expect(
-        (yield* run(["rev-parse", taskIntegrationArtifactRef("artifact-a")])).stdout.trim(),
+        (yield* run(["rev-parse", taskIntegrationArtifactRef(artifactId)])).stdout.trim(),
       ).toBe(first.commit);
       const message = (yield* run(["show", "-s", "--format=%B", first.commit])).stdout;
       expect(message).toContain("Nebula-Task-Result: task-result-a");

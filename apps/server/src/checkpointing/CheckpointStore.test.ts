@@ -114,6 +114,25 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
     );
   });
 
+  describe("captureCheckpoint", () => {
+    it.effect("captures checkpoints for deeply nested Mission thread IDs", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const threadId = ThreadId.make(
+          Array.from({ length: 12 }, (_, index) => `mission-replan-${index}`).join(":"),
+        );
+        const checkpointRef = checkpointRefForThreadTurn(threadId, 0);
+
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef });
+
+        expect(yield* checkpointStore.hasCheckpointRef({ cwd: tmp, checkpointRef })).toBe(true);
+        expect(String(checkpointRef).split("/").at(-3)).toMatch(/^sha256-/);
+      }),
+    );
+  });
+
   describe("diffCheckpoints", () => {
     it.effect("returns full oversized checkpoint diffs without truncation", () =>
       Effect.gen(function* () {
