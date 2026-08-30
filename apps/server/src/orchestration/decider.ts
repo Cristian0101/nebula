@@ -6,6 +6,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type ReplanChangeSet,
+  type TaskId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
@@ -47,6 +48,18 @@ import { buildIntegrationBatch, integrationEligibility } from "./integrationPoli
 function missionContainingTask(readModel: OrchestrationReadModel, taskId: string) {
   return (readModel.missions ?? []).find((mission) =>
     mission.taskIds.some((candidate) => candidate === taskId),
+  );
+}
+
+export function continuesInterruptedProviderReplacement(input: {
+  readonly resolution: "approved" | "rejected";
+  readonly attempts: ReadonlyArray<{ readonly kind: string; readonly status: string }>;
+}): boolean {
+  const latestAttempt = input.attempts.at(-1);
+  return (
+    input.resolution === "rejected" &&
+    latestAttempt?.kind === "replacement" &&
+    latestAttempt.status === "interrupted"
   );
 }
 
@@ -2006,6 +2019,137 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "mission.run.replan.analysis.start": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      const proposal = run?.replanProposals?.find(
+        (candidate) => candidate.id === command.proposalId,
+      );
+      if (!run || !proposal || proposal.status !== "requested") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Replan Proposal '${command.proposalId}' is not awaiting Architect analysis.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: run.missionId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.run.reconciled" as const,
+        payload: {
+          run: {
+            ...run,
+            status: "attention" as const,
+            attention: [
+              ...run.attention.filter(
+                (item) => !["replan_requested", "replan_analysis_failed"].includes(item.code),
+              ),
+              {
+                taskId: proposal.sourceTaskId,
+                code: "replan_requested",
+                detail: "The Architect is analyzing bounded canonical Mission evidence.",
+                blocksMission: proposal.scope === "full_mission",
+              },
+            ],
+            attentionReason: "Architect replan analysis is in progress.",
+            replanProposals: (run.replanProposals ?? []).map((candidate) =>
+              candidate.id === proposal.id
+                ? {
+                    ...candidate,
+                    status: "analyzing" as const,
+                    architectModelSelection: command.architectModelSelection,
+                    architectContextFingerprint: command.architectContextFingerprint,
+                    architectAnalysisStartedAt: command.createdAt,
+                    architectAnalysisCompletedAt: null,
+                    architectAnalysisFailure: null,
+                  }
+                : candidate,
+            ),
+            decisions: [
+              ...run.decisions,
+              {
+                id: EventId.make(`replan:${command.proposalId}:architect-analysis-started`),
+                kind: "replan" as const,
+                taskId: proposal.sourceTaskId,
+                reason: `Architect analysis started with '${command.architectModelSelection.instanceId}'.`,
+                sourceTaskIds: proposal.affectedTaskIds,
+                occurredAt: command.createdAt,
+              },
+            ],
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "mission.run.replan.analysis.fail": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      const proposal = run?.replanProposals?.find(
+        (candidate) => candidate.id === command.proposalId,
+      );
+      if (!run || !proposal || !["requested", "analyzing"].includes(proposal.status)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Replan Proposal '${command.proposalId}' is not in Architect analysis.`,
+        });
+      }
+      const failureReason = redactSensitiveText(command.failureReason);
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: run.missionId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.run.reconciled" as const,
+        payload: {
+          run: {
+            ...run,
+            status: "attention" as const,
+            attention: [
+              ...run.attention.filter(
+                (item) => !["replan_requested", "replan_analysis_failed"].includes(item.code),
+              ),
+              {
+                taskId: proposal.sourceTaskId,
+                code: "replan_analysis_failed",
+                detail: failureReason,
+                blocksMission: proposal.scope === "full_mission",
+              },
+            ],
+            attentionReason: "Architect replan analysis failed.",
+            replanProposals: (run.replanProposals ?? []).map((candidate) =>
+              candidate.id === proposal.id
+                ? {
+                    ...candidate,
+                    status: "analysis_failed" as const,
+                    ...(command.architectModelSelection !== undefined
+                      ? { architectModelSelection: command.architectModelSelection }
+                      : {}),
+                    architectAnalysisCompletedAt: command.createdAt,
+                    architectAnalysisFailure: failureReason,
+                  }
+                : candidate,
+            ),
+            decisions: [
+              ...run.decisions,
+              {
+                id: EventId.make(`replan:${command.proposalId}:architect-analysis-failed`),
+                kind: "replan" as const,
+                taskId: proposal.sourceTaskId,
+                reason: failureReason,
+                sourceTaskIds: proposal.affectedTaskIds,
+                occurredAt: command.createdAt,
+              },
+            ],
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
     case "mission.run.replan.propose": {
       const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
       const proposal = run?.replanProposals?.find(
@@ -2034,7 +2178,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         projectId: mission.projectId,
       });
       const changeSet = redactReplanChangeSet(command.changeSet);
-      const validation = validateReplanChangeSet({
+      const baseValidation = validateReplanChangeSet({
         mission,
         tasks: readModel.tasks ?? [],
         project,
@@ -2058,6 +2202,32 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         ...changeSet.supersededTaskIds,
         ...contractConsumerTaskIds,
       ]);
+      const expectedPreservedTaskIds =
+        proposal.impact?.unaffectedTaskIds.filter((taskId) => !changeAffectedTaskIds.has(taskId)) ??
+        [];
+      const sameTaskSet = (left: ReadonlyArray<TaskId>, right: ReadonlyArray<TaskId>) =>
+        left.length === right.length && left.every((taskId) => right.includes(taskId));
+      const architectBlockers = [
+        ...(command.scope !== undefined && command.scope !== proposal.scope
+          ? [
+              `Architect returned scope '${command.scope}' instead of approved analysis scope '${proposal.scope}'.`,
+            ]
+          : []),
+        ...(command.architectReportedAffectedTaskIds !== undefined &&
+        !sameTaskSet(command.architectReportedAffectedTaskIds, [...changeAffectedTaskIds])
+          ? ["Architect affected Task IDs do not match the validated change set."]
+          : []),
+        ...(command.architectReportedPreservedTaskIds !== undefined &&
+        !sameTaskSet(command.architectReportedPreservedTaskIds, expectedPreservedTaskIds)
+          ? ["Architect preserved Task IDs do not match canonical impact analysis."]
+          : []),
+      ];
+      const blockers = [...new Set([...baseValidation.blockers, ...architectBlockers])];
+      const validation = {
+        ...baseValidation,
+        status: blockers.length === 0 ? ("valid" as const) : ("invalid" as const),
+        blockers,
+      };
       const impact = proposal.impact
         ? {
             ...proposal.impact,
@@ -2084,10 +2254,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         : null;
       const nextProposal = {
         ...proposal,
+        ...(command.summary ? { summary: redactSensitiveText(command.summary) } : {}),
+        ...(command.rationale ? { rationale: redactSensitiveText(command.rationale) } : {}),
         affectedTaskIds: [...changeAffectedTaskIds],
         impact,
         changeSet,
         validation,
+        ...(command.architectModelSelection
+          ? { architectModelSelection: command.architectModelSelection }
+          : {}),
+        ...(command.architectContextFingerprint
+          ? { architectContextFingerprint: command.architectContextFingerprint }
+          : {}),
+        ...(command.architectReportedPreservedTaskIds
+          ? { architectReportedPreservedTaskIds: command.architectReportedPreservedTaskIds }
+          : {}),
+        ...(command.architectReportedAffectedTaskIds
+          ? { architectReportedAffectedTaskIds: command.architectReportedAffectedTaskIds }
+          : {}),
+        ...(command.architectRisks
+          ? {
+              architectRisks: command.architectRisks.map((risk) => ({
+                risk: redactSensitiveText(risk.risk),
+                mitigation: risk.mitigation === null ? null : redactSensitiveText(risk.mitigation),
+              })),
+            }
+          : {}),
+        architectAnalysisCompletedAt: command.createdAt,
+        architectAnalysisFailure: null,
         architectPlanProposalId:
           command.architectPlanProposalId ?? proposal.architectPlanProposalId,
         status:
@@ -2286,7 +2480,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
       const recovery = run?.taskRecovery?.find((candidate) => candidate.taskId === command.taskId);
       const recommendation = recovery?.providerEscalation;
-      if (!run || !recovery || !recommendation || recommendation.status !== "recommended") {
+      const continuesInterruptedReplacement = recovery
+        ? continuesInterruptedProviderReplacement({
+            resolution: command.resolution,
+            attempts: recovery.attempts,
+          })
+        : false;
+      if (
+        !run ||
+        !recovery ||
+        !recommendation ||
+        (recommendation.status !== "recommended" && !continuesInterruptedReplacement)
+      ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Task '${command.taskId}' has no pending provider substitution recommendation.`,
@@ -2308,6 +2513,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           status: command.resolution,
           resolvedAt: command.createdAt,
         },
+        attentionRequired: continuesInterruptedReplacement ? false : recovery.attentionRequired,
         updatedAt: command.createdAt,
       };
       return {
@@ -2321,7 +2527,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           run: {
             ...run,
-            status: command.resolution === "approved" ? "running" : run.status,
+            status:
+              command.resolution === "approved" || continuesInterruptedReplacement
+                ? "running"
+                : run.status,
             attention: run.attention.filter((item) => item.taskId !== command.taskId),
             attentionReason:
               command.resolution === "approved"
@@ -2341,7 +2550,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                 reason:
                   command.resolution === "approved"
                     ? `User approved provider substitution to '${recommendation.recommendedProviderInstanceId}'.`
-                    : "User rejected provider substitution; the failed Task remains in attention.",
+                    : continuesInterruptedReplacement
+                      ? "User kept the current provider and explicitly continued after its interrupted replacement attempt."
+                      : "User rejected provider substitution; the failed Task remains in attention.",
                 sourceTaskIds: [command.taskId],
                 occurredAt: command.createdAt,
               },

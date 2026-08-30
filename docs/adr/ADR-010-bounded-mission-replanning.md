@@ -10,7 +10,7 @@ A supervised Mission can discover that an approved decomposition is no longer va
 
 ## Decision
 
-Nebula separates replanning into durable request, proposal, approval, and application states. Requests require a typed trigger and grounded evidence. The runtime computes the smallest affected DAG set, while a structured change set describes new, modified, superseded, dependency, ownership, resource, provider, and contract changes. Deterministic validation runs before approval.
+Nebula separates replanning into durable request, analysis, proposal, approval, and application states. Requests require a typed trigger and grounded evidence. The existing Architect runtime receives bounded canonical context and produces a structured change set describing new, modified, superseded, dependency, ownership, resource, provider, and contract changes. The runtime independently computes the smallest affected DAG set and validates the Architect output before approval. Provider output never mutates canonical Tasks directly.
 
 Approval never mutates the Mission. A separate apply command emits one atomic event containing the next Mission Plan, updated Run ledger, canonical Tasks, and affected Integration Batch. Plan v1 remains history and Plan v2 becomes current. Unaffected canonical Tasks retain identity and evidence. Superseded work remains visible but cannot schedule or integrate. Changed contract, handoff, review, and quality evidence becomes stale rather than disappearing.
 

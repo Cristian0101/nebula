@@ -81,6 +81,7 @@ const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "task.review.prepare-failed",
   "task.review.stale",
   "task.handoff.updated",
+  "thread.created",
   "task.quality.run-requested",
   "task.quality.run-finished",
   "task.independent-review.requested",
@@ -97,6 +98,13 @@ const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
 
 export const shouldReconcileMissionRunEventType = (eventType: OrchestrationEvent["type"]) =>
   RELEVANT_EVENTS.has(eventType);
+
+export const shouldReconcileMissionRunEvent = (event: OrchestrationEvent) => {
+  if (shouldReconcileMissionRunEventType(event.type)) return true;
+  if (event.type !== "mission.run.reconciled") return false;
+  const decision = event.payload.run.decisions.at(-1);
+  return decision?.kind === "replacement" && decision.occurredAt === event.occurredAt;
+};
 
 const decisionHash = (value: string) => {
   let hash = 2_166_136_261;
@@ -283,6 +291,27 @@ export function replacementAttemptOwnsTurnStart(
   return activeAttempt?.kind === "replacement" && activeAttempt.threadId === threadId;
 }
 
+export function replacementAttemptNeedsProjectionContinuation(
+  state: Pick<TaskRecoveryState, "attempts">,
+  taskThreadId: ThreadId | null,
+): boolean {
+  const activeAttempt = state.attempts.findLast((attempt) => attempt.status === "active");
+  return activeAttempt?.kind === "replacement" && activeAttempt.threadId !== taskThreadId;
+}
+
+export function replacementAttemptNeedsTurnStart(
+  state: Pick<TaskRecoveryState, "attempts">,
+  thread: Pick<OrchestrationThread, "id" | "latestTurn" | "messages"> | undefined,
+): boolean {
+  const activeAttempt = state.attempts.findLast((attempt) => attempt.status === "active");
+  return (
+    activeAttempt?.kind === "replacement" &&
+    thread?.id === activeAttempt.threadId &&
+    thread.latestTurn === null &&
+    thread.messages.length === 0
+  );
+}
+
 export function finalizeTerminalTaskAttempts(input: {
   readonly recovery: ReadonlyArray<TaskRecoveryState>;
   readonly tasks: ReadonlyArray<
@@ -327,13 +356,18 @@ export function finalizeSuccessfulProviderExecution(input: {
   readonly completedAt: string;
 }): TaskRecoveryState {
   const hasMatchingActiveAttempt = input.state.attempts.some(
-    (attempt) => attempt.status === "active" && attempt.threadId === input.threadId,
+    (attempt) =>
+      attempt.threadId === input.threadId &&
+      (attempt.status === "active" ||
+        (attempt.status === "failed" && attempt.failureClass === "provider_capability_mismatch")),
   );
   if (!hasMatchingActiveAttempt) return input.state;
   return {
     ...input.state,
     attempts: input.state.attempts.map((attempt) =>
-      attempt.status === "active" && attempt.threadId === input.threadId
+      attempt.threadId === input.threadId &&
+      (attempt.status === "active" ||
+        (attempt.status === "failed" && attempt.failureClass === "provider_capability_mismatch"))
         ? {
             ...attempt,
             status: "completed" as const,
@@ -345,9 +379,62 @@ export function finalizeSuccessfulProviderExecution(input: {
     ),
     latestFailureClass: null,
     latestFailureSignature: null,
+    providerEscalation: null,
     attentionRequired: false,
     updatedAt: input.completedAt,
   };
+}
+
+export function refreshProviderEscalationAvailability(input: {
+  readonly state: TaskRecoveryState;
+  readonly candidates: ReadonlyArray<RoutingCandidate>;
+  readonly refreshedAt: string;
+}): TaskRecoveryState {
+  const escalation = input.state.providerEscalation;
+  if (
+    escalation?.status !== "recommended" ||
+    escalation.recommendedProviderInstanceId !== null ||
+    input.state.latestFailureClass === null
+  ) {
+    return input.state;
+  }
+  const refreshed = recommendProviderEscalation({
+    state: input.state,
+    failedProviderInstanceId: escalation.failedProviderInstanceId,
+    candidates: input.candidates,
+    failureClass: input.state.latestFailureClass,
+    createdAt: escalation.createdAt,
+  });
+  if (refreshed?.recommendedProviderInstanceId === null || refreshed === null) {
+    return input.state;
+  }
+  return {
+    ...input.state,
+    providerEscalation: refreshed,
+    updatedAt: input.refreshedAt,
+  };
+}
+
+export function providerCapabilityMismatchForAttempt(input: {
+  readonly state: TaskRecoveryState;
+  readonly threadId: ThreadId;
+  readonly handoff:
+    | Pick<NonNullable<OrchestrationTask["handoff"]>, "generationError" | "updatedAt">
+    | null
+    | undefined;
+}): string | null {
+  const attempt = input.state.attempts.findLast(
+    (candidate) => candidate.threadId === input.threadId,
+  );
+  const error = input.handoff?.generationError ?? "";
+  if (
+    !attempt ||
+    !input.handoff ||
+    input.handoff.updatedAt.localeCompare(attempt.startedAt) < 0 ||
+    !/does not support structured Architect generation/iu.test(error)
+  )
+    return null;
+  return error || "Provider lacks required structured generation support.";
 }
 
 export function beginReviewRemediationAttempt(input: {
@@ -1043,7 +1130,6 @@ const make = Effect.gen(function* () {
         createdAt: attempt.startedAt,
       });
       yield* nudgeAfterProjectionStep();
-      return true;
     }
     if (thread.latestTurn === null && thread.messages.length === 0) {
       yield* engine.dispatch({
@@ -1107,6 +1193,37 @@ const make = Effect.gen(function* () {
         attentionRequired: false,
         updatedAt: startedAt,
       };
+    }
+    if (
+      state.providerEscalation?.status === "recommended" &&
+      state.providerEscalation.recommendedProviderInstanceId === null
+    ) {
+      const refreshedAt = yield* now;
+      const refreshedState = refreshProviderEscalationAvailability({
+        state,
+        candidates: yield* routingCandidates(model),
+        refreshedAt,
+      });
+      if (refreshedState !== state) {
+        state = refreshedState;
+        yield* updateRun({
+          runId: run.id,
+          status: "attention",
+          currentReadyTaskIds: run.currentReadyTaskIds,
+          scheduledTaskIds: run.scheduledTaskIds,
+          attention: [
+            ...run.attention.filter((item) => item.taskId !== task.id),
+            {
+              taskId: task.id,
+              code: "provider_substitution_recommended",
+              detail: state.providerEscalation?.reason ?? "An alternate provider is now ready.",
+              blocksMission: false,
+            },
+          ],
+          taskRecovery: upsertTaskRecoveryState(run.taskRecovery, state),
+        });
+        return true;
+      }
     }
     if (state.providerEscalation?.status === "approved") {
       const recommendation = state.providerEscalation;
@@ -1212,6 +1329,28 @@ const make = Effect.gen(function* () {
     const activeReplacement = state.attempts.findLast(
       (attempt) => attempt.kind === "replacement" && attempt.status === "active",
     );
+    if (replacementAttemptNeedsProjectionContinuation(state, task.threadId)) {
+      return yield* continueReplacement({
+        run,
+        model,
+        task,
+        state,
+        detail:
+          state.providerEscalation?.reason ??
+          "Continue the approved provider replacement in the canonical Task workspace.",
+      });
+    }
+    if (replacementAttemptNeedsTurnStart(state, thread)) {
+      return yield* continueReplacement({
+        run,
+        model,
+        task,
+        state,
+        detail:
+          state.providerEscalation?.reason ??
+          "Start the approved provider replacement in the canonical Task workspace.",
+      });
+    }
     if (activeExecutionAttemptOwnsProviderTurn(state, thread)) return true;
     const reviewBeforeRecovery = currentReview(task);
     const remediationStartedAt = thread?.latestTurn?.requestedAt;
@@ -1294,11 +1433,11 @@ const make = Effect.gen(function* () {
     const gate = requiredGateFailure(task);
     const review = reviewSnapshotCoversLatestTurn(task, thread) ? currentReview(task) : null;
     const providerError = providerExecutionFailureDetail(thread);
-    const capabilityMismatch = /does not support structured Architect generation/iu.test(
-      task.handoff?.generationError ?? "",
-    )
-      ? (task.handoff?.generationError ?? "Provider lacks required structured generation support.")
-      : null;
+    const capabilityMismatch = providerCapabilityMismatchForAttempt({
+      state,
+      threadId: thread.id,
+      handoff: task.handoff,
+    });
     if (
       providerError === null &&
       thread.latestTurn?.state === "completed" &&
@@ -2460,7 +2599,7 @@ const make = Effect.gen(function* () {
 
   const start: MissionRunReactorShape["start"] = Effect.fn("MissionRunReactor.start")(function* () {
     yield* forkParkedStream(engine.streamDomainEvents, (event) =>
-      shouldReconcileMissionRunEventType(event.type) ? worker.enqueue(event) : Effect.void,
+      shouldReconcileMissionRunEvent(event) ? worker.enqueue(event) : Effect.void,
     );
     // Provider readiness changes are not orchestration domain events. Wake the
     // scheduler when a provider finishes probing so a Task held at the

@@ -19,7 +19,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { decideOrchestrationCommand } from "./decider.ts";
+import { continuesInterruptedProviderReplacement, decideOrchestrationCommand } from "./decider.ts";
 import { createEmptyReadModel, projectEvent } from "./projector.ts";
 
 const now = "2026-08-22T12:00:00.000Z";
@@ -36,6 +36,24 @@ const replanProposalId = ReplanProposalId.make("replan-proposal-1");
 const decodeOrchestrationReadModel = Schema.decodeUnknownSync(OrchestrationReadModelSchema);
 const restartFromPersistedSnapshot = (model: OrchestrationReadModel) =>
   decodeOrchestrationReadModel(JSON.parse(JSON.stringify(model)));
+
+it("treats keeping an interrupted replacement provider as explicit continuation", () => {
+  expect(
+    continuesInterruptedProviderReplacement({
+      resolution: "rejected",
+      attempts: [
+        { kind: "initial", status: "failed" },
+        { kind: "replacement", status: "interrupted" },
+      ],
+    }),
+  ).toBe(true);
+  expect(
+    continuesInterruptedProviderReplacement({
+      resolution: "rejected",
+      attempts: [{ kind: "initial", status: "failed" }],
+    }),
+  ).toBe(false);
+});
 
 const persistedEvent = (
   sequence: number,
@@ -687,48 +705,104 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
       expect(model.missions?.[0]?.taskIds).not.toContain(registryTask);
 
       model = yield* apply(model, {
+        type: "mission.run.replan.analysis.start",
+        commandId: CommandId.make("start-architect-replan-analysis"),
+        runId,
+        proposalId: replanProposalId,
+        architectModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "test",
+        },
+        architectContextFingerprint: "bounded-context-fingerprint",
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
+        status: "analyzing",
+        architectModelSelection: { instanceId: "codex", model: "test" },
+      });
+      model = restartFromPersistedSnapshot(model);
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("analyzing");
+
+      const changeSet = {
+        newTasks: [
+          {
+            taskId: registryTask,
+            title: "Registry foundation",
+            objective: "Create the missing registry before Task B continues.",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "test",
+            },
+            acceptanceCriteria: ["Registry contract exists"],
+            ownership: [
+              {
+                pattern: "fixture/registry/**",
+                access: "write" as const,
+                reason: "New bounded foundation",
+              },
+            ],
+            requiredResourceIds: [],
+            supersedesTaskId: null,
+          },
+        ],
+        modifiedTasks: [],
+        supersededTaskIds: [],
+        dependencyChanges: [
+          {
+            operation: "add" as const,
+            prerequisiteTaskId: registryTask,
+            dependentTaskId: taskB,
+          },
+        ],
+        contractChanges: [],
+      };
+
+      model = yield* apply(model, {
+        type: "mission.run.replan.propose",
+        commandId: CommandId.make("reject-invalid-architect-replan-output"),
+        runId,
+        proposalId: replanProposalId,
+        scope: "full_mission",
+        changeSet,
+        architectReportedPreservedTaskIds: [taskA, taskC],
+        architectReportedAffectedTaskIds: [taskB],
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
+        status: "analysis_failed",
+        validation: { status: "invalid" },
+      });
+      expect(model.missions?.[0]?.taskIds).not.toContain(registryTask);
+
+      model = yield* apply(model, {
         type: "mission.run.replan.propose",
         commandId: CommandId.make("propose-replan"),
         runId,
         proposalId: replanProposalId,
-        changeSet: {
-          newTasks: [
-            {
-              taskId: registryTask,
-              title: "Registry foundation",
-              objective: "Create the missing registry before Task B continues.",
-              modelSelection: {
-                instanceId: ProviderInstanceId.make("codex"),
-                model: "test",
-              },
-              acceptanceCriteria: ["Registry contract exists"],
-              ownership: [
-                {
-                  pattern: "fixture/registry/**",
-                  access: "write",
-                  reason: "New bounded foundation",
-                },
-              ],
-              requiredResourceIds: [],
-              supersedesTaskId: null,
-            },
-          ],
-          modifiedTasks: [],
-          supersededTaskIds: [],
-          dependencyChanges: [
-            {
-              operation: "add",
-              prerequisiteTaskId: registryTask,
-              dependentTaskId: taskB,
-            },
-          ],
-          contractChanges: [],
+        scope: "task_split",
+        summary: "Architect adds the missing Registry foundation.",
+        rationale: "Canonical repository evidence invalidated the Registry assumption.",
+        changeSet,
+        architectModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "test",
         },
+        architectContextFingerprint: "bounded-context-fingerprint",
+        architectReportedPreservedTaskIds: [taskA, taskC],
+        architectReportedAffectedTaskIds: [taskB],
+        architectRisks: [
+          {
+            risk: "Registry contract may drift.",
+            mitigation: "Require current handoff and review evidence.",
+          },
+        ],
         createdAt: now,
       });
       expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
         status: "awaiting_approval",
         validation: { status: "valid", blockers: [] },
+        architectAnalysisFailure: null,
+        architectRisks: [{ risk: "Registry contract may drift." }],
       });
       model = restartFromPersistedSnapshot(model);
       expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("awaiting_approval");

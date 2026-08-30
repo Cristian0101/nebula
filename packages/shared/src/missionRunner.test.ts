@@ -262,6 +262,52 @@ describe("supervised Mission scheduler", () => {
     );
   });
 
+  it("releases a replanned downstream Task only after the new prerequisite completes", () => {
+    const registryId = taskId("REGISTRY");
+    const serviceId = taskId("SERVICE");
+    const frontendId = taskId("FRONTEND");
+    const replannedMission = {
+      ...mission,
+      taskIds: [frontendId, serviceId, registryId],
+      dependencies: [
+        {
+          missionId,
+          prerequisiteTaskId: registryId,
+          dependentTaskId: serviceId,
+          createdAt: now,
+        },
+      ],
+      currentPlanVersion: 2,
+    };
+    const frontend = task("FRONTEND", "completed");
+    const service = task("SERVICE");
+    const registry = task("REGISTRY");
+    const waiting = planMissionRunScheduling({
+      mission: replannedMission,
+      run,
+      tasks: [frontend, service, registry],
+      project,
+      providerReadyTaskIds: new Set([serviceId, registryId]),
+    });
+    expect(waiting.scheduledTaskIds).toContain(registryId);
+    expect(waiting.scheduledTaskIds).not.toContain(serviceId);
+    expect(waiting.decisions).toContainEqual(
+      expect.objectContaining({ taskId: serviceId, kind: "waiting_dependency" }),
+    );
+
+    const released = planMissionRunScheduling({
+      mission: replannedMission,
+      run: { ...run, scheduledTaskIds: [] },
+      tasks: [frontend, service, task("REGISTRY", "completed")],
+      project,
+      providerReadyTaskIds: new Set([serviceId]),
+    });
+    expect(released.scheduledTaskIds).toEqual([serviceId]);
+    expect(released.decisions).toContainEqual(
+      expect.objectContaining({ taskId: serviceId, kind: "scheduled" }),
+    );
+  });
+
   it("reserves a contested resource for the deterministic winner", () => {
     const tasks = [
       task("A", "completed"),
@@ -538,6 +584,115 @@ describe("Swarm Alpha evidence", () => {
     expect(report.historicalRisks).toEqual(["Final follow-up risk"]);
     expect(report.resolvedRisks).toEqual([]);
     expect(report.remainingRisks).toEqual(["Final follow-up risk"]);
+  });
+
+  it("reports replans and provider replacements as distinct adaptive Mission metrics", () => {
+    const frontend = completed("A", "src/frontend.ts");
+    const registry = completed("REGISTRY", "src/registry.ts");
+    const report = buildMissionFinalReport({
+      mission: {
+        ...mission,
+        taskIds: [frontend.id, registry.id],
+        currentPlanVersion: 2,
+        planVersions: [
+          {
+            version: 1,
+            source: "initial",
+            taskIds: [frontend.id],
+            dependencies: [],
+            replanProposalId: null,
+            trigger: null,
+            preservedTaskIds: [frontend.id],
+            supersededTaskIds: [],
+            addedTaskIds: [],
+            createdAt: now,
+          },
+          {
+            version: 2,
+            source: "replan",
+            taskIds: [frontend.id, registry.id],
+            dependencies: [],
+            replanProposalId: "replan-1" as never,
+            trigger: "assumption_invalidated",
+            preservedTaskIds: [frontend.id],
+            supersededTaskIds: [],
+            addedTaskIds: [registry.id],
+            createdAt: now,
+          },
+        ],
+      },
+      run: {
+        ...run,
+        replanProposals: [
+          {
+            id: "replan-1",
+            status: "applied",
+            scope: "mission_subgraph",
+            trigger: "assumption_invalidated",
+            changeSet: {
+              newTasks: [],
+              modifiedTasks: [],
+              supersededTaskIds: [],
+              dependencyChanges: [],
+              contractChanges: [],
+            },
+          },
+        ] as never,
+        taskRecovery: [
+          {
+            taskId: registry.id,
+            transientRetries: 0,
+            remediationRounds: 0,
+            latestFailureClass: null,
+            latestFailureSignature: null,
+            attentionRequired: false,
+            updatedAt: now,
+            attempts: [
+              {
+                number: 1,
+                kind: "initial",
+                providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+                threadId: ThreadId.make("registry-1"),
+                status: "replaced",
+                failureClass: "provider_unavailable_auth",
+                summary: "Authentication unavailable.",
+                startedAt: now,
+                completedAt: now,
+              },
+              {
+                number: 2,
+                kind: "replacement",
+                providerInstanceId: ProviderInstanceId.make("codex"),
+                threadId: ThreadId.make("registry-2"),
+                status: "completed",
+                failureClass: null,
+                summary: "Replacement completed.",
+                startedAt: now,
+                completedAt: now,
+              },
+            ],
+          },
+        ],
+      },
+      tasks: [frontend, registry],
+      integrationBranch: "nebula/integration/adaptive",
+      finalValidation: "ready",
+      planVersion: 2,
+      generatedAt: "2026-08-23T12:10:00.000Z",
+    });
+
+    expect(report).toMatchObject({
+      planVersion: 2,
+      planVersionCount: 2,
+      appliedReplanCount: 1,
+      providerReplacementCount: 1,
+      providerSubstitutionCount: 1,
+      preservedTaskCount: 1,
+      dynamicTaskCount: 1,
+      modifiedTaskCount: 0,
+      replanTriggers: ["assumption_invalidated"],
+      replanScopes: ["mission_subgraph"],
+    });
   });
 
   it("preserves historical risks while excluding explicitly resolved Integration risks", () => {

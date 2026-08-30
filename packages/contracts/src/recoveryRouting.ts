@@ -257,6 +257,23 @@ export const ReplanChangeSet = Schema.Struct({
 });
 export type ReplanChangeSet = typeof ReplanChangeSet.Type;
 
+export const ArchitectReplanRisk = Schema.Struct({
+  risk: TrimmedNonEmptyString,
+  mitigation: Schema.NullOr(TrimmedString),
+});
+export type ArchitectReplanRisk = typeof ArchitectReplanRisk.Type;
+
+export const ArchitectReplanGenerationDraft = Schema.Struct({
+  scope: ReplanScope,
+  summary: TrimmedNonEmptyString,
+  rationale: TrimmedNonEmptyString,
+  preservedTaskIds: Schema.Array(TaskId),
+  affectedTaskIds: Schema.Array(TaskId),
+  changeSet: ReplanChangeSet,
+  risks: Schema.Array(ArchitectReplanRisk),
+});
+export type ArchitectReplanGenerationDraft = typeof ArchitectReplanGenerationDraft.Type;
+
 export const ReplanValidation = Schema.Struct({
   status: Schema.Literals(["valid", "invalid"]),
   blockers: Schema.Array(TrimmedNonEmptyString),
@@ -277,6 +294,14 @@ export const ReplanProposal = Schema.Struct({
   rationale: TrimmedNonEmptyString,
   preservedCompletedTaskIds: Schema.Array(TaskId),
   architectPlanProposalId: Schema.NullOr(ArchitectPlanProposalId),
+  architectModelSelection: Schema.optional(Schema.NullOr(ArchitectModelSelection)),
+  architectContextFingerprint: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  architectReportedPreservedTaskIds: Schema.optional(Schema.Array(TaskId)),
+  architectReportedAffectedTaskIds: Schema.optional(Schema.Array(TaskId)),
+  architectRisks: Schema.optional(Schema.Array(ArchitectReplanRisk)),
+  architectAnalysisStartedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  architectAnalysisCompletedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  architectAnalysisFailure: Schema.optional(Schema.NullOr(TrimmedString)),
   impact: Schema.optional(Schema.NullOr(ReplanImpactAnalysis)),
   changeSet: Schema.optional(Schema.NullOr(ReplanChangeSet)),
   validation: Schema.optional(Schema.NullOr(ReplanValidation)),

@@ -471,6 +471,11 @@ export function buildMissionFinalReport(input: {
   const addedTaskIds = new Set(
     (input.mission.planVersions ?? []).flatMap((version) => version.addedTaskIds),
   );
+  const preservedTaskIds = new Set(
+    (input.mission.planVersions ?? [])
+      .filter((version) => version.source === "replan")
+      .flatMap((version) => version.preservedTaskIds),
+  );
   const remediationRoundCount = recovery.reduce(
     (count, state) => count + state.remediationRounds,
     0,
@@ -520,6 +525,7 @@ export function buildMissionFinalReport(input: {
   return {
     missionObjective: input.mission.objective,
     ...(input.planVersion ? { planVersion: input.planVersion } : {}),
+    planVersionCount: Math.max(1, input.mission.planVersions?.length ?? 0),
     taskIds: currentTasks.map((task) => task.id),
     completedTaskIds: currentTasks
       .filter((task) => task.status === "completed")
@@ -537,7 +543,16 @@ export function buildMissionFinalReport(input: {
       .length,
     rejectedReplanCount: rejectedReplans.length,
     supersededTaskCount: input.tasks.filter((task) => task.replan?.state === "superseded").length,
+    modifiedTaskCount: appliedReplans.reduce(
+      (count, proposal) => count + (proposal.changeSet?.modifiedTasks.length ?? 0),
+      0,
+    ),
+    preservedTaskCount: preservedTaskIds.size,
     dynamicTaskCount: addedTaskIds.size,
+    replanTriggers: appliedReplans.flatMap((proposal) =>
+      proposal.trigger ? [proposal.trigger] : [],
+    ),
+    replanScopes: appliedReplans.map((proposal) => proposal.scope),
     providerSubstitutionCount: providerReplacementCount,
     retryCount: recovery.reduce((count, state) => count + state.transientRetries, 0),
     remediationRoundCount,

@@ -40,16 +40,18 @@ import {
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
+  ArchitectModelSelection,
   ArchitectPlanMaterializationTask,
   ArchitectPlanProposal,
   ArchitectTeamConfiguration,
 } from "./architectPlan.ts";
 import {
+  ArchitectReplanRisk,
   CoordinationRequest,
   RecoveryPolicy,
-  ReplanProposal,
   ReplanChangeSet,
   ReplanEvidence,
+  ReplanProposal,
   ReplanScope,
   ReplanTrigger,
   RoutingDecision,
@@ -595,6 +597,7 @@ export type SwarmPolicy = typeof SwarmPolicy.Type;
 export const MissionFinalReport = Schema.Struct({
   missionObjective: TrimmedNonEmptyString,
   planVersion: Schema.optional(PositiveInt),
+  planVersionCount: Schema.optional(PositiveInt),
   taskIds: Schema.Array(TaskId),
   completedTaskIds: Schema.Array(TaskId),
   attemptCount: Schema.optional(NonNegativeInt),
@@ -606,7 +609,11 @@ export const MissionFinalReport = Schema.Struct({
   missionReplanCount: Schema.optional(NonNegativeInt),
   rejectedReplanCount: Schema.optional(NonNegativeInt),
   supersededTaskCount: Schema.optional(NonNegativeInt),
+  modifiedTaskCount: Schema.optional(NonNegativeInt),
+  preservedTaskCount: Schema.optional(NonNegativeInt),
   dynamicTaskCount: Schema.optional(NonNegativeInt),
+  replanTriggers: Schema.optional(Schema.Array(ReplanTrigger)),
+  replanScopes: Schema.optional(Schema.Array(ReplanScope)),
   providerSubstitutionCount: Schema.optional(NonNegativeInt),
   retryCount: NonNegativeInt,
   remediationRoundCount: NonNegativeInt,
@@ -1793,7 +1800,35 @@ const MissionRunReplanProposeCommand = Schema.Struct({
   runId: MissionRunId,
   proposalId: ReplanProposalId,
   changeSet: ReplanChangeSet,
+  scope: Schema.optional(ReplanScope),
+  summary: Schema.optional(TrimmedNonEmptyString),
+  rationale: Schema.optional(TrimmedNonEmptyString),
+  architectModelSelection: Schema.optional(ArchitectModelSelection),
+  architectContextFingerprint: Schema.optional(TrimmedNonEmptyString),
+  architectReportedPreservedTaskIds: Schema.optional(Schema.Array(TaskId)),
+  architectReportedAffectedTaskIds: Schema.optional(Schema.Array(TaskId)),
+  architectRisks: Schema.optional(Schema.Array(ArchitectReplanRisk)),
   architectPlanProposalId: Schema.optional(Schema.NullOr(ArchitectPlanProposalId)),
+  createdAt: IsoDateTime,
+});
+
+const MissionRunReplanAnalysisStartCommand = Schema.Struct({
+  type: Schema.Literal("mission.run.replan.analysis.start"),
+  commandId: CommandId,
+  runId: MissionRunId,
+  proposalId: ReplanProposalId,
+  architectModelSelection: ArchitectModelSelection,
+  architectContextFingerprint: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const MissionRunReplanAnalysisFailCommand = Schema.Struct({
+  type: Schema.Literal("mission.run.replan.analysis.fail"),
+  commandId: CommandId,
+  runId: MissionRunId,
+  proposalId: ReplanProposalId,
+  architectModelSelection: Schema.optional(Schema.NullOr(ArchitectModelSelection)),
+  failureReason: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
 });
 
@@ -2816,6 +2851,8 @@ const ProjectResourceLeasesReconcileCommand = Schema.Struct({
 
 const InternalOrchestrationCommand = Schema.Union([
   MissionRunReconcileCommand,
+  MissionRunReplanAnalysisStartCommand,
+  MissionRunReplanAnalysisFailCommand,
   TaskWorkspacePreparationStartedCommand,
   TaskWorkspaceReadyCommand,
   TaskWorkspaceFailedCommand,

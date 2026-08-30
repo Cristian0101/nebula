@@ -188,7 +188,7 @@ function ReplanProposalCard({
     title.trim().length > 0 &&
     objective.trim().length > 0 &&
     ownership.trim().length > 0;
-  const canEdit = ["requested", "analysis_failed", "awaiting_approval"].includes(proposal.status);
+  const canEdit = proposal.status === "analysis_failed";
   return (
     <article className="rounded-md border border-black/[0.08] bg-background/75 p-3 text-xs">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -211,6 +211,18 @@ function ReplanProposalCard({
           {label(proposal.status)}
         </Badge>
       </div>
+      {proposal.architectModelSelection ? (
+        <p className="mt-2 text-muted-foreground">
+          Architect · {proposal.architectModelSelection.instanceId} ·{" "}
+          {proposal.architectModelSelection.model}
+        </p>
+      ) : null}
+      {proposal.status === "requested" || proposal.status === "analyzing" ? (
+        <p className="mt-2 rounded-md bg-info/10 p-2 text-info">
+          Architect is analyzing bounded canonical Mission evidence. No Task graph mutation has
+          occurred.
+        </p>
+      ) : null}
       {(proposal.evidence ?? []).map((item) => (
         <div
           key={`${item.kind}:${item.source}:${item.summary}:${item.observed}`}
@@ -274,8 +286,19 @@ function ReplanProposalCard({
           ))}
         </div>
       ) : null}
+      {(proposal.architectRisks ?? []).length > 0 ? (
+        <div className="mt-2 rounded-md bg-muted/35 p-2">
+          <p className="font-medium">Architect risks</p>
+          {(proposal.architectRisks ?? []).map((risk) => (
+            <p key={`${risk.risk}:${risk.mitigation ?? ""}`} className="mt-1">
+              {risk.risk}
+              {risk.mitigation ? ` · ${risk.mitigation}` : ""}
+            </p>
+          ))}
+        </div>
+      ) : null}
       {canEdit ? (
-        <details className="mt-2" open={proposal.status !== "awaiting_approval"}>
+        <details className="mt-2" open>
           <summary className="cursor-pointer font-medium">Prepare smallest fix</summary>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <label className="grid gap-1">
@@ -634,7 +657,9 @@ export function MissionCommandCenter({
                       variant="ghost"
                       onClick={() => onResolveProviderSubstitution(state.taskId, "rejected")}
                     >
-                      Keep current provider
+                      {state.attempts.at(-1)?.status === "interrupted"
+                        ? "Retry with current provider"
+                        : "Keep current provider"}
                     </Button>
                   </div>
                 ) : null}
@@ -731,8 +756,9 @@ export function MissionCommandCenter({
             <div>
               <dt className="text-muted-foreground">Plan and Tasks</dt>
               <dd>
-                v{run.finalReport.planVersion ?? 1} · {run.finalReport.completedTaskIds.length} /{" "}
-                {run.finalReport.taskIds.length} complete
+                v{run.finalReport.planVersion ?? 1} of {run.finalReport.planVersionCount ?? 1} ·{" "}
+                {run.finalReport.completedTaskIds.length} / {run.finalReport.taskIds.length}{" "}
+                complete
               </dd>
             </div>
             <div>
@@ -755,8 +781,16 @@ export function MissionCommandCenter({
               <dd>
                 {run.finalReport.appliedReplanCount ?? 0} replans ·{" "}
                 {run.finalReport.dynamicTaskCount ?? 0} new Tasks ·{" "}
+                {run.finalReport.preservedTaskCount ?? 0} preserved ·{" "}
+                {run.finalReport.modifiedTaskCount ?? 0} modified ·{" "}
                 {run.finalReport.supersededTaskCount ?? 0} superseded
               </dd>
+              {(run.finalReport.replanTriggers ?? []).length > 0 ? (
+                <dd className="text-muted-foreground">
+                  {(run.finalReport.replanTriggers ?? []).map(label).join(", ")} ·{" "}
+                  {(run.finalReport.replanScopes ?? []).map(label).join(", ")}
+                </dd>
+              ) : null}
             </div>
             <div>
               <dt className="text-muted-foreground">Reviews</dt>

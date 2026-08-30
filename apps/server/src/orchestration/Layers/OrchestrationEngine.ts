@@ -109,6 +109,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "mission.run.reconcile":
     case "mission.run.coordination-request.resolve":
     case "mission.run.replan.request":
+    case "mission.run.replan.analysis.start":
+    case "mission.run.replan.analysis.fail":
     case "mission.run.replan.propose":
     case "mission.run.replan.resolve":
     case "mission.run.replan.apply":

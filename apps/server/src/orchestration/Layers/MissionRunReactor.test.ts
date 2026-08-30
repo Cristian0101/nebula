@@ -11,10 +11,15 @@ import {
   interruptedReplacementRequiresAttention,
   isRequiredGateFailureStatus,
   missionProviderTurnInFlight,
+  providerCapabilityMismatchForAttempt,
   providerExecutionFailureDetail,
   providerSupportsStructuredReview,
+  refreshProviderEscalationAvailability,
+  replacementAttemptNeedsProjectionContinuation,
+  replacementAttemptNeedsTurnStart,
   replacementAttemptOwnsTurnStart,
   reviewSnapshotCoversLatestTurn,
+  shouldReconcileMissionRunEvent,
   shouldReconcileMissionRunEventType,
   shouldInterruptCancelledTaskProvider,
   taskActivationCommandPhase,
@@ -254,6 +259,128 @@ describe("MissionRunReactor recovery", () => {
     expect(state?.attempts.filter((attempt) => attempt.status === "active")).toHaveLength(0);
   });
 
+  it("reconciles a successful replacement after an earlier stale capability classification", () => {
+    const state = recoveryState({
+      attempts: [
+        {
+          number: 1,
+          kind: "initial",
+          providerInstanceId: "claude",
+          threadId: "thread-a",
+          status: "replaced",
+          failureClass: "provider_capability_mismatch",
+          summary: "Structured generation was unavailable.",
+          startedAt: "2026-08-29T12:00:00.000Z",
+          completedAt: "2026-08-29T12:01:00.000Z",
+        },
+        {
+          number: 2,
+          kind: "replacement",
+          providerInstanceId: "codex",
+          threadId: "thread-b",
+          status: "failed",
+          failureClass: "provider_capability_mismatch",
+          summary: "Stale capability evidence was observed before the replacement turn.",
+          startedAt: "2026-08-29T12:02:00.000Z",
+          completedAt: "2026-08-29T12:02:01.000Z",
+        },
+      ],
+      latestFailureClass: "provider_capability_mismatch",
+      attentionRequired: true,
+    });
+    expect(
+      providerCapabilityMismatchForAttempt({
+        state,
+        threadId: "thread-b" as never,
+        handoff: {
+          generationError: "This provider does not support structured Architect generation.",
+          updatedAt: "2026-08-29T12:01:30.000Z",
+        },
+      }),
+    ).toBeNull();
+
+    const completed = finalizeSuccessfulProviderExecution({
+      state,
+      threadId: "thread-b" as never,
+      completedAt: "2026-08-29T12:05:00.000Z",
+    });
+    expect(completed.attempts).toEqual([
+      expect.objectContaining({ number: 1, status: "replaced" }),
+      expect.objectContaining({
+        number: 2,
+        status: "completed",
+        failureClass: null,
+        completedAt: "2026-08-29T12:05:00.000Z",
+      }),
+    ]);
+    expect(completed.attempts.filter((attempt) => attempt.status === "active")).toHaveLength(0);
+    expect(completed).toMatchObject({
+      latestFailureClass: null,
+      providerEscalation: null,
+      attentionRequired: false,
+    });
+  });
+
+  it("refreshes a no-alternative recommendation when a provider becomes ready", () => {
+    const state = recoveryState({
+      attempts: [
+        {
+          number: 1,
+          kind: "initial",
+          providerInstanceId: "claude",
+          threadId: "thread-a",
+          status: "failed",
+          failureClass: "provider_capability_mismatch",
+          summary: "The provider cannot satisfy a required capability.",
+          startedAt: "2026-08-29T12:00:00.000Z",
+          completedAt: "2026-08-29T12:01:00.000Z",
+        },
+      ],
+      latestFailureClass: "provider_capability_mismatch",
+      providerEscalation: {
+        failedProviderInstanceId: "claude",
+        recommendedProviderInstanceId: null,
+        reason: "No alternative provider is currently ready.",
+        status: "recommended",
+        createdAt: "2026-08-29T12:01:00.000Z",
+        resolvedAt: null,
+      },
+      attentionRequired: true,
+    });
+
+    const refreshed = refreshProviderEscalationAvailability({
+      state,
+      candidates: [
+        {
+          instanceId: "claude",
+          driverKind: "claude",
+          model: "claude-sonnet-5",
+          ready: true,
+          activeLoad: 0,
+        },
+        {
+          instanceId: "codex",
+          driverKind: "codex",
+          model: "gpt-5.6-sol",
+          ready: true,
+          activeLoad: 0,
+        },
+      ] as never,
+      refreshedAt: "2026-08-29T12:02:00.000Z",
+    });
+
+    expect(refreshed.providerEscalation).toMatchObject({
+      failedProviderInstanceId: "claude",
+      recommendedProviderInstanceId: "codex",
+      status: "recommended",
+      createdAt: "2026-08-29T12:01:00.000Z",
+    });
+    expect(refreshed.attempts).toEqual(
+      (state as unknown as { readonly attempts: ReadonlyArray<unknown> }).attempts,
+    );
+    expect(refreshed.updatedAt).toBe("2026-08-29T12:02:00.000Z");
+  });
+
   it("interrupts a dead replacement once and leaves no active attempt for repeat reconciliation", () => {
     const state = recoveryState({
       attempts: [
@@ -364,6 +491,52 @@ describe("MissionRunReactor recovery", () => {
       ),
     ).toBe(true);
     expect(replacementAttemptOwnsTurnStart(recoveryState(), "thread-a" as never)).toBe(false);
+  });
+
+  it("continues a projected replacement until the Task is rebound to its thread", () => {
+    const state = recoveryState({
+      attempts: [
+        {
+          number: 1,
+          kind: "initial",
+          providerInstanceId: "claude",
+          threadId: "thread-a",
+          status: "failed",
+          failureClass: "provider_capability_mismatch",
+          summary: "Claude authentication failed.",
+          startedAt: "2026-08-29T12:00:00.000Z",
+          completedAt: "2026-08-29T12:01:00.000Z",
+        },
+        {
+          number: 2,
+          kind: "replacement",
+          providerInstanceId: "codex",
+          threadId: "thread-b",
+          status: "active",
+          failureClass: null,
+          summary: "Approved provider replacement.",
+          startedAt: "2026-08-29T12:02:00.000Z",
+          completedAt: null,
+        },
+      ],
+    });
+
+    expect(replacementAttemptNeedsProjectionContinuation(state, "thread-a" as never)).toBe(true);
+    expect(replacementAttemptNeedsProjectionContinuation(state, "thread-b" as never)).toBe(false);
+    expect(
+      replacementAttemptNeedsTurnStart(state, {
+        id: "thread-b" as never,
+        latestTurn: null,
+        messages: [],
+      }),
+    ).toBe(true);
+    expect(
+      replacementAttemptNeedsTurnStart(state, {
+        id: "thread-b" as never,
+        latestTurn: { state: "completed" } as never,
+        messages: [],
+      }),
+    ).toBe(false);
   });
 
   it("interrupts only the cancelled Task's own in-flight provider turn", () => {
@@ -499,7 +672,28 @@ describe("MissionRunReactor recovery", () => {
 
   it("does not wake the scheduler from its own reconciliation output", () => {
     expect(shouldReconcileMissionRunEventType("mission.run.reconciled")).toBe(false);
+    expect(shouldReconcileMissionRunEventType("thread.created")).toBe(true);
     expect(shouldReconcileMissionRunEventType("integration.updated")).toBe(true);
+  });
+
+  it("wakes exactly on the reconciliation that resolves provider substitution", () => {
+    const resolvedAt = "2026-08-29T12:05:00.000Z";
+    const event = {
+      type: "mission.run.reconciled",
+      occurredAt: resolvedAt,
+      payload: {
+        run: {
+          decisions: [{ kind: "replacement", occurredAt: resolvedAt }],
+        },
+      },
+    };
+    expect(shouldReconcileMissionRunEvent(event as never)).toBe(true);
+    expect(
+      shouldReconcileMissionRunEvent({
+        ...event,
+        occurredAt: "2026-08-29T12:06:00.000Z",
+      } as never),
+    ).toBe(false);
   });
 
   it("opens a fresh activation command epoch after ownership is revalidated", () => {
