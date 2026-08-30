@@ -21,6 +21,7 @@ import {
   missionIntegrationOverlapPaths,
   missionRunCompletionBlockers,
   planMissionRunScheduling,
+  reconcileMissionRisks,
   resolveMissionCheckpointState,
   summarizeMissionReviewCoverage,
 } from "./missionRunner.js";
@@ -174,6 +175,29 @@ describe("supervised Mission scheduler", () => {
     });
     expect(resolveMissionCheckpointState(approvedCheckpoint, tasks).state).toBe("passed");
     expect(released.scheduledTaskIds).toEqual([taskId("B"), taskId("C")]);
+  });
+
+  it("keeps Integration-only gates out of Task checkpoint readiness", () => {
+    const completed = {
+      ...task("A", "completed"),
+      reviewSnapshot: { id: "snapshot-a" },
+      qualityGateRuns: [{ gateId: "task-gate", snapshotId: "snapshot-a", status: "passed" }],
+    } as never;
+    const checkpoint = {
+      key: "task-ready",
+      name: "Task ready for Integration",
+      requiredTaskIds: [taskId("A")],
+      unlockTaskIds: [taskId("B")],
+      requiredGateIds: ["task-gate", "integration-gate"],
+      reviewsRequired: false,
+      humanApprovalRequired: false,
+      humanApprovedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    } as never;
+    expect(
+      resolveMissionCheckpointState(checkpoint, [completed], new Set(["task-gate"])).state,
+    ).toBe("passed");
   });
 
   it("requires every checkpoint that unlocks the same Task to pass", () => {
@@ -485,6 +509,16 @@ describe("Swarm Alpha evidence", () => {
       tasks,
       integrationBranch: "nebula/integration/swarm-alpha",
       finalValidation: "ready",
+      integrationHumanChanges: [
+        {
+          commit: "human-change",
+          summary: "Resolve Integration details",
+          files: ["packages/shared/src/swarm.test.ts"],
+          resolvedRisks: [],
+          createdAt: now,
+        },
+      ],
+      planHumanEditCount: 2,
       generatedAt: "2026-08-23T12:10:00.000Z",
     });
     expect(report).toMatchObject({
@@ -493,11 +527,134 @@ describe("Swarm Alpha evidence", () => {
       providerReplacementCount: 1,
       retryCount: 1,
       remediationRoundCount: 1,
+      humanInterventionCount: 4,
+      attemptCount: 2,
+      baseCommit: null,
       finalValidation: "ready",
       elapsedMilliseconds: 600_000,
     });
     expect(report.filesChanged).toHaveLength(4);
     expect(report.knownRisks).toEqual(["Final follow-up risk"]);
+    expect(report.historicalRisks).toEqual(["Final follow-up risk"]);
+    expect(report.resolvedRisks).toEqual([]);
+    expect(report.remainingRisks).toEqual(["Final follow-up risk"]);
+  });
+
+  it("preserves historical risks while excluding explicitly resolved Integration risks", () => {
+    const risky = {
+      ...completed("A", "packages/shared/src/notifications.ts"),
+      result: {
+        ...completed("A", "packages/shared/src/notifications.ts").result!,
+        knownRisks: [
+          "Integration export may be missing",
+          "Migration requires production observation",
+        ],
+      },
+    };
+    const report = buildMissionFinalReport({
+      mission: { ...mission, taskIds: [taskId("A")] },
+      run,
+      tasks: [risky],
+      integrationBranch: "nebula/integration/risk-resolution",
+      finalValidation: "ready",
+      integrationHumanChanges: [
+        {
+          commit: "resolved-risk-commit",
+          summary: "Restore the notification export",
+          files: ["packages/shared/src/notifications.ts"],
+          resolvedRisks: ["Integration export may be missing"],
+          createdAt: now,
+        },
+      ],
+      generatedAt: "2026-08-23T12:10:00.000Z",
+    });
+
+    expect(report.historicalRisks).toEqual([
+      "Integration export may be missing",
+      "Migration requires production observation",
+    ]);
+    expect(report.resolvedRisks).toEqual(["Integration export may be missing"]);
+    expect(report.remainingRisks).toEqual(["Migration requires production observation"]);
+    expect(report.knownRisks).toEqual(report.historicalRisks);
+  });
+
+  it("keeps a Task risk remaining when later evidence does not explicitly resolve it", () => {
+    const report = buildMissionFinalReport({
+      mission: { ...mission, taskIds: [taskId("D")] },
+      run,
+      tasks: [completed("D", "apps/web/src/notifications.ts")],
+      integrationBranch: "nebula/integration/unresolved-risk",
+      finalValidation: "ready",
+      integrationHumanChanges: [
+        {
+          commit: "unrelated-fix",
+          summary: "Repair an unrelated Integration issue",
+          files: ["apps/web/src/other.ts"],
+          resolvedRisks: ["An unrelated exact risk"],
+          createdAt: now,
+        },
+      ],
+      generatedAt: "2026-08-23T12:10:00.000Z",
+    });
+
+    expect(report.historicalRisks).toEqual(["Final follow-up risk"]);
+    expect(report.resolvedRisks).toEqual([]);
+    expect(report.remainingRisks).toEqual(["Final follow-up risk"]);
+  });
+
+  it("resolves only named missing artifacts when final Integration evidence is complete", () => {
+    expect(
+      reconcileMissionRisks({
+        historicalRisks: [
+          "Integration proof is incomplete because src/notification-policy.js is missing.",
+          "The referenced notification-copy module is absent from the snapshot.",
+          "Migration requires production observation.",
+        ],
+        explicitResolvedRisks: new Set(),
+        integratedFiles: ["src/notification-policy.js", "src/notification-copy.js"],
+        finalEvidenceComplete: true,
+      }),
+    ).toEqual({
+      resolvedRisks: [
+        "Integration proof is incomplete because src/notification-policy.js is missing.",
+        "The referenced notification-copy module is absent from the snapshot.",
+      ],
+      remainingRisks: ["Migration requires production observation."],
+    });
+  });
+
+  it("keeps missing-artifact and evidence warnings without complete canonical evidence", () => {
+    expect(
+      reconcileMissionRisks({
+        historicalRisks: [
+          "Integration proof is incomplete because src/notification-policy.js is missing.",
+          "Builder-reported evidence: None retained.",
+        ],
+        explicitResolvedRisks: new Set(),
+        integratedFiles: ["src/notification-policy.js"],
+        finalEvidenceComplete: false,
+      }),
+    ).toEqual({
+      resolvedRisks: [],
+      remainingRisks: [
+        "Integration proof is incomplete because src/notification-policy.js is missing.",
+        "Builder-reported evidence: None retained.",
+      ],
+    });
+  });
+
+  it("resolves the exact missing Builder-evidence note after canonical evidence replaces it", () => {
+    expect(
+      reconcileMissionRisks({
+        historicalRisks: ["Builder-reported evidence: None retained."],
+        explicitResolvedRisks: new Set(),
+        integratedFiles: [],
+        finalEvidenceComplete: true,
+      }),
+    ).toEqual({
+      resolvedRisks: ["Builder-reported evidence: None retained."],
+      remainingRisks: [],
+    });
   });
 
   it("separates required current review coverage from immutable historical attempts", () => {

@@ -437,6 +437,27 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
           project.id === projectId ? { ...project, architectPlans: [approvedPlan] } : project,
         ),
       };
+      const defaultStart = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "mission.run.start",
+          commandId: CommandId.make("inspect-default-run-policy"),
+          runId,
+          missionId,
+          projectId,
+          maxConcurrentTasks: 2,
+          createdAt: now,
+        },
+      });
+      expect(Array.isArray(defaultStart) ? defaultStart[0] : defaultStart).toMatchObject({
+        type: "mission.run.started",
+        payload: {
+          run: {
+            recoveryPolicy: { transportRetryLimit: 1, remediationLimit: 0 },
+            swarmPolicy: { transportRetryLimit: 1, remediationLimit: 0 },
+          },
+        },
+      });
       model = yield* apply(model, {
         type: "mission.run.start",
         commandId: CommandId.make("start-run"),

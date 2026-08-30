@@ -187,6 +187,140 @@ describe("orchestration projector", () => {
     });
   });
 
+  it("reconstructs a completed Mission report and exact Integration SHA in a new projection", async () => {
+    const now = "2026-08-29T12:00:00.000Z";
+    const completedAt = "2026-08-29T12:05:00.000Z";
+    const finalIntegrationCommit = "f".repeat(40);
+    const run = {
+      id: "mission-run-history",
+      missionId: "mission-history",
+      projectId: "project-history",
+      mode: "supervised_swarm",
+      status: "completed",
+      maxConcurrentTasks: 2,
+      currentReadyTaskIds: [],
+      scheduledTaskIds: [],
+      attention: [],
+      attentionReason: null,
+      decisions: [],
+      startedAt: now,
+      pausedAt: null,
+      completedAt,
+      stoppedAt: null,
+      failedAt: null,
+      failureReason: null,
+      taskRecovery: [
+        {
+          taskId: "task-history",
+          transientRetries: 1,
+          remediationRounds: 1,
+          attempts: [
+            {
+              number: 1,
+              kind: "initial",
+              providerInstanceId: "antigravity",
+              threadId: "thread-history-1",
+              status: "failed",
+              failureClass: "transport_transient",
+              summary: "network timeout",
+              startedAt: now,
+              completedAt: "2026-08-29T12:01:00.000Z",
+            },
+            {
+              number: 2,
+              kind: "retry",
+              providerInstanceId: "antigravity",
+              threadId: "thread-history-1",
+              status: "completed",
+              failureClass: null,
+              summary: "retry completed",
+              startedAt: "2026-08-29T12:01:00.000Z",
+              completedAt: "2026-08-29T12:02:00.000Z",
+            },
+          ],
+          latestFailureClass: null,
+          latestFailureSignature: null,
+          attentionRequired: false,
+          updatedAt: completedAt,
+        },
+      ],
+      integrationBatchId: "batch-history",
+      finalReport: {
+        missionObjective: "Prove completed Mission history.",
+        planVersion: 2,
+        taskIds: ["task-history"],
+        completedTaskIds: ["task-history"],
+        attemptCount: 2,
+        providersUsed: ["antigravity"],
+        providerReplacementCount: 0,
+        retryCount: 1,
+        remediationRoundCount: 1,
+        qualityGateCount: 1,
+        reviewCount: 2,
+        finalGateResults: [],
+        filesChanged: ["src/history.ts"],
+        integrationBranch: "nebula/integration/history",
+        baseCommit: "a".repeat(40),
+        finalIntegrationCommit,
+        finalValidation: "ready",
+        humanInterventionCount: 1,
+        knownRisks: [],
+        followUps: [],
+        elapsedMilliseconds: 300_000,
+        generatedAt: completedAt,
+      },
+      updatedAt: completedAt,
+    };
+    const events = [
+      makeEvent({
+        sequence: 1,
+        type: "project.created",
+        aggregateKind: "project",
+        aggregateId: "project-history",
+        occurredAt: now,
+        commandId: "create-project-history",
+        payload: {
+          projectId: "project-history",
+          title: "History fixture",
+          workspaceRoot: "/tmp/history",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+      makeEvent({
+        sequence: 2,
+        type: "mission.run.reconciled",
+        aggregateKind: "mission",
+        aggregateId: "mission-history",
+        occurredAt: completedAt,
+        commandId: "complete-mission-history",
+        payload: { run },
+      }),
+    ];
+    const project = async () => {
+      let model = createEmptyReadModel(now);
+      for (const event of events) model = await Effect.runPromise(projectEvent(model, event));
+      return model;
+    };
+
+    const firstSession = await project();
+    const newFrontendSession = await project();
+    expect(newFrontendSession.missionRuns?.[0]).toEqual(firstSession.missionRuns?.[0]);
+    expect(newFrontendSession.missionRuns?.[0]).toMatchObject({
+      status: "completed",
+      completedAt,
+      integrationBatchId: "batch-history",
+      finalReport: {
+        attemptCount: 2,
+        retryCount: 1,
+        finalIntegrationCommit,
+        finalValidation: "ready",
+      },
+    });
+  });
+
   it("applies thread.created events", async () => {
     const now = "2026-01-01T00:00:00.000Z";
     const model = createEmptyReadModel(now);

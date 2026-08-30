@@ -59,4 +59,23 @@ describe("Swarm product surface", () => {
     expect(workspace).toContain('selectedPlan.status === "failed"');
     expect(workspace).not.toContain('["failed", "cancelled"].includes(selectedPlan.status)');
   });
+
+  it("keeps Mission operations on canonical state with explicit attention and history", () => {
+    const center = source("./MissionCommandCenter.tsx");
+    const viewModel = source("./missionCommandCenterViewModel.ts");
+    expect(center).toContain('aria-label="Mission Command Center"');
+    expect(center).toContain('aria-label="Needs Attention"');
+    expect(center).toContain("Task attempt history");
+    expect(center).toContain("Execution completed");
+    expect(center).toContain("Remaining risks");
+    expect(center).toContain("Resolved during Mission");
+    expect(center).toContain("Known risks at completion · Legacy report");
+    expect(center).toContain('aria-label="Search Mission events"');
+    expect(center).toContain(
+      "Provider processes are resumed or interrupted only when the runtime confirms it",
+    );
+    expect(viewModel).toContain("missionAttentionItems");
+    expect(viewModel).toContain("filterMissionTimeline");
+    expect(viewModel).not.toContain("progressPercent");
+  });
 });

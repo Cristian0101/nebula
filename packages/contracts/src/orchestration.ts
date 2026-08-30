@@ -376,6 +376,9 @@ export const IntegrationHumanChange = Schema.Struct({
   commit: TrimmedNonEmptyString,
   summary: TrimmedNonEmptyString,
   files: Schema.Array(TrimmedNonEmptyString),
+  // Optional so older Integration snapshots remain decodable. New records
+  // contain exact historical risk strings from explicit commit trailers.
+  resolvedRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   createdAt: IsoDateTime,
 });
 export type IntegrationHumanChange = typeof IntegrationHumanChange.Type;
@@ -523,6 +526,7 @@ export const MissionRunDecision = Schema.Struct({
     "retry",
     "remediation",
     "replacement",
+    "recovery",
     "request",
     "replan",
   ]),
@@ -552,8 +556,10 @@ export type SwarmPolicy = typeof SwarmPolicy.Type;
 
 export const MissionFinalReport = Schema.Struct({
   missionObjective: TrimmedNonEmptyString,
+  planVersion: Schema.optional(PositiveInt),
   taskIds: Schema.Array(TaskId),
   completedTaskIds: Schema.Array(TaskId),
+  attemptCount: Schema.optional(NonNegativeInt),
   providersUsed: Schema.Array(ProviderInstanceId),
   providerReplacementCount: NonNegativeInt,
   retryCount: NonNegativeInt,
@@ -568,13 +574,23 @@ export const MissionFinalReport = Schema.Struct({
   reviewChangesRequestedCount: Schema.optional(NonNegativeInt),
   staleReviewCount: Schema.optional(NonNegativeInt),
   resourceConflictCount: Schema.optional(NonNegativeInt),
+  resourceWaitCount: Schema.optional(NonNegativeInt),
   serializedResourceConflictCount: Schema.optional(NonNegativeInt),
+  ownershipViolationCount: Schema.optional(NonNegativeInt),
   unresolvedOwnershipViolationCount: Schema.optional(NonNegativeInt),
+  integrationConflictCount: Schema.optional(NonNegativeInt),
   filesChanged: Schema.Array(TrimmedNonEmptyString),
   integrationBranch: Schema.NullOr(TrimmedNonEmptyString),
+  baseCommit: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  finalIntegrationCommit: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   finalValidation: Schema.Literals(["not_requested", "ready", "failed"]),
+  finalGateResults: Schema.optional(Schema.Array(IntegrationQualityGateRun)),
   humanInterventionCount: NonNegativeInt,
+  // `knownRisks` remains the legacy historical union for old consumers.
   knownRisks: Schema.Array(TrimmedNonEmptyString),
+  historicalRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  resolvedRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  remainingRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   followUps: Schema.Array(TrimmedNonEmptyString),
   elapsedMilliseconds: NonNegativeInt,
   generatedAt: IsoDateTime,

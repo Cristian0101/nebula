@@ -6,7 +6,7 @@ import type {
   SharedResourceDefinition,
 } from "@t3tools/contracts";
 import { ArchitectPlanProposalId, MissionId } from "@t3tools/contracts";
-import { validateArchitectPlan } from "@t3tools/shared/architectPlan";
+import { diffArchitectPlanVersions, validateArchitectPlan } from "@t3tools/shared/architectPlan";
 import { createModelSelection } from "@t3tools/shared/model";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -75,6 +75,14 @@ export function ArchitectPlanPanel({
   const selected = plans.find((plan) => plan.id === selectedId) ?? plans.at(-1) ?? null;
   const selectedIsEditable =
     selected !== null && selected.status !== "approved" && selected.status !== "rejected";
+  const latestRevisionChanges = useMemo(() => {
+    const revisions = selected?.revisions ?? [];
+    const previous = revisions.at(-2);
+    const current = revisions.at(-1);
+    return previous && current
+      ? diffArchitectPlanVersions(previous.proposal, current.proposal)
+      : [];
+  }, [selected?.revisions]);
 
   const readyProviders = useMemo(
     () =>
@@ -145,7 +153,7 @@ export function ArchitectPlanPanel({
         {
           number: plan.revisions.length + 1,
           source: "human",
-          feedback: null,
+          feedback: "Edited in Plan with Architect",
           proposal,
           validation,
           createdAt: validation.validatedAt,
@@ -689,7 +697,10 @@ export function ArchitectPlanPanel({
                 </div>
               ) : null}
               <div className="rounded-lg border border-black/[0.08] p-3">
-                <p className="text-xs font-medium">Revision history</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium">Plan versions</p>
+                  <Badge variant="outline">Current v{selected.revisions.at(-1)?.number ?? 1}</Badge>
+                </div>
                 <ol className="mt-1 space-y-1 text-xs text-muted-foreground">
                   {selected.revisions.map((revision) => (
                     <li key={revision.number}>
@@ -698,6 +709,18 @@ export function ArchitectPlanPanel({
                     </li>
                   ))}
                 </ol>
+                {latestRevisionChanges.length > 0 ? (
+                  <div className="mt-3 rounded-md bg-muted/30 p-2">
+                    <p className="text-xs font-medium">Latest version diff</p>
+                    <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                      {latestRevisionChanges.map((change) => (
+                        <li key={`${change.kind}:${change.taskKey ?? "mission"}:${change.detail}`}>
+                          {change.detail}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
               {selected.status !== "approved" && selected.status !== "rejected" ? (
                 <div className="flex gap-2">

@@ -24,6 +24,112 @@ export const ARCHITECT_TEAM_PRESET_OPTIONS = [
   { preset: "heavy", label: "Heavy", count: 12, maxWritableConcurrency: 4 },
 ] as const;
 
+export type ArchitectPlanChangeKind =
+  | "task_added"
+  | "task_removed"
+  | "provider_changed"
+  | "role_changed"
+  | "acceptance_changed"
+  | "ownership_changed"
+  | "resource_changed"
+  | "dependency_added"
+  | "dependency_removed"
+  | "mission_changed";
+
+export interface ArchitectPlanChange {
+  readonly kind: ArchitectPlanChangeKind;
+  readonly taskKey: string | null;
+  readonly detail: string;
+}
+
+const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+
+const assignmentLabel = (task: ArchitectMissionDraft["tasks"][number]) =>
+  task.assignedModelSelection
+    ? `${task.assignedModelSelection.instanceId} / ${task.assignedModelSelection.model}`
+    : "Unassigned";
+
+/** A deterministic audit diff between two persisted Plan versions. */
+export function diffArchitectPlanVersions(
+  previous: ArchitectMissionDraft,
+  current: ArchitectMissionDraft,
+): ReadonlyArray<ArchitectPlanChange> {
+  const changes: ArchitectPlanChange[] = [];
+  if (
+    previous.title !== current.title ||
+    previous.objective !== current.objective ||
+    previous.description !== current.description
+  )
+    changes.push({ kind: "mission_changed", taskKey: null, detail: "Mission details changed." });
+
+  const previousTasks = new Map(previous.tasks.map((task) => [task.key, task] as const));
+  const currentTasks = new Map(current.tasks.map((task) => [task.key, task] as const));
+  for (const task of current.tasks) {
+    const before = previousTasks.get(task.key);
+    if (!before) {
+      changes.push({ kind: "task_added", taskKey: task.key, detail: `Task added: ${task.title}.` });
+      continue;
+    }
+    if (!same(before.assignedModelSelection, task.assignedModelSelection))
+      changes.push({
+        kind: "provider_changed",
+        taskKey: task.key,
+        detail: `Provider changed: ${assignmentLabel(before)} → ${assignmentLabel(task)}.`,
+      });
+    if (before.role !== task.role)
+      changes.push({
+        kind: "role_changed",
+        taskKey: task.key,
+        detail: `Role changed: ${before.role ?? "builder"} → ${task.role ?? "builder"}.`,
+      });
+    if (!same(before.acceptanceCriteria, task.acceptanceCriteria))
+      changes.push({
+        kind: "acceptance_changed",
+        taskKey: task.key,
+        detail: `Acceptance criteria changed for ${task.title}.`,
+      });
+    if (!same(before.ownership, task.ownership))
+      changes.push({
+        kind: "ownership_changed",
+        taskKey: task.key,
+        detail: `Ownership changed for ${task.title}.`,
+      });
+    if (!same(before.requiredResourceIds, task.requiredResourceIds))
+      changes.push({
+        kind: "resource_changed",
+        taskKey: task.key,
+        detail: `Resource requirements changed for ${task.title}.`,
+      });
+  }
+  for (const task of previous.tasks)
+    if (!currentTasks.has(task.key))
+      changes.push({
+        kind: "task_removed",
+        taskKey: task.key,
+        detail: `Task removed: ${task.title}.`,
+      });
+
+  const edgeKey = (edge: ArchitectMissionDraft["dependencies"][number]) =>
+    `${edge.prerequisiteKey}\0${edge.dependentKey}`;
+  const previousEdges = new Set(previous.dependencies.map(edgeKey));
+  const currentEdges = new Set(current.dependencies.map(edgeKey));
+  for (const edge of current.dependencies)
+    if (!previousEdges.has(edgeKey(edge)))
+      changes.push({
+        kind: "dependency_added",
+        taskKey: edge.dependentKey,
+        detail: `Dependency added: ${edge.prerequisiteKey} → ${edge.dependentKey}.`,
+      });
+  for (const edge of previous.dependencies)
+    if (!currentEdges.has(edgeKey(edge)))
+      changes.push({
+        kind: "dependency_removed",
+        taskKey: edge.dependentKey,
+        detail: `Dependency removed: ${edge.prerequisiteKey} → ${edge.dependentKey}.`,
+      });
+  return changes;
+}
+
 function roleSequence(count: number): ReadonlyArray<ArchitectTeamRoleKind> {
   if (count <= 2) return ["builder", "reviewer"].slice(0, count) as ArchitectTeamRoleKind[];
   if (count <= 4)

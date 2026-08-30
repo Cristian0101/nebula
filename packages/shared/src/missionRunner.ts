@@ -4,6 +4,7 @@ import type {
   MissionRunAttention,
   MissionFinalReport,
   IntegrationBatch,
+  IntegrationHumanChange,
   IntegrationQualityGateRun,
   MissionCheckpoint,
   OrchestrationProject,
@@ -59,6 +60,7 @@ export type MissionCheckpointState =
 export function resolveMissionCheckpointState(
   checkpoint: MissionCheckpoint,
   tasks: ReadonlyArray<OrchestrationTask>,
+  taskGateIds?: ReadonlySet<string>,
 ): {
   readonly state: MissionCheckpointState;
   readonly blockerTaskIds: ReadonlyArray<TaskId>;
@@ -75,8 +77,11 @@ export function resolveMissionCheckpointState(
       blockerTaskIds: pendingTasks,
       detail: `Waiting for checkpoint '${checkpoint.name}' prerequisite Tasks.`,
     };
+  const requiredTaskGateIds = taskGateIds
+    ? checkpoint.requiredGateIds.filter((gateId) => taskGateIds.has(gateId))
+    : checkpoint.requiredGateIds;
   const gateBlocked = required.filter((task) =>
-    checkpoint.requiredGateIds.some(
+    requiredTaskGateIds.some(
       (gateId) =>
         !task?.qualityGateRuns?.some(
           (run) =>
@@ -190,7 +195,10 @@ export function planMissionRunScheduling(input: {
   readonly mission: Mission;
   readonly run: MissionRun;
   readonly tasks: ReadonlyArray<OrchestrationTask>;
-  readonly project: Pick<OrchestrationProject, "sharedResources" | "resourceLeases">;
+  readonly project: Pick<
+    OrchestrationProject,
+    "sharedResources" | "resourceLeases" | "qualityPolicy"
+  >;
   readonly providerReadyTaskIds: ReadonlySet<TaskId>;
   readonly blockedTaskIds?: ReadonlySet<TaskId>;
   readonly autoRoutableTaskIds?: ReadonlySet<TaskId>;
@@ -210,10 +218,15 @@ export function planMissionRunScheduling(input: {
         ...(checkpointsByUnlockedTask.get(taskId) ?? []),
         checkpoint,
       ]);
+  const taskGateIds = new Set(
+    (input.project.qualityPolicy?.gates ?? [])
+      .filter((gate) => gate.enabled && gate.scope !== "integration")
+      .map((gate) => gate.id),
+  );
   const checkpointStateByKey = new Map(
     (input.mission.checkpoints ?? []).map((checkpoint) => [
       checkpoint.key,
-      resolveMissionCheckpointState(checkpoint, input.tasks),
+      resolveMissionCheckpointState(checkpoint, input.tasks, taskGateIds),
     ]),
   );
   const scheduled = new Set(
@@ -361,6 +374,53 @@ export function missionIntegrationOverlapPaths(
     .toSorted();
 }
 
+const missingArtifactRiskPattern =
+  /\b(?:absent|missing|does not exist|neither .+ exists|not currently executable|incomplete)\b/i;
+const repositoryPathPattern = /\b(?:apps|docs|packages|src|tests)\/[a-z0-9_./-]+\.[a-z0-9]+\b/gi;
+
+export function reconcileMissionRisks(input: {
+  readonly historicalRisks: ReadonlyArray<string>;
+  readonly explicitResolvedRisks: ReadonlySet<string>;
+  readonly integratedFiles: ReadonlyArray<string>;
+  readonly finalEvidenceComplete: boolean;
+}) {
+  const integratedFiles = new Set(input.integratedFiles.map((file) => file.toLowerCase()));
+  const integratedArtifactNames = input.integratedFiles
+    .map(
+      (file) =>
+        file
+          .split("/")
+          .at(-1)
+          ?.replace(/\.[^.]+$/, "")
+          .toLowerCase() ?? "",
+    )
+    .filter((name) => name.length >= 8);
+  const hasIntegratedArtifactEvidence = (risk: string) => {
+    if (!input.finalEvidenceComplete || !missingArtifactRiskPattern.test(risk)) return false;
+    const normalizedRisk = risk.toLowerCase();
+    const referencedPaths = [...risk.matchAll(repositoryPathPattern)].map((match) =>
+      match[0].toLowerCase(),
+    );
+    if (referencedPaths.length > 0) {
+      return referencedPaths.every((path) => integratedFiles.has(path));
+    }
+    return integratedArtifactNames.some((name) => normalizedRisk.includes(name));
+  };
+  const hasCanonicalReplacementEvidence = (risk: string) =>
+    input.finalEvidenceComplete && /^builder-reported evidence:\s*none retained\.?$/i.test(risk);
+  const resolvedRisks = input.historicalRisks.filter(
+    (risk) =>
+      input.explicitResolvedRisks.has(risk) ||
+      hasIntegratedArtifactEvidence(risk) ||
+      hasCanonicalReplacementEvidence(risk),
+  );
+  const resolved = new Set(resolvedRisks);
+  return {
+    resolvedRisks,
+    remainingRisks: input.historicalRisks.filter((risk) => !resolved.has(risk)),
+  };
+}
+
 export function buildMissionFinalReport(input: {
   readonly mission: Mission;
   readonly run: MissionRun;
@@ -368,6 +428,11 @@ export function buildMissionFinalReport(input: {
   readonly integrationBranch: string | null;
   readonly finalValidation: MissionFinalReport["finalValidation"];
   readonly integrationQualityGateRuns?: ReadonlyArray<IntegrationQualityGateRun>;
+  readonly integrationHumanChanges?: ReadonlyArray<IntegrationHumanChange>;
+  readonly integrationConflictCount?: number;
+  readonly finalIntegrationCommit?: string | null;
+  readonly planVersion?: number;
+  readonly planHumanEditCount?: number;
   readonly generatedAt: string;
 }): MissionFinalReport {
   const recovery = input.run.taskRecovery ?? [];
@@ -384,20 +449,69 @@ export function buildMissionFinalReport(input: {
       decision.kind === "waiting_resource" && decision.taskId ? [decision.taskId] : [],
     ),
   );
+  const providerReplacementCount = recovery.reduce(
+    (count, state) =>
+      count + state.attempts.filter((attempt) => attempt.kind === "replacement").length,
+    0,
+  );
+  const remediationRoundCount = recovery.reduce(
+    (count, state) => count + state.remediationRounds,
+    0,
+  );
+  const resolvedCoordinationCount = (input.run.coordinationRequests ?? []).filter(
+    (request) => request.status !== "pending" && request.resolvedAt !== null,
+  ).length;
+  const resolvedOwnershipCount = input.tasks.reduce(
+    (count, task) =>
+      count +
+      (task.ownershipRequests ?? []).filter(
+        (request) => request.status !== "pending" && request.status !== "cancelled",
+      ).length,
+    0,
+  );
+  const reviewRemediationCount = input.tasks.reduce(
+    (count, task) =>
+      count +
+      (task.reviews ?? []).filter(
+        (review) => review.verdict === "request_changes" && review.findingsSentAt !== null,
+      ).length,
+    0,
+  );
+  const ownershipViolationCount = input.tasks.filter(
+    (task) =>
+      task.ownership?.status === "violation" || task.resourceCompliance?.status === "violation",
+  ).length;
+  const filesChanged = [
+    ...new Set(input.tasks.flatMap((task) => (task.result?.files ?? []).map((file) => file.path))),
+  ].toSorted();
+  const historicalRisks = [
+    ...new Set(input.tasks.flatMap((task) => task.result?.knownRisks ?? [])),
+  ];
+  const explicitResolutionEvidence = new Set(
+    (input.integrationHumanChanges ?? []).flatMap((change) => change.resolvedRisks ?? []),
+  );
+  const { resolvedRisks, remainingRisks } = reconcileMissionRisks({
+    historicalRisks,
+    explicitResolvedRisks: explicitResolutionEvidence,
+    integratedFiles: filesChanged,
+    finalEvidenceComplete:
+      requiredFinalGates.length > 0 &&
+      requiredFinalGates.every((run) => run.status === "passed") &&
+      reviewSummary.required > 0 &&
+      reviewSummary.approved === reviewSummary.required,
+  });
   return {
     missionObjective: input.mission.objective,
+    ...(input.planVersion ? { planVersion: input.planVersion } : {}),
     taskIds: [...input.mission.taskIds],
     completedTaskIds: input.tasks
       .filter((task) => task.status === "completed")
       .map((task) => task.id),
+    attemptCount: recovery.reduce((count, state) => count + state.attempts.length, 0),
     providersUsed: [...providersUsed].toSorted(),
-    providerReplacementCount: recovery.reduce(
-      (count, state) =>
-        count + state.attempts.filter((attempt) => attempt.kind === "replacement").length,
-      0,
-    ),
+    providerReplacementCount,
     retryCount: recovery.reduce((count, state) => count + state.transientRetries, 0),
-    remediationRoundCount: recovery.reduce((count, state) => count + state.remediationRounds, 0),
+    remediationRoundCount,
     qualityGateCount: input.tasks.reduce(
       (count, task) => count + (task.qualityGateRuns?.length ?? 0),
       0,
@@ -411,24 +525,30 @@ export function buildMissionFinalReport(input: {
     reviewChangesRequestedCount: reviewSummary.changesRequested,
     staleReviewCount: reviewSummary.stale,
     resourceConflictCount: waitingResourceTaskIds.size,
+    resourceWaitCount: waitingResourceTaskIds.size,
     serializedResourceConflictCount: [...waitingResourceTaskIds].filter((taskId) =>
       input.tasks.some((task) => task.id === taskId && task.status === "completed"),
     ).length,
-    unresolvedOwnershipViolationCount: input.tasks.filter(
-      (task) =>
-        task.ownership?.status === "violation" || task.resourceCompliance?.status === "violation",
-    ).length,
-    filesChanged: [
-      ...new Set(
-        input.tasks.flatMap((task) => (task.result?.files ?? []).map((file) => file.path)),
-      ),
-    ].toSorted(),
+    ownershipViolationCount,
+    unresolvedOwnershipViolationCount: ownershipViolationCount,
+    integrationConflictCount: input.integrationConflictCount ?? 0,
+    filesChanged,
     integrationBranch: input.integrationBranch,
+    baseCommit: input.mission.baseCommit ?? null,
+    finalIntegrationCommit: input.finalIntegrationCommit ?? null,
     finalValidation: input.finalValidation,
-    humanInterventionCount: input.run.decisions.filter(
-      (decision) => decision.kind === "attention" || decision.kind === "request",
-    ).length,
-    knownRisks: [...new Set(input.tasks.flatMap((task) => task.result?.knownRisks ?? []))],
+    finalGateResults: [...(input.integrationQualityGateRuns ?? [])],
+    humanInterventionCount:
+      providerReplacementCount +
+      reviewRemediationCount +
+      resolvedCoordinationCount +
+      resolvedOwnershipCount +
+      (input.integrationHumanChanges?.length ?? 0) +
+      (input.planHumanEditCount ?? 0),
+    knownRisks: historicalRisks,
+    historicalRisks,
+    resolvedRisks,
+    remainingRisks,
     followUps: [...new Set(input.tasks.flatMap((task) => task.result?.followUps ?? []))],
     elapsedMilliseconds: Math.max(
       0,

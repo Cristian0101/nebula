@@ -9,8 +9,8 @@ import type {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-export const DEFAULT_TRANSPORT_RETRY_LIMIT = 2;
-export const DEFAULT_REMEDIATION_LIMIT = 2;
+export const DEFAULT_TRANSPORT_RETRY_LIMIT = 1;
+export const DEFAULT_REMEDIATION_LIMIT = 0;
 
 export interface RuntimeFailureEvidence {
   readonly source:
@@ -74,15 +74,13 @@ export function recoveryAction(input: {
   readonly replacementAvailable: boolean;
 }): "retry" | "remediate" | "replace" | "attention" {
   const retryLimit = input.transportRetryLimit ?? DEFAULT_TRANSPORT_RETRY_LIMIT;
-  const remediationLimit = input.remediationLimit ?? DEFAULT_REMEDIATION_LIMIT;
   if (input.failureClass === "transport_transient") {
     if (input.transientRetries < retryLimit) return "retry";
-    return input.replacementAvailable ? "replace" : "attention";
+    return "attention";
   }
-  if (input.failureClass === "provider_unavailable_auth")
-    return input.replacementAvailable ? "replace" : "attention";
-  if (input.failureClass === "quality_failure" || input.failureClass === "review_request_changes")
-    return input.remediationRounds < remediationLimit ? "remediate" : "attention";
+  // Provider substitution and reasoning remediation are deliberate user actions.
+  // Retaining them as explicit attention prevents subscription-burning loops and
+  // keeps the canonical Task/worktree available for the Mission operator.
   return "attention";
 }
 

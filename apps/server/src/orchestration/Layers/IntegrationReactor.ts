@@ -47,6 +47,26 @@ type IntegrationEvent = Extract<
 export const taskIntegrationArtifactRef = (artifactId: string) =>
   `refs/t3/integration-artifacts/${encodeURIComponent(artifactId)}`;
 
+export const orderedRemainingIntegrationTasks = (batch: Pick<IntegrationBatch, "tasks">) =>
+  batch.tasks
+    .toSorted((left, right) => left.order - right.order)
+    .filter((task) => task.status !== "applied");
+
+const SENSITIVE_RISK_EVIDENCE =
+  /(?:authorization|api[_ -]?key|password|secret|token|cookie|credential)|(?:\b(?:gh[opusr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{25,}|sk-(?:ant-)?[A-Za-z0-9_-]{20,}|xox[pbar]-[A-Za-z0-9-]{20,})\b|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b|\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,})/i;
+
+export function integrationResolvedRisksFromCommitMessage(message: string): ReadonlyArray<string> {
+  return [
+    ...new Set(
+      message.split("\n").flatMap((line) => {
+        const matched = line.match(/^Nebula-Resolved-Risk:\s*(.+?)\s*$/);
+        const risk = matched?.[1]?.trim();
+        return risk && !SENSITIVE_RISK_EVIDENCE.test(risk) ? [risk] : [];
+      }),
+    ),
+  ];
+}
+
 export const createDeterministicTaskArtifact = Effect.fn(
   "IntegrationReactor.createDeterministicTaskArtifact",
 )(function* (input: {
@@ -250,12 +270,17 @@ const make = Effect.gen(function* () {
       const metadata = yield* execute(batch.workspacePath, "Integration.humanChanges.metadata", [
         "show",
         "-s",
-        "--format=%s%x00%cI",
+        "--format=%B%x00%cI",
         commit,
       ]);
-      const [summary = "Human Integration change", createdAt = batch.updatedAt] = metadata.stdout
+      const [message = "Human Integration change", createdAt = batch.updatedAt] = metadata.stdout
         .trim()
         .split("\0");
+      const summary =
+        message
+          .split("\n")
+          .find((line) => line.trim().length > 0)
+          ?.trim() ?? "Human Integration change";
       const files = yield* execute(batch.workspacePath, "Integration.humanChanges.files", [
         "diff-tree",
         "--no-commit-id",
@@ -268,6 +293,7 @@ const make = Effect.gen(function* () {
         commit,
         summary,
         files: files.stdout.split("\0").filter(Boolean).sort(),
+        resolvedRisks: integrationResolvedRisksFromCommitMessage(message),
         createdAt,
       });
     }
@@ -364,8 +390,7 @@ const make = Effect.gen(function* () {
     let batch = context.batch;
     if (!batch || batch.status !== "applying" || !batch.workspacePath) return;
     const workspacePath = batch.workspacePath;
-    for (const selected of batch.tasks.toSorted((left, right) => left.order - right.order)) {
-      if (selected.status === "applied") continue;
+    for (const selected of orderedRemainingIntegrationTasks(batch)) {
       const cherryPickHead = yield* execute(
         workspacePath,
         "Integration.reconcileCherryPick",
