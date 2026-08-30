@@ -16,6 +16,13 @@
 - Added branch-scoped attention, pause/resume/stop controls, Mission-ready-for-Integration state, and active Run Thread discovery in Terminal Center Mission Flow.
 - Kept plan rewriting, ownership approval, provider rerouting, automatic remediation, automatic Integration, and Swarm Mode out of scope.
 
+## Unreleased — Bounded Mission replanning
+
+- Added evidence-grounded Replan Requests, deterministic DAG impact analysis, structured validation, explicit approval, and atomic Plan-version application.
+- Preserved unaffected canonical Tasks and Plan history while making superseded work unschedulable and changed contract, handoff, review, quality, and Integration evidence stale.
+- Added Task-local provider substitution recommendations after grounded repeated failures; replacement stays human-approved and separate from Replan metrics.
+- Added restart-safe requested, proposed, approved, rejected, and applied proposal states plus Mission timeline and final-report adaptation evidence.
+
 ## Unreleased — Terminal Center
 
 - Added a Project-scoped spatial workspace for quick-launching configured provider instances as canonical Threads without requiring a Task or Mission.

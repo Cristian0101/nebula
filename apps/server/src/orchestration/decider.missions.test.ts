@@ -8,6 +8,7 @@ import {
   ProviderInstanceId,
   ReplanProposalId,
   TaskId,
+  OrchestrationReadModel as OrchestrationReadModelSchema,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -16,6 +17,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import { decideOrchestrationCommand } from "./decider.ts";
 import { createEmptyReadModel, projectEvent } from "./projector.ts";
@@ -31,6 +33,9 @@ const taskC = TaskId.make("task-c");
 const proposalId = ArchitectPlanProposalId.make("architect-plan-1");
 const runId = MissionRunId.make("mission-run-1");
 const replanProposalId = ReplanProposalId.make("replan-proposal-1");
+const decodeOrchestrationReadModel = Schema.decodeUnknownSync(OrchestrationReadModelSchema);
+const restartFromPersistedSnapshot = (model: OrchestrationReadModel) =>
+  decodeOrchestrationReadModel(JSON.parse(JSON.stringify(model)));
 
 const persistedEvent = (
   sequence: number,
@@ -610,6 +615,180 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
         createdAt: now,
       });
       expect(model.missionRuns?.[0]?.status).toBe("stopped");
+    }),
+  );
+
+  it.effect("versions and atomically applies an approved bounded Replan exactly once", () =>
+    Effect.gen(function* () {
+      const registryTask = TaskId.make("task-registry");
+      let model = yield* seed;
+      model = {
+        ...model,
+        projects: model.projects.map((project) =>
+          project.id === projectId ? { ...project, architectPlans: [approvedPlan] } : project,
+        ),
+      };
+      model = yield* apply(model, {
+        ...createMission(missionId, proposalId),
+        taskIds: [taskA, taskB, taskC],
+      });
+      model = yield* apply(model, addDependency(taskA, taskB));
+      model = yield* apply(model, {
+        type: "mission.activate",
+        commandId: CommandId.make("activate-replan-mission"),
+        missionId,
+        projectId,
+        createdAt: now,
+      });
+      model = yield* apply(model, {
+        type: "mission.run.start",
+        commandId: CommandId.make("start-replan-run"),
+        runId,
+        missionId,
+        projectId,
+        maxConcurrentTasks: 2,
+        createdAt: now,
+      });
+      model = yield* apply(model, {
+        type: "mission.run.replan.request",
+        commandId: CommandId.make("request-replan"),
+        runId,
+        proposalId: replanProposalId,
+        sourceTaskId: taskB,
+        trigger: "assumption_invalidated",
+        scope: "task_split",
+        reason: "The expected registry does not exist. token=private-provider-token",
+        evidence: [
+          {
+            kind: "repository_fact",
+            summary: "Registry path is absent.",
+            expected: "fixture/registry/index.ts",
+            observed:
+              "Repository search found no registry implementation. Authorization: Bearer private-provider-token",
+            source: "git tree abc123 password=private-environment-password",
+          },
+        ],
+        userInitiated: false,
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
+        status: "requested",
+        affectedTaskIds: [taskB],
+        preservedCompletedTaskIds: [],
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.summary).toContain("token=[REDACTED]");
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.evidence?.[0]).toMatchObject({
+        observed:
+          "Repository search found no registry implementation. Authorization: Bearer [REDACTED]",
+        source: "git tree abc123 password=[REDACTED]",
+      });
+      model = restartFromPersistedSnapshot(model);
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("requested");
+      expect(model.missions?.[0]?.taskIds).not.toContain(registryTask);
+
+      model = yield* apply(model, {
+        type: "mission.run.replan.propose",
+        commandId: CommandId.make("propose-replan"),
+        runId,
+        proposalId: replanProposalId,
+        changeSet: {
+          newTasks: [
+            {
+              taskId: registryTask,
+              title: "Registry foundation",
+              objective: "Create the missing registry before Task B continues.",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "test",
+              },
+              acceptanceCriteria: ["Registry contract exists"],
+              ownership: [
+                {
+                  pattern: "fixture/registry/**",
+                  access: "write",
+                  reason: "New bounded foundation",
+                },
+              ],
+              requiredResourceIds: [],
+              supersedesTaskId: null,
+            },
+          ],
+          modifiedTasks: [],
+          supersededTaskIds: [],
+          dependencyChanges: [
+            {
+              operation: "add",
+              prerequisiteTaskId: registryTask,
+              dependentTaskId: taskB,
+            },
+          ],
+          contractChanges: [],
+        },
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
+        status: "awaiting_approval",
+        validation: { status: "valid", blockers: [] },
+      });
+      model = restartFromPersistedSnapshot(model);
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("awaiting_approval");
+      expect(model.missions?.[0]?.taskIds).not.toContain(registryTask);
+
+      const rejected = yield* apply(model, {
+        type: "mission.run.replan.resolve",
+        commandId: CommandId.make("reject-replan-proof"),
+        runId,
+        proposalId: replanProposalId,
+        resolution: "rejected",
+        createdAt: now,
+      });
+      expect(rejected.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("rejected");
+      expect(rejected.missions?.[0]?.taskIds).toEqual(model.missions?.[0]?.taskIds);
+      expect(rejected.tasks?.map((task) => task.id)).toEqual(model.tasks?.map((task) => task.id));
+
+      model = yield* apply(model, {
+        type: "mission.run.replan.resolve",
+        commandId: CommandId.make("approve-replan"),
+        runId,
+        proposalId: replanProposalId,
+        resolution: "approved",
+        createdAt: now,
+      });
+      model = restartFromPersistedSnapshot(model);
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("approved");
+      expect(model.missions?.[0]?.taskIds).not.toContain(registryTask);
+      model = yield* apply(model, {
+        type: "mission.run.replan.apply",
+        commandId: CommandId.make("apply-replan"),
+        runId,
+        proposalId: replanProposalId,
+        createdAt: now,
+      });
+      expect(model.missions?.[0]).toMatchObject({ currentPlanVersion: 2 });
+      expect(model.missions?.[0]?.planVersions?.map((version) => version.version)).toEqual([1, 2]);
+      expect(model.missions?.[0]?.taskIds).toContain(registryTask);
+      expect(model.tasks?.find((task) => task.id === registryTask)).toMatchObject({
+        status: "draft",
+        replan: { planVersion: 2, state: "current" },
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("applied");
+      model = restartFromPersistedSnapshot(model);
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("applied");
+
+      const duplicate = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            type: "mission.run.replan.apply",
+            commandId: CommandId.make("apply-replan-again"),
+            runId,
+            proposalId: replanProposalId,
+            createdAt: now,
+          },
+        }),
+      );
+      expect(duplicate.message).toMatch(/already applied|not approved/i);
+      expect(model.tasks?.filter((task) => task.id === registryTask)).toHaveLength(1);
     }),
   );
 });

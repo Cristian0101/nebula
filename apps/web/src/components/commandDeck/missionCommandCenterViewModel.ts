@@ -35,6 +35,7 @@ export interface MissionAttentionItem {
 
 export type MissionTimelineCategory =
   | "all"
+  | "replans"
   | "tasks"
   | "providers"
   | "ownership"
@@ -207,15 +208,12 @@ export function missionProgressSummary(input: {
   readonly plan: MissionPlan;
   readonly run: MissionRun | null;
 }) {
-  const completed = input.plan.tasks.filter((item) => item.task.status === "completed").length;
-  const active = input.plan.tasks.filter((item) =>
-    ["running", "active"].includes(item.status),
-  ).length;
-  const waitingDependency = input.plan.tasks.filter((item) => item.status === "blocked").length;
-  const waitingResource = input.plan.tasks.filter(
-    (item) => item.status === "resource-blocked",
-  ).length;
-  const reviewPending = input.plan.tasks.filter(
+  const currentTasks = input.plan.tasks.filter((item) => item.task.replan?.state !== "superseded");
+  const completed = currentTasks.filter((item) => item.task.status === "completed").length;
+  const active = currentTasks.filter((item) => ["running", "active"].includes(item.status)).length;
+  const waitingDependency = currentTasks.filter((item) => item.status === "blocked").length;
+  const waitingResource = currentTasks.filter((item) => item.status === "resource-blocked").length;
+  const reviewPending = currentTasks.filter(
     (item) => item.task.reviewRequired === true && !currentReviewApproved(item.task),
   ).length;
   const integration = input.plan.integration;
@@ -223,7 +221,7 @@ export function missionProgressSummary(input: {
   const passedGates = requiredGates.filter((run) => run.status === "passed").length;
   return {
     completed,
-    total: input.mission.taskIds.length,
+    total: currentTasks.length,
     active,
     waitingDependency,
     waitingResource,
@@ -232,7 +230,7 @@ export function missionProgressSummary(input: {
     passedGates,
     steps: [
       input.mission.architectPlanProposalId ? "Planning complete" : "Manual plan",
-      `${completed} / ${input.mission.taskIds.length} Tasks complete`,
+      `${completed} / ${currentTasks.length} Tasks complete`,
       active > 0 ? `${active} active` : null,
       waitingDependency > 0 ? `${waitingDependency} waiting on dependency` : null,
       waitingResource > 0 ? `${waitingResource} waiting on resource` : null,
@@ -320,6 +318,7 @@ export function missionRecoverySummary(input: {
 export function missionTimelineCategory(activity: MissionActivity): MissionTimelineCategory {
   const text = `${activity.type} ${activity.summary}`.toLowerCase();
   if (/failed|error|conflict|denied|cancelled/.test(text)) return "errors";
+  if (/replan|plan v\d/.test(text)) return "replans";
   if (/integration/.test(text)) return "integration";
   if (/resource|lease/.test(text)) return "resources";
   if (/review/.test(text)) return "reviews";

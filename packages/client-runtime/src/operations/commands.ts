@@ -57,7 +57,12 @@ export type ResumeMissionRunInput = CommandInput<"mission.run.resume">;
 export type StopMissionRunInput = CommandInput<"mission.run.stop">;
 export type ResolveMissionRunCoordinationRequestInput =
   CommandInput<"mission.run.coordination-request.resolve">;
+export type RequestMissionRunReplanInput = CommandInput<"mission.run.replan.request">;
+export type ProposeMissionRunReplanInput = CommandInput<"mission.run.replan.propose">;
 export type ResolveMissionRunReplanInput = CommandInput<"mission.run.replan.resolve">;
+export type ApplyMissionRunReplanInput = CommandInput<"mission.run.replan.apply">;
+export type ResolveMissionRunProviderSubstitutionInput =
+  CommandInput<"mission.run.provider-substitution.resolve">;
 export type CreateIntegrationInput = CommandInput<"integration.create">;
 export type ContinueIntegrationInput = CommandInput<"integration.continue">;
 export type AbortIntegrationInput = CommandInput<"integration.abort">;
@@ -257,7 +262,11 @@ const missionCommand = <
     | "mission.run.resume"
     | "mission.run.stop"
     | "mission.run.coordination-request.resolve"
-    | "mission.run.replan.resolve",
+    | "mission.run.replan.request"
+    | "mission.run.replan.propose"
+    | "mission.run.replan.resolve"
+    | "mission.run.replan.apply"
+    | "mission.run.provider-substitution.resolve",
 >(
   type: T,
   input: CommandInput<T>,
@@ -323,10 +332,27 @@ export const resolveMissionRunCoordinationRequest: (
 ) => CommandEffect = Effect.fn("EnvironmentCommands.resolveMissionRunCoordinationRequest")(
   (input) => missionCommand("mission.run.coordination-request.resolve", input),
 );
+export const requestMissionRunReplan: (input: RequestMissionRunReplanInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.requestMissionRunReplan")((input) =>
+    missionCommand("mission.run.replan.request", input),
+  );
+export const proposeMissionRunReplan: (input: ProposeMissionRunReplanInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.proposeMissionRunReplan")((input) =>
+    missionCommand("mission.run.replan.propose", input),
+  );
 export const resolveMissionRunReplan: (input: ResolveMissionRunReplanInput) => CommandEffect =
   Effect.fn("EnvironmentCommands.resolveMissionRunReplan")((input) =>
     missionCommand("mission.run.replan.resolve", input),
   );
+export const applyMissionRunReplan: (input: ApplyMissionRunReplanInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.applyMissionRunReplan")((input) =>
+    missionCommand("mission.run.replan.apply", input),
+  );
+export const resolveMissionRunProviderSubstitution: (
+  input: ResolveMissionRunProviderSubstitutionInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.resolveMissionRunProviderSubstitution")(
+  (input) => missionCommand("mission.run.provider-substitution.resolve", input),
+);
 
 export const createIntegration: (input: CreateIntegrationInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.createIntegration",

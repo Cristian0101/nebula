@@ -50,6 +50,18 @@ it("resumes with B after restart when A is already durably applied", () => {
   expect(secondRecovery.some((task) => task.taskId === "task-a")).toBe(false);
 });
 
+it("does not reapply Integration artifacts invalidated by a newer Mission Plan", () => {
+  const tasks = [
+    { taskId: "task-a", order: 0, status: "invalidated", appliedCommit: null },
+    { taskId: "task-b", order: 1, status: "correction_required", appliedCommit: "old-b" },
+    { taskId: "task-c", order: 2, status: "pending", appliedCommit: null },
+  ] as never;
+
+  expect(orderedRemainingIntegrationTasks({ tasks }).map((task) => task.taskId)).toEqual([
+    "task-c",
+  ]);
+});
+
 it("extracts only explicit non-sensitive Integration risk-resolution trailers", () => {
   expect(
     integrationResolvedRisksFromCommitMessage(

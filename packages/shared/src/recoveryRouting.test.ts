@@ -13,8 +13,10 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   classifyRuntimeFailure,
   LocalCapacityAdvisor,
+  hasRepeatedExecutionFailureLoop,
   parseCoordinationRequest,
   recommendWithFallback,
+  recommendProviderEscalation,
   recoveryAction,
   smallestReplanScope,
 } from "./recoveryRouting.js";
@@ -68,6 +70,62 @@ describe("bounded recovery", () => {
       "review_request_changes",
     );
     expect(classifyRuntimeFailure({ source: "ownership" })).toBe("ownership_violation");
+  });
+
+  it("recommends but does not apply an alternate provider after repeated Task-local failures", () => {
+    const recommendation = recommendProviderEscalation({
+      state: {
+        taskId,
+        transientRetries: 0,
+        remediationRounds: 1,
+        attempts: [1, 2].map((number) => ({
+          number,
+          kind: number === 1 ? ("initial" as const) : ("remediation" as const),
+          providerInstanceId: codex,
+          threadId: ThreadId.make("thread-codex"),
+          status: "failed" as const,
+          failureClass: "provider_execution_error" as const,
+          summary: "Same architectural blocker.",
+          startedAt: "2026-08-30T12:00:00.000Z",
+          completedAt: "2026-08-30T12:01:00.000Z",
+        })),
+        latestFailureClass: "provider_execution_error",
+        latestFailureSignature: "same-blocker",
+        attentionRequired: true,
+        updatedAt: "2026-08-30T12:01:00.000Z",
+      },
+      failedProviderInstanceId: codex,
+      candidates,
+      failureClass: "provider_execution_error",
+      createdAt: "2026-08-30T12:01:00.000Z",
+    });
+    expect(recommendation).toMatchObject({
+      failedProviderInstanceId: codex,
+      recommendedProviderInstanceId: antigravity,
+      status: "recommended",
+      resolvedAt: null,
+    });
+    expect(recommendation?.reason).toContain("possible execution loop");
+    expect(
+      hasRepeatedExecutionFailureLoop(
+        recommendation
+          ? {
+              attempts: [1, 2].map((number) => ({
+                number,
+                kind: "remediation" as const,
+                providerInstanceId: codex,
+                threadId: ThreadId.make("thread-codex"),
+                status: "failed" as const,
+                failureClass: "provider_execution_error" as const,
+                summary: "Same architectural blocker.",
+                startedAt: "2026-08-30T12:00:00.000Z",
+                completedAt: "2026-08-30T12:01:00.000Z",
+              })),
+            }
+          : { attempts: [] },
+        codex,
+      ),
+    ).toBe(true);
   });
 
   it("retries a transient provider failure exactly once before requiring attention", () => {
@@ -211,6 +269,8 @@ describe("structured requests and replanning", () => {
       resource: null,
       question: null,
       scope: null,
+      trigger: null,
+      evidence: [],
     });
   });
 

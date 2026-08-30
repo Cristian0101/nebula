@@ -52,6 +52,9 @@ import {
   OwnershipRequest,
   ArchitectPlanProposal,
   ArchitectPlanProposalId,
+  MissionPlanVersion,
+  MissionContractVersion,
+  TaskReplanState,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -128,6 +131,7 @@ const ProjectionTaskDbRowSchema = ProjectionTask.mapFields(
     requiredResourceIdsJson: Schema.fromJsonString(Schema.Array(SharedResourceId)),
     resourceComplianceJson: Schema.NullOr(Schema.fromJsonString(TaskResourceComplianceState)),
     ownershipRequestsJson: Schema.fromJsonString(Schema.Array(OwnershipRequest)),
+    replanJson: Schema.NullOr(Schema.fromJsonString(TaskReplanState)),
   }),
 );
 type ProjectionTaskRow = typeof ProjectionTaskDbRowSchema.Type;
@@ -186,6 +190,7 @@ const mapTaskRow = (row: ProjectionTaskRow): OrchestrationTask => ({
   requiredResourceIds: row.requiredResourceIdsJson,
   resourceCompliance: row.resourceComplianceJson,
   ownershipRequests: row.ownershipRequestsJson,
+  replan: row.replanJson,
 });
 const ProjectionMissionRow = Schema.Struct({
   missionId: MissionId,
@@ -203,6 +208,9 @@ const ProjectionMissionRow = Schema.Struct({
   baseCommit: Schema.NullOr(Schema.String),
   architectPlanProposalId: Schema.NullOr(ArchitectPlanProposalId),
   checkpointsJson: Schema.fromJsonString(Schema.Array(MissionCheckpoint)),
+  currentPlanVersion: NonNegativeInt,
+  planVersionsJson: Schema.fromJsonString(Schema.Array(MissionPlanVersion)),
+  contractVersionsJson: Schema.fromJsonString(Schema.Array(MissionContractVersion)),
 });
 const ProjectionMissionTaskRow = Schema.Struct({
   missionId: MissionId,
@@ -277,6 +285,9 @@ function mapMissionRows(input: {
     cancelledAt: row.cancelledAt,
     baseCommit: row.baseCommit,
     architectPlanProposalId: row.architectPlanProposalId,
+    currentPlanVersion: row.currentPlanVersion,
+    planVersions: row.planVersionsJson,
+    contractVersions: row.contractVersionsJson,
   }));
 }
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -672,6 +683,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           , required_resource_ids_json AS "requiredResourceIdsJson"
           , resource_compliance_json AS "resourceComplianceJson"
           , ownership_requests_json AS "ownershipRequestsJson"
+          , replan_json AS "replanJson"
         FROM projection_tasks
         ORDER BY created_at ASC, task_id ASC
       `,
@@ -689,6 +701,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         , base_commit AS "baseCommit"
         , architect_plan_proposal_id AS "architectPlanProposalId"
         , checkpoints_json AS "checkpointsJson"
+        , current_plan_version AS "currentPlanVersion"
+        , plan_versions_json AS "planVersionsJson"
+        , contract_versions_json AS "contractVersionsJson"
       FROM projection_missions ORDER BY created_at, mission_id
     `,
   });

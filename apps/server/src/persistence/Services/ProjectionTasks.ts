@@ -60,6 +60,7 @@ export const ProjectionTask = Schema.Struct({
   requiredResourceIdsJson: Schema.String,
   resourceComplianceJson: Schema.NullOr(Schema.String),
   ownershipRequestsJson: Schema.String,
+  replanJson: Schema.NullOr(Schema.String),
 });
 export type ProjectionTask = typeof ProjectionTask.Type;
 

@@ -35,6 +35,7 @@ import {
 import {
   classifyRuntimeFailure,
   parseCoordinationRequest,
+  recommendProviderEscalation,
   recommendWithFallback,
   recoveryAction,
   smallestReplanScope,
@@ -58,6 +59,7 @@ const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "mission.run.started",
   "mission.run.resumed",
   "mission.run.paused",
+  "mission.replan-applied",
   "mission.updated",
   "mission.task-added",
   "mission.task-removed",
@@ -111,7 +113,9 @@ const decisionId = (run: MissionRun, decision: MissionRunSchedulingDecision | Mi
   );
 
 const taskThreadId = (run: MissionRun, task: OrchestrationTask) =>
-  ThreadId.make(`mission-run:${run.id}:task:${task.id}`);
+  ThreadId.make(
+    `mission-run:${run.id}:task:${task.id}${task.replan?.state === "current" ? `:plan:${task.replan.planVersion}` : ""}`,
+  );
 
 const commandId = (run: MissionRun, taskId: string | null, phase: string) =>
   CommandId.make(`server:mission-run:${run.id}:${taskId ?? "mission"}:${phase}`);
@@ -460,6 +464,14 @@ export function finalizeAttemptForAttention(input: {
   };
 }
 
+const upsertTaskRecoveryState = (
+  states: ReadonlyArray<TaskRecoveryState> | undefined,
+  next: TaskRecoveryState,
+): TaskRecoveryState[] =>
+  (states ?? []).some((candidate) => candidate.taskId === next.taskId)
+    ? (states ?? []).map((candidate) => (candidate.taskId === next.taskId ? next : candidate))
+    : [...(states ?? []), next];
+
 export function providerSupportsStructuredReview(instance: {
   readonly textGeneration: { readonly generateStructured?: unknown };
 }): boolean {
@@ -495,6 +507,11 @@ const activeTaskAttention = (
   const attention: MissionRunAttention[] = [];
   const add = (code: string, detail: string, blocksMission = false) =>
     attention.push({ taskId: task.id, code, detail, blocksMission });
+  if (task.replan?.state === "stale" || task.replan?.state === "requires_review")
+    add(
+      "replan_context_stale",
+      "Task inputs or contract context are stale after an applied Replan.",
+    );
   if (task.workspace?.status === "failed" || task.workspace?.status === "missing")
     add("workspace_unavailable", task.workspace.failureReason ?? "Task workspace unavailable.");
   if (task.ownership?.status === "violation")
@@ -1065,7 +1082,132 @@ const make = Effect.gen(function* () {
   }) {
     const { run, model, task, thread } = input;
     let state = (run.taskRecovery ?? []).find((candidate) => candidate.taskId === task.id);
-    if (!state) return false;
+    if (!state) {
+      if (!thread) return false;
+      const startedAt = thread.latestTurn?.requestedAt ?? task.activatedAt ?? run.startedAt;
+      state = {
+        taskId: task.id,
+        transientRetries: 0,
+        remediationRounds: 0,
+        attempts: [
+          {
+            number: 1,
+            kind: "initial",
+            providerInstanceId: thread.modelSelection.instanceId,
+            threadId: thread.id,
+            status: "active",
+            failureClass: null,
+            summary: "Recovered initial supervised Builder execution state.",
+            startedAt,
+            completedAt: null,
+          },
+        ],
+        latestFailureClass: null,
+        latestFailureSignature: null,
+        attentionRequired: false,
+        updatedAt: startedAt,
+      };
+    }
+    if (state.providerEscalation?.status === "approved") {
+      const recommendation = state.providerEscalation;
+      const candidates = yield* routingCandidates(model);
+      const selected = candidates.find(
+        (candidate) =>
+          candidate.ready && candidate.instanceId === recommendation.recommendedProviderInstanceId,
+      );
+      if (!selected) {
+        yield* updateRun({
+          runId: run.id,
+          status: "attention",
+          currentReadyTaskIds: run.currentReadyTaskIds,
+          scheduledTaskIds: run.scheduledTaskIds,
+          attention: [
+            ...run.attention.filter((item) => item.taskId !== task.id),
+            {
+              taskId: task.id,
+              code: "provider_substitution_unavailable",
+              detail:
+                "The approved alternate provider is no longer ready. Choose another provider.",
+              blocksMission: false,
+            },
+          ],
+        });
+        return false;
+      }
+      const startedAt = yield* now;
+      const attemptNumber = (state.attempts.at(-1)?.number ?? 0) + 1;
+      const replacementThreadId = ThreadId.make(
+        `mission-run:${run.id}:task:${task.id}:attempt:${attemptNumber}`,
+      );
+      const routingDecision: RoutingDecision = {
+        taskId: task.id,
+        profile: run.recoveryPolicy?.routingProfile ?? "manual_only",
+        selectedProviderInstanceId: selected.instanceId,
+        selectedModel: selected.model,
+        reasons: ["User approved this Task-local provider substitution.", recommendation.reason],
+        consideredProviderInstanceIds: candidates
+          .filter((candidate) => candidate.ready)
+          .map((candidate) => candidate.instanceId),
+        decidedAt: startedAt,
+      };
+      const nextState: TaskRecoveryState = {
+        ...state,
+        attempts: [
+          ...state.attempts,
+          {
+            number: attemptNumber,
+            kind: "replacement",
+            providerInstanceId: selected.instanceId,
+            threadId: replacementThreadId,
+            status: "active",
+            failureClass: null,
+            summary: `User-approved replacement after ${state.latestFailureClass ?? "provider failure"}.`,
+            startedAt,
+            completedAt: null,
+          },
+        ],
+        attentionRequired: false,
+        providerEscalation: {
+          ...recommendation,
+          status: "applied",
+          resolvedAt: recommendation.resolvedAt ?? startedAt,
+        },
+        updatedAt: startedAt,
+      };
+      const nextTaskRecovery = upsertTaskRecoveryState(run.taskRecovery, nextState);
+      const nextRoutingDecisions = [...(run.routingDecisions ?? []), routingDecision];
+      yield* updateRun({
+        runId: run.id,
+        status: "running",
+        currentReadyTaskIds: run.currentReadyTaskIds,
+        scheduledTaskIds: run.scheduledTaskIds,
+        attention: run.attention.filter((item) => item.taskId !== task.id),
+        taskRecovery: nextTaskRecovery,
+        routingDecisions: nextRoutingDecisions,
+        decision: {
+          id: EventId.make(
+            `mission-run:${run.id}:replacement:${task.id}:${attemptNumber}:approved`,
+          ),
+          kind: "replacement",
+          taskId: task.id,
+          reason: `${recommendation.failedProviderInstanceId} → ${selected.instanceId}. User approved Task-local provider substitution.`,
+          sourceTaskIds: [task.id],
+          occurredAt: startedAt,
+        },
+      });
+      yield* continueReplacement({
+        run: {
+          ...run,
+          taskRecovery: nextTaskRecovery,
+          routingDecisions: nextRoutingDecisions,
+        },
+        model,
+        task,
+        state: nextState,
+        detail: recommendation.reason,
+      });
+      return true;
+    }
     if (interruptedReplacementRequiresAttention(state)) return false;
     const activeReplacement = state.attempts.findLast(
       (attempt) => attempt.kind === "replacement" && attempt.status === "active",
@@ -1093,9 +1235,7 @@ const make = Effect.gen(function* () {
         currentReadyTaskIds: run.currentReadyTaskIds,
         scheduledTaskIds: run.scheduledTaskIds,
         attention: [],
-        taskRecovery: (run.taskRecovery ?? []).map((candidate) =>
-          candidate.taskId === task.id ? observedRemediation : candidate,
-        ),
+        taskRecovery: upsertTaskRecoveryState(run.taskRecovery, observedRemediation),
         decision: {
           id: EventId.make(
             `mission-run:${run.id}:remediation:${task.id}:${observedRemediation.attempts.at(-1)!.number}`,
@@ -1118,9 +1258,7 @@ const make = Effect.gen(function* () {
       failureSignature: restartFailureSignature,
     });
     if (interrupted) {
-      const nextTaskRecovery = (run.taskRecovery ?? []).map((candidate) =>
-        candidate.taskId === task.id ? interrupted : candidate,
-      );
+      const nextTaskRecovery = upsertTaskRecoveryState(run.taskRecovery, interrupted);
       const detail = redactQualityGateOutput(
         thread?.session?.lastError ?? "Provider process did not survive server restart.",
       );
@@ -1156,6 +1294,11 @@ const make = Effect.gen(function* () {
     const gate = requiredGateFailure(task);
     const review = reviewSnapshotCoversLatestTurn(task, thread) ? currentReview(task) : null;
     const providerError = providerExecutionFailureDetail(thread);
+    const capabilityMismatch = /does not support structured Architect generation/iu.test(
+      task.handoff?.generationError ?? "",
+    )
+      ? (task.handoff?.generationError ?? "Provider lacks required structured generation support.")
+      : null;
     if (
       providerError === null &&
       thread.latestTurn?.state === "completed" &&
@@ -1170,13 +1313,15 @@ const make = Effect.gen(function* () {
         completedAt: task.handoff.updatedAt,
       });
     }
-    const failureClass = providerError
-      ? classifyRuntimeFailure({ source: "provider", message: providerError })
-      : gate
-        ? classifyRuntimeFailure({ source: "quality" })
-        : review?.status === "completed" && review.verdict === "request_changes"
-          ? classifyRuntimeFailure({ source: "review", reviewVerdict: "request_changes" })
-          : null;
+    const failureClass = capabilityMismatch
+      ? ("provider_capability_mismatch" as const)
+      : providerError
+        ? classifyRuntimeFailure({ source: "provider", message: providerError })
+        : gate
+          ? classifyRuntimeFailure({ source: "quality" })
+          : review?.status === "completed" && review.verdict === "request_changes"
+            ? classifyRuntimeFailure({ source: "review", reviewVerdict: "request_changes" })
+            : null;
     if (!failureClass) {
       const persisted = (run.taskRecovery ?? []).find((candidate) => candidate.taskId === task.id);
       if (persisted !== state) {
@@ -1186,15 +1331,14 @@ const make = Effect.gen(function* () {
           currentReadyTaskIds: run.currentReadyTaskIds,
           scheduledTaskIds: run.scheduledTaskIds,
           attention: run.attention,
-          taskRecovery: (run.taskRecovery ?? []).map((candidate) =>
-            candidate.taskId === task.id ? state! : candidate,
-          ),
+          taskRecovery: upsertTaskRecoveryState(run.taskRecovery, state),
         });
         return true;
       }
       return false;
     }
     const detail =
+      capabilityMismatch ??
       providerError ??
       (gate ? `${gate.label}: ${gate.outputSummary}` : review?.summary) ??
       failureClass;
@@ -1252,22 +1396,39 @@ const make = Effect.gen(function* () {
       replacementAvailable,
     });
     if (action === "attention") {
-      const next = finalizeAttemptForAttention({
+      const completedAt = yield* now;
+      const finalized = finalizeAttemptForAttention({
         state,
         failureClass,
         detail,
-        completedAt: yield* now,
+        completedAt,
         failureSignature: signature,
       });
+      const providerEscalation = recommendProviderEscalation({
+        state: finalized,
+        failedProviderInstanceId: thread.modelSelection.instanceId,
+        candidates,
+        failureClass,
+        createdAt: completedAt,
+      });
+      const next = providerEscalation ? { ...finalized, providerEscalation } : finalized;
       yield* updateRun({
         runId: run.id,
         status: "attention",
         currentReadyTaskIds: run.currentReadyTaskIds,
         scheduledTaskIds: run.scheduledTaskIds,
-        attention: run.attention,
-        taskRecovery: (run.taskRecovery ?? []).map((candidate) =>
-          candidate.taskId === task.id ? next : candidate,
-        ),
+        attention: providerEscalation
+          ? [
+              ...run.attention.filter((item) => item.taskId !== task.id),
+              {
+                taskId: task.id,
+                code: "provider_substitution_recommended",
+                detail: providerEscalation.reason,
+                blocksMission: false,
+              },
+            ]
+          : run.attention,
+        taskRecovery: upsertTaskRecoveryState(run.taskRecovery, next),
       });
       return false;
     }
@@ -1328,9 +1489,7 @@ const make = Effect.gen(function* () {
       action === "replace"
         ? `${thread.modelSelection.instanceId} → ${providerInstanceId}. Reason: ${failureClass} after ${state.transientRetries} retries.`
         : `${action} ${attemptNumber} for ${failureClass}: ${detail}`;
-    const nextTaskRecovery = (run.taskRecovery ?? []).map((candidate) =>
-      candidate.taskId === task.id ? nextState : candidate,
-    );
+    const nextTaskRecovery = upsertTaskRecoveryState(run.taskRecovery, nextState);
     const nextRoutingDecisions = replacementDecision
       ? [...(run.routingDecisions ?? []), replacementDecision]
       : run.routingDecisions;
@@ -1524,31 +1683,6 @@ const make = Effect.gen(function* () {
         createdAt,
         resolvedAt: deterministicAnswer ? createdAt : null,
       };
-      const replanProposal =
-        parsed.kind === "replan_request"
-          ? {
-              id: ReplanProposalId.make(`replan:${id}`),
-              missionId: mission.id,
-              sourceTaskId: task.id,
-              scope: smallestReplanScope({
-                requested: parsed.scope,
-                affectedTaskCount: 1,
-                missionTaskCount: mission.taskIds.length,
-              }),
-              affectedTaskIds: [task.id],
-              summary: parsed.reason,
-              rationale: `Architect amendment requested from current approved Mission evidence after a blocker in Task '${task.title}'.`,
-              preservedCompletedTaskIds: mission.taskIds.filter(
-                (taskId) =>
-                  (model.tasks ?? []).find((candidate) => candidate.id === taskId)?.status ===
-                  "completed",
-              ),
-              architectPlanProposalId: null,
-              status: "pending" as const,
-              createdAt,
-              resolvedAt: null,
-            }
-          : null;
       yield* updateRun({
         runId: run.id,
         status: deterministicAnswer ? "running" : "attention",
@@ -1556,12 +1690,9 @@ const make = Effect.gen(function* () {
         scheduledTaskIds: run.scheduledTaskIds,
         attention: run.attention,
         coordinationRequests: [...(run.coordinationRequests ?? []), request],
-        ...(replanProposal
-          ? { replanProposals: [...(run.replanProposals ?? []), replanProposal] }
-          : {}),
         decision: {
           id: EventId.make(`mission-run:${run.id}:request:${id}`),
-          kind: replanProposal ? "replan" : "request",
+          kind: "request",
           taskId: task.id,
           reason: deterministicAnswer
             ? "Answered coordination question from completed prerequisite handoff evidence."
@@ -1570,6 +1701,29 @@ const make = Effect.gen(function* () {
           occurredAt: createdAt,
         },
       });
+      if (
+        parsed.kind === "replan_request" &&
+        parsed.trigger !== null &&
+        parsed.evidence.length > 0
+      ) {
+        yield* engine.dispatch({
+          type: "mission.run.replan.request",
+          commandId: commandId(run, task.id, `replan-request:${id}`),
+          runId: run.id,
+          proposalId: ReplanProposalId.make(`replan:${id}`),
+          sourceTaskId: task.id,
+          trigger: parsed.trigger,
+          scope: smallestReplanScope({
+            requested: parsed.scope,
+            affectedTaskCount: 1,
+            missionTaskCount: mission.taskIds.length,
+          }),
+          reason: parsed.reason,
+          evidence: parsed.evidence,
+          userInitiated: false,
+          createdAt,
+        });
+      }
       if (parsed.kind === "ownership_request") {
         yield* engine.dispatch({
           type: "task.ownership-request.create",
@@ -1983,9 +2137,11 @@ const make = Effect.gen(function* () {
             ).length,
             finalIntegrationCommit: batch.validationSnapshot?.headCommit ?? null,
             planVersion:
+              mission.currentPlanVersion ??
               project.architectPlans
                 ?.find((plan) => plan.id === mission.architectPlanProposalId)
-                ?.revisions.at(-1)?.number ?? 1,
+                ?.revisions.at(-1)?.number ??
+              1,
             planHumanEditCount:
               project.architectPlans
                 ?.find((plan) => plan.id === mission.architectPlanProposalId)
@@ -2019,9 +2175,11 @@ const make = Effect.gen(function* () {
           finalValidation: "not_requested",
           finalIntegrationCommit: null,
           planVersion:
+            mission.currentPlanVersion ??
             project.architectPlans
               ?.find((plan) => plan.id === mission.architectPlanProposalId)
-              ?.revisions.at(-1)?.number ?? 1,
+              ?.revisions.at(-1)?.number ??
+            1,
           planHumanEditCount:
             project.architectPlans
               ?.find((plan) => plan.id === mission.architectPlanProposalId)
@@ -2095,6 +2253,28 @@ const make = Effect.gen(function* () {
       );
       if (pipelineAttention) attention.push(pipelineAttention);
     }
+    const openReplans = (run.replanProposals ?? []).filter(
+      (proposal) => !["rejected", "cancelled", "applied"].includes(proposal.status),
+    );
+    for (const proposal of openReplans) {
+      const code =
+        proposal.status === "awaiting_approval" || proposal.status === "approved"
+          ? "replan_approval_required"
+          : proposal.status === "analysis_failed"
+            ? "replan_analysis_failed"
+            : "replan_requested";
+      attention.push({
+        taskId: proposal.sourceTaskId,
+        code,
+        detail:
+          proposal.status === "approved"
+            ? "Approved Replan is ready to apply."
+            : proposal.status === "awaiting_approval"
+              ? `Proposed Plan v${proposal.proposedPlanVersion ?? 2} requires explicit approval.`
+              : proposal.summary,
+        blocksMission: proposal.scope === "full_mission",
+      });
+    }
     if (run.status === "paused") return;
 
     const readyTaskIds = new Set<TaskId>();
@@ -2107,13 +2287,19 @@ const make = Effect.gen(function* () {
         ? missionTasks.filter((task) => task.status === "draft").map((task) => task.id)
         : [],
     );
+    const replanBlockedTaskIds = new Set(
+      openReplans.flatMap((proposal) => proposal.affectedTaskIds),
+    );
     const scheduling = planMissionRunScheduling({
       mission,
       run,
       tasks: missionTasks,
       project,
       providerReadyTaskIds: readyTaskIds,
-      blockedTaskIds: new Set(attention.flatMap((item) => (item.taskId ? [item.taskId] : []))),
+      blockedTaskIds: new Set([
+        ...attention.flatMap((item) => (item.taskId ? [item.taskId] : [])),
+        ...replanBlockedTaskIds,
+      ]),
       autoRoutableTaskIds,
     });
     attention = [...attention, ...scheduling.attention];
@@ -2222,6 +2408,23 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const interruptReplannedTaskProviders = Effect.fn(
+    "MissionRunReactor.interruptReplannedTaskProviders",
+  )(function* (event: Extract<OrchestrationEvent, { type: "mission.replan-applied" }>) {
+    const model = yield* read();
+    for (const threadId of event.payload.interruptedThreadIds) {
+      const thread = model.threads.find((candidate) => candidate.id === threadId);
+      if (!shouldInterruptCancelledTaskProvider({ taskThreadId: threadId, thread })) continue;
+      yield* engine.dispatch({
+        type: "thread.turn.interrupt",
+        commandId: CommandId.make(`server:replan:${event.eventId}:${threadId}:interrupt`),
+        threadId,
+        ...(thread?.latestTurn?.turnId ? { turnId: thread.latestTurn.turnId } : {}),
+        createdAt: event.occurredAt,
+      });
+    }
+  });
+
   const nudgeAfterTurnDiff = Effect.fn("MissionRunReactor.nudgeAfterTurnDiff")(function* () {
     const model = yield* read();
     for (const run of model.missionRuns ?? []) {
@@ -2239,7 +2442,12 @@ const make = Effect.gen(function* () {
   });
 
   const worker = yield* makeDrainableWorker((event: OrchestrationEvent | null) =>
-    (event?.type === "task.cancelled" ? interruptCancelledTaskProvider(event) : Effect.void).pipe(
+    (event?.type === "task.cancelled"
+      ? interruptCancelledTaskProvider(event)
+      : event?.type === "mission.replan-applied"
+        ? interruptReplannedTaskProviders(event)
+        : Effect.void
+    ).pipe(
       Effect.andThen(reconcileAll()),
       Effect.andThen(
         event?.type === "thread.turn-diff-completed" ? nudgeAfterTurnDiff() : Effect.void,

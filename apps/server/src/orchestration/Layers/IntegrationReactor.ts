@@ -50,7 +50,7 @@ export const taskIntegrationArtifactRef = (artifactId: string) =>
 export const orderedRemainingIntegrationTasks = (batch: Pick<IntegrationBatch, "tasks">) =>
   batch.tasks
     .toSorted((left, right) => left.order - right.order)
-    .filter((task) => task.status !== "applied");
+    .filter((task) => task.status === "pending" || task.status === "applying");
 
 const SENSITIVE_RISK_EVIDENCE =
   /(?:authorization|api[_ -]?key|password|secret|token|cookie|credential)|(?:\b(?:gh[opusr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{25,}|sk-(?:ant-)?[A-Za-z0-9_-]{20,}|xox[pbar]-[A-Za-z0-9-]{20,})\b|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b|\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,})/i;

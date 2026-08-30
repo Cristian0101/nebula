@@ -168,6 +168,8 @@ export function missionTopologicalTaskIds(mission: Mission): ReadonlyArray<TaskI
 
 function startConfigurationAttention(task: OrchestrationTask): ReadonlyArray<string> {
   const attention: string[] = [];
+  if (task.replan?.state === "stale" || task.replan?.state === "requires_review")
+    attention.push("Task context is stale after an applied Replan.");
   if (task.role !== "builder") attention.push(`Role '${task.role}' has no managed start flow.`);
   if (!task.modelSelection) attention.push("Provider not assigned.");
   if (

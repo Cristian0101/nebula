@@ -5,6 +5,7 @@ import {
   type QualityGateRun,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { redactSensitiveText } from "@t3tools/shared/redaction";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -28,13 +29,7 @@ type QualityEvent = Extract<
   { type: "task.quality.run-requested" | "task.quality.run-cancel-requested" }
 >;
 
-export const redactQualityGateOutput = (input: string): string =>
-  input
-    .replace(
-      /\b(api[_-]?key|token|secret|password)\s*[:=]\s*([^\s]+)/gi,
-      (_match, key: string) => `${key}=[REDACTED]`,
-    )
-    .slice(-8_000);
+export const redactQualityGateOutput = redactSensitiveText;
 
 export const runQualityGateProcess = Effect.fn("TaskQualityReactor.runQualityGateProcess")(
   function* (input: {

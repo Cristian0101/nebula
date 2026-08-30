@@ -131,6 +131,13 @@ function configurationAttention(input: {
 }): MissionRunAttention[] {
   const { task, project, providerReadyTaskIds } = input;
   const attention: MissionRunAttention[] = [];
+  if (task.replan?.state === "stale" || task.replan?.state === "requires_review")
+    attention.push({
+      taskId: task.id,
+      code: "replan_context_stale",
+      detail: "Task inputs or contract context are stale after an applied Replan.",
+      blocksMission: false,
+    });
   if (task.role !== "builder")
     attention.push({
       taskId: task.id,
@@ -435,6 +442,7 @@ export function buildMissionFinalReport(input: {
   readonly planHumanEditCount?: number;
   readonly generatedAt: string;
 }): MissionFinalReport {
+  const currentTasks = input.tasks.filter((task) => task.replan?.state !== "superseded");
   const recovery = input.run.taskRecovery ?? [];
   const providersUsed = new Set(
     recovery.flatMap((state) => state.attempts.map((attempt) => attempt.providerInstanceId)),
@@ -442,7 +450,7 @@ export function buildMissionFinalReport(input: {
   for (const task of input.tasks) {
     if (task.result?.providerInstanceId) providersUsed.add(task.result.providerInstanceId);
   }
-  const reviewSummary = summarizeMissionReviewCoverage(input.tasks);
+  const reviewSummary = summarizeMissionReviewCoverage(currentTasks);
   const requiredFinalGates = (input.integrationQualityGateRuns ?? []).filter((run) => run.required);
   const waitingResourceTaskIds = new Set(
     input.run.decisions.flatMap((decision) =>
@@ -453,6 +461,15 @@ export function buildMissionFinalReport(input: {
     (count, state) =>
       count + state.attempts.filter((attempt) => attempt.kind === "replacement").length,
     0,
+  );
+  const appliedReplans = (input.run.replanProposals ?? []).filter(
+    (proposal) => proposal.status === "applied",
+  );
+  const rejectedReplans = (input.run.replanProposals ?? []).filter(
+    (proposal) => proposal.status === "rejected",
+  );
+  const addedTaskIds = new Set(
+    (input.mission.planVersions ?? []).flatMap((version) => version.addedTaskIds),
   );
   const remediationRoundCount = recovery.reduce(
     (count, state) => count + state.remediationRounds,
@@ -503,13 +520,25 @@ export function buildMissionFinalReport(input: {
   return {
     missionObjective: input.mission.objective,
     ...(input.planVersion ? { planVersion: input.planVersion } : {}),
-    taskIds: [...input.mission.taskIds],
-    completedTaskIds: input.tasks
+    taskIds: currentTasks.map((task) => task.id),
+    completedTaskIds: currentTasks
       .filter((task) => task.status === "completed")
       .map((task) => task.id),
     attemptCount: recovery.reduce((count, state) => count + state.attempts.length, 0),
     providersUsed: [...providersUsed].toSorted(),
     providerReplacementCount,
+    appliedReplanCount: appliedReplans.length,
+    taskReplanCount: appliedReplans.filter(
+      (proposal) => proposal.scope === "task_repair" || proposal.scope === "task_split",
+    ).length,
+    subgraphReplanCount: appliedReplans.filter((proposal) => proposal.scope === "mission_subgraph")
+      .length,
+    missionReplanCount: appliedReplans.filter((proposal) => proposal.scope === "full_mission")
+      .length,
+    rejectedReplanCount: rejectedReplans.length,
+    supersededTaskCount: input.tasks.filter((task) => task.replan?.state === "superseded").length,
+    dynamicTaskCount: addedTaskIds.size,
+    providerSubstitutionCount: providerReplacementCount,
     retryCount: recovery.reduce((count, state) => count + state.transientRetries, 0),
     remediationRoundCount,
     qualityGateCount: input.tasks.reduce(
@@ -586,14 +615,18 @@ export function missionRunCompletionBlockers(input: {
   readonly integrationBatch: IntegrationBatch | null;
 }): ReadonlyArray<string> {
   const blockers: string[] = [];
+  const requiredTasks = input.tasks.filter((task) => task.replan?.state !== "superseded");
   if (input.run.swarmPolicy?.autoCompleteMission !== true)
     blockers.push("Mission auto-completion is disabled for this Run.");
   if (
-    input.tasks.length !== input.mission.taskIds.length ||
-    input.tasks.some((task) => task.status !== "completed")
+    requiredTasks.length !==
+      input.mission.taskIds.filter(
+        (taskId) => input.tasks.find((task) => task.id === taskId)?.replan?.state !== "superseded",
+      ).length ||
+    requiredTasks.some((task) => task.status !== "completed")
   )
     blockers.push("All required Tasks must be completed.");
-  for (const task of input.tasks) {
+  for (const task of requiredTasks) {
     if (task.reviewRequired === true) {
       const currentApproval =
         task.reviewSnapshot?.status === "current" &&

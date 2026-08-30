@@ -6,6 +6,7 @@ import {
   IntegrationBatchId,
   MissionId,
   MissionRunId,
+  ReplanProposalId,
   TaskId,
   type EnvironmentId,
   type Mission,
@@ -13,6 +14,10 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationTask,
   type OrchestrationThreadShell,
+  type ReplanChangeSet,
+  type ReplanEvidence,
+  type ReplanScope,
+  type ReplanTrigger,
   type RoutingProfile,
 } from "@t3tools/contracts";
 import { computeMissionPlan, missionTopologicalTaskIds } from "@t3tools/shared/missionGraph";
@@ -103,14 +108,21 @@ function MissionGraph({
   readonly plan: ReturnType<typeof computeMissionPlan>;
   readonly onOpenTask: (taskId: TaskId) => void;
 }) {
+  const proposedReplan = run?.replanProposals?.find((proposal) =>
+    ["requested", "analyzing", "awaiting_approval", "approved"].includes(proposal.status),
+  );
+  const proposedNewTasks = proposedReplan?.changeSet?.newTasks ?? [];
+  const proposedAffectedTaskIds = new Set(proposedReplan?.affectedTaskIds ?? []);
+  const currentAddedTaskIds = new Set(mission.planVersions?.at(-1)?.addedTaskIds ?? []);
   const positions = new Map<TaskId, { x: number; y: number }>();
   for (const wave of plan.waves) {
     wave.taskIds.forEach((taskId, index) =>
       positions.set(taskId, { x: (wave.number - 1) * 250 + 20, y: index * 112 + 38 }),
     );
   }
-  const width = Math.max(300, plan.waves.length * 250 + 20);
-  const height = Math.max(190, ...plan.waves.map((wave) => wave.taskIds.length * 112 + 40));
+  const width = Math.max(300, plan.waves.length * 250 + 20, proposedNewTasks.length * 212 + 20);
+  const graphHeight = Math.max(190, ...plan.waves.map((wave) => wave.taskIds.length * 112 + 40));
+  const height = graphHeight + (proposedNewTasks.length > 0 ? 118 : 0);
   return (
     <div
       className="overflow-auto rounded-lg border border-border/70 bg-background/45"
@@ -165,12 +177,22 @@ function MissionGraph({
           const position = positions.get(item.task.id);
           if (!position) return null;
           const stateLabel = missionTaskStateLabel(item, run, plan.integration);
+          const replanState =
+            item.task.replan?.state === "superseded"
+              ? "superseded"
+              : currentAddedTaskIds.has(item.task.id)
+                ? "new"
+                : proposedReplan
+                  ? proposedAffectedTaskIds.has(item.task.id)
+                    ? "affected"
+                    : "preserved"
+                  : null;
           return (
             <button
               key={item.task.id}
               type="button"
               onClick={() => onOpenTask(item.task.id)}
-              className="absolute w-[196px] rounded-lg border border-border bg-card p-2.5 text-left shadow-sm transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={`absolute w-[196px] rounded-lg border p-2.5 text-left shadow-sm transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${replanState === "superseded" ? "border-border/60 bg-muted/25 opacity-70" : replanState === "affected" ? "border-warning/50 bg-warning/10" : replanState === "preserved" ? "border-success/35 bg-success/5" : replanState === "new" ? "border-info/40 bg-info/5" : "border-border bg-card"}`}
               style={{ left: position.x, top: position.y }}
               aria-label={`${item.task.title}, ${stateLabel}, wave ${item.wave}`}
             >
@@ -180,12 +202,27 @@ function MissionGraph({
                   {item.task.modelSelection?.instanceId ?? "Unassigned"} · {item.task.role}
                 </span>
                 <Badge size="sm" variant={statusVariant(item.status)}>
-                  {stateLabel}
+                  {replanState ? replanState.replaceAll("_", " ") : stateLabel}
                 </Badge>
               </span>
             </button>
           );
         })}
+        {proposedNewTasks.map((task, index) => (
+          <div
+            key={task.taskId}
+            className="absolute w-[196px] rounded-lg border border-dashed border-info/50 bg-info/5 p-2.5 text-left shadow-sm"
+            style={{ left: 20 + index * 212, top: graphHeight + 18 }}
+          >
+            <span className="block truncate text-sm font-medium">{task.title}</span>
+            <span className="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <span>{task.modelSelection?.instanceId ?? "Unassigned"} · builder</span>
+              <Badge size="sm" variant="info">
+                Proposed new
+              </Badge>
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -269,6 +306,19 @@ export function MissionPanel(props: MissionPanelProps) {
   const resolveReplan = useAtomCommand(projectEnvironment.resolveMissionRunReplan, {
     reportFailure: false,
   });
+  const requestReplan = useAtomCommand(projectEnvironment.requestMissionRunReplan, {
+    reportFailure: false,
+  });
+  const proposeReplan = useAtomCommand(projectEnvironment.proposeMissionRunReplan, {
+    reportFailure: false,
+  });
+  const applyReplan = useAtomCommand(projectEnvironment.applyMissionRunReplan, {
+    reportFailure: false,
+  });
+  const resolveProviderSubstitution = useAtomCommand(
+    projectEnvironment.resolveMissionRunProviderSubstitution,
+    { reportFailure: false },
+  );
   const createIntegration = useAtomCommand(projectEnvironment.createIntegration, {
     reportFailure: false,
   });
@@ -920,6 +970,61 @@ export function MissionPanel(props: MissionPanelProps) {
                       input: {
                         runId: selectedMissionRun!.id,
                         proposalId: proposal.id,
+                        resolution,
+                      },
+                    }),
+                  )
+                }
+                onRequestReplan={(input: {
+                  sourceTaskId: TaskId | null;
+                  trigger: ReplanTrigger;
+                  scope: ReplanScope;
+                  reason: string;
+                  evidence: ReadonlyArray<ReplanEvidence>;
+                }) =>
+                  void run("Could not request bounded replan", () =>
+                    requestReplan({
+                      environmentId,
+                      input: {
+                        runId: selectedMissionRun!.id,
+                        proposalId: ReplanProposalId.make(`replan:${randomUUID()}`),
+                        ...input,
+                        evidence: [...input.evidence],
+                        userInitiated: true,
+                      },
+                    }),
+                  )
+                }
+                onProposeReplan={(proposal, changeSet: ReplanChangeSet) =>
+                  void run("Could not validate proposed replan", () =>
+                    proposeReplan({
+                      environmentId,
+                      input: {
+                        runId: selectedMissionRun!.id,
+                        proposalId: proposal.id,
+                        changeSet,
+                      },
+                    }),
+                  )
+                }
+                onApplyReplan={(proposal) =>
+                  void run("Could not apply approved replan", () =>
+                    applyReplan({
+                      environmentId,
+                      input: {
+                        runId: selectedMissionRun!.id,
+                        proposalId: proposal.id,
+                      },
+                    }),
+                  )
+                }
+                onResolveProviderSubstitution={(taskId, resolution) =>
+                  void run("Could not resolve provider substitution", () =>
+                    resolveProviderSubstitution({
+                      environmentId,
+                      input: {
+                        runId: selectedMissionRun!.id,
+                        taskId,
                         resolution,
                       },
                     }),

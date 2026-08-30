@@ -46,7 +46,7 @@ After a client or server restart, the Command Center reconstructs the persisted 
 
 Integration startup reconciliation compares the persisted item state with the artifact commit, recorded applied commit, Integration branch HEAD, and current worktree. It skips already-applied Task commits, resumes only the next durable pending item, and turns an interrupted final-validation process into an explicit rerun requirement. A conflict remains **Integration blocked** until a human resolves it; Nebula never silently auto-resolves it.
 
-The Mission timeline filters and searches the canonical Mission activity history locally. Task attempt history remains under the same Task and distinguishes transient retry from provider replacement.
+The Mission timeline filters and searches canonical Mission activity and Run decisions locally, including Replan requested, proposed, approved, rejected, and applied transitions. **Plan history and bounded replans** retains every numbered Plan and its diff. Task attempt history remains under the same Task and distinguishes transient retry, remediation, and provider substitution from Mission replanning.
 
 When the canonical completion criteria pass, Nebula persists both the Mission and Run as **Completed** and stores the factual final report with the Run. Mission History reconstructs the Plan, graph, Tasks, attempts, reviews, Integration Batch, final gates, exact Integration SHA, and final report from canonical events after reload, runtime restart, or a new frontend session. The report counts deliberate operator actions such as provider replacement, sent review remediation, resolved ownership or coordination requests, Integration intervention, and human Plan edits; automatic scheduling and bounded retry are not human interventions.
 
@@ -61,7 +61,8 @@ resource-ready. A Supervised Run may continue it automatically under the user's 
 On runtime startup Nebula preserves leases for legitimate active Tasks, releases leases whose owners
 are terminal or missing, and then recomputes the deterministic wait queue. The War Room names the
 resource and current holder; agents do not coordinate the lock through chat prompts.
-Automatic Task creation outside an approved Architect plan, automatic plan approval, automatic
-`main` merge, unlimited autonomy, and AI conflict resolution are not implemented. Supervised Swarm,
-one bounded transient retry, manual provider replacement, human-initiated remediation, and
-policy-gated automatic Integration are implemented.
+Automatic Task creation outside an approved Architect plan or explicitly approved bounded Replan,
+automatic plan approval, automatic `main` merge, unlimited autonomy, and AI conflict resolution are
+not implemented. Supervised Swarm, one bounded transient retry, approved Task-local provider
+substitution, human-initiated remediation, human-gated Replan application, and policy-gated
+automatic Integration are implemented.

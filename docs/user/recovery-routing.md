@@ -14,11 +14,13 @@ The Mission retry count includes only automatic transient retry attempts. Review
 
 ## Provider replacement and Task continuity
 
-When a provider is no longer usable, the Mission operator may replace it from the canonical Task inspector. Nebula starts the replacement provider execution Thread in the same Task worktree. The Task id, Mission membership, ownership rules, resources, workspace, completed history, current diff, handoff, and review findings do not change. Provider availability is shown honestly, and no replacement occurs silently.
+When the same provider has repeated non-transient Task-local failures, Nebula may recommend one currently ready alternative. A capability mismatch may produce the recommendation after the first grounded failure. The recommendation is evidence about this Task, not a global provider ranking, and requires **Replace Agent** approval. Nebula then starts the replacement provider execution Thread in the same Task worktree. The Task id, Mission membership, ownership rules, resources, workspace, completed history, current diff, handoff, and review findings do not change. Provider availability is shown honestly, and no replacement occurs silently. Authentication failure remains attention and is never treated as proof that another provider should take over.
 
 Terminal Center shows the current execution Thread as the Task node and labels it with its attempt number. Earlier attempt Threads remain durable and can be added explicitly from **Add existing Thread**, but Nebula does not leave duplicate Task nodes open automatically.
 
 Provider subprocesses are not assumed to survive a Nebula runtime restart. When an active replacement Thread is known to have died with the runtime, startup reconciliation marks that replacement attempt `interrupted` once and moves the Task to **Needs Attention**. The operator can then choose **Continue Task** when the provider supports it or **Replace Agent** to start a new attempt. Later reconciliation passes do not redispatch the interrupted replacement or create another attempt.
+
+Two failed attempts from the same provider with the same normalized failure class and exact summary are labeled as a **Possible execution loop** in the substitution evidence. This is a bounded warning, not an automatic kill. Nebula does not infer a stall from elapsed silence alone because providers expose progress differently.
 
 Replacement context contains the Task and Mission objective, current changed-file evidence when snapshotted, latest handoff, gate and review findings, and a previous-provider summary. It does not reconstruct or transfer hidden reasoning.
 
@@ -50,24 +52,34 @@ A provider can return one structured proposal with one of these kinds:
 
 These are requests, not policy changes. Ownership requests appear in the existing Task ownership workflow. Resource requirements change only after approval and leases still follow normal Task start rules. Contract and dependency questions are answered automatically only when a completed prerequisite handoff contains deterministic interface evidence; otherwise they wait for a human answer.
 
-## Replan proposals
+## Bounded Mission replanning
 
-A replan request creates a proposal, never an automatic graph edit. Nebula keeps the scope as small as possible: Task repair, then Task split or replacement, then the affected Mission subgraph, and only then a full Mission replan.
+A replan request records a trigger, source Task, scope, reason, and grounded evidence. Eligible triggers include an invalidated assumption or dependency contract, newly required work, ownership expansion, an architectural blocker, repeated provider capability mismatch, an Integration semantic conflict, or a changed user requirement. A transient failure, failed gate, or review request-changes result remains ordinary recovery and does not become a replan.
 
-The proposal records affected Tasks and completed Tasks that must be preserved. Approval marks the proposal ready for the existing Architect planning and Mission-amendment workflow; it does not itself delete Tasks, mutate approved TaskResults, rewrite integration history, or silently change ownership and resources.
+Nebula computes the smallest deterministic impact set from the Mission DAG. A Task repair affects only its source; a split or subgraph change includes descendants; full-Mission scope is explicit. Unaffected Tasks keep their Task IDs, worktrees, attempts, results, and review history and may continue while the affected set waits. The proposal preview records preserved, affected, added, superseded, contract, ownership, resource, and dependency changes before any runtime mutation.
+
+The structured change set reruns graph, ownership-pattern, resource-reference, Task-reference, and contract-reference validation. Invalid analysis stays visible with blockers and may be edited or rejected. A valid proposal moves to **Awaiting approval**. Approval still does not mutate the Mission: **Apply Plan** is a separate deliberate action.
+
+Application is one atomic canonical event. It retains Plan v1, appends Plan v2, materializes any approved new canonical Tasks, updates dependencies, and records the full diff. Applying the same proposal again is rejected. Started or terminal Tasks cannot be modified in place; replace them with a new Task and retain the old one as **Superseded**. Any prior handoff, review, or passed quality result intersecting changed scope is retained as historical and marked stale. Contract v1 is invalidated when contract v2 becomes current, and consumers are blocked until their evidence is refreshed.
+
+Integration artifacts from superseded Tasks are never newly applied. If an artifact was already applied, the Batch becomes **Correction required** and keeps the exact affected Task visible for an explicit revert or remediation path. Replan count, dynamically created Task count, superseded Task count, and provider substitution count are reported separately.
+
+Requested, proposed, approved, rejected, and applied states are persisted with the Run. Restart restores the exact pending proposal and Plan history; it does not approve, apply, duplicate Tasks, or reset the agent proposal limit. Rejection keeps the current Plan authoritative.
 
 ## Implementation status
 
-| Capability                      | Status          |
-| ------------------------------- | --------------- |
-| Bounded transient retry         | IMPLEMENTED     |
-| Human-initiated remediation     | IMPLEMENTED     |
-| Provider replacement            | IMPLEMENTED     |
-| Automatic routing policies      | IMPLEMENTED     |
-| Structured provider requests    | IMPLEMENTED     |
-| Human-approved replan proposals | IMPLEMENTED     |
-| CapacityAdvisor seam            | IMPLEMENTED     |
-| Automatic ownership approval    | NOT IMPLEMENTED |
-| Unbounded remediation           | NOT IMPLEMENTED |
-| Unapproved Mission rewrite      | NOT IMPLEMENTED |
-| Swarm Mode                      | IMPLEMENTED     |
+| Capability                           | Status          |
+| ------------------------------------ | --------------- |
+| Bounded transient retry              | IMPLEMENTED     |
+| Human-initiated remediation          | IMPLEMENTED     |
+| Provider replacement                 | IMPLEMENTED     |
+| Automatic routing policies           | IMPLEMENTED     |
+| Structured provider requests         | IMPLEMENTED     |
+| Bounded Plan versioning and apply    | IMPLEMENTED     |
+| Contract/review/quality freshness    | IMPLEMENTED     |
+| Provider substitution recommendation | IMPLEMENTED     |
+| CapacityAdvisor seam                 | IMPLEMENTED     |
+| Automatic ownership approval         | NOT IMPLEMENTED |
+| Unbounded remediation                | NOT IMPLEMENTED |
+| Unapproved Mission rewrite           | NOT IMPLEMENTED |
+| Swarm Mode                           | IMPLEMENTED     |

@@ -17,6 +17,7 @@ import {
   MissionLifecyclePayload as ContractsMissionLifecyclePayloadSchema,
   MissionIntegrationLinkedPayload as ContractsMissionIntegrationLinkedPayloadSchema,
   MissionRunPayload as ContractsMissionRunPayloadSchema,
+  MissionReplanAppliedPayload as ContractsMissionReplanAppliedPayloadSchema,
   IntegrationCreatedPayload as ContractsIntegrationCreatedPayloadSchema,
   IntegrationActionRequestedPayload as ContractsIntegrationActionRequestedPayloadSchema,
   IntegrationUpdatedPayload as ContractsIntegrationUpdatedPayloadSchema,
@@ -108,6 +109,7 @@ export const MissionDependencyPayload = ContractsMissionDependencyPayloadSchema;
 export const MissionLifecyclePayload = ContractsMissionLifecyclePayloadSchema;
 export const MissionIntegrationLinkedPayload = ContractsMissionIntegrationLinkedPayloadSchema;
 export const MissionRunPayload = ContractsMissionRunPayloadSchema;
+export const MissionReplanAppliedPayload = ContractsMissionReplanAppliedPayloadSchema;
 export const IntegrationCreatedPayload = ContractsIntegrationCreatedPayloadSchema;
 export const IntegrationActionRequestedPayload = ContractsIntegrationActionRequestedPayloadSchema;
 export const IntegrationUpdatedPayload = ContractsIntegrationUpdatedPayloadSchema;
