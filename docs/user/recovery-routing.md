@@ -8,7 +8,9 @@ Nebula classifies failures from runtime evidence before choosing an action. Tran
 
 Provider authentication failures, provider execution failures, ownership violations, resource violations, workspace failures, quality failures, review changes requested, rejected reviews, architecture or policy blockers, Integration conflicts, and an exhausted retry budget stop the Run for attention. Nebula does not automatically repeat reasoning work or silently substitute a provider. Quality and review remediation starts only after a deliberate human action.
 
-Every retry, human-initiated remediation, and replacement attempt is retained in the Mission Run. An execution attempt becomes terminal when its Task completes or is cancelled; replacing a provider marks the previous attempt `replaced` before the new attempt becomes active. Restarting Nebula resumes reconciliation from that durable ledger rather than resetting a budget, so there is never more than one active execution attempt for a Task.
+Every retry, human-initiated remediation, and replacement attempt is retained in the Mission Run. A successful provider execution becomes terminal when it produces the current review-ready handoff; the later review verdict belongs to the Task review lifecycle and does not retroactively turn that execution into a provider failure. Sending requested review changes to the Builder starts a distinct remediation execution attempt under the same Task. Cancelling a Task finalizes any active attempt, and replacing a provider marks the previous attempt `replaced` before the new attempt becomes active. Restarting Nebula resumes reconciliation from that durable ledger rather than resetting a budget, so there is never more than one active execution attempt for a Task.
+
+The Mission retry count includes only automatic transient retry attempts. Review remediation and provider replacement remain separate counters, even when they add execution attempts.
 
 ## Provider replacement and Task continuity
 

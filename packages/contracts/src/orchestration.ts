@@ -376,6 +376,9 @@ export const IntegrationHumanChange = Schema.Struct({
   commit: TrimmedNonEmptyString,
   summary: TrimmedNonEmptyString,
   files: Schema.Array(TrimmedNonEmptyString),
+  // Optional so older Integration snapshots remain decodable. New records
+  // contain exact historical risk strings from explicit commit trailers.
+  resolvedRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   createdAt: IsoDateTime,
 });
 export type IntegrationHumanChange = typeof IntegrationHumanChange.Type;
@@ -583,7 +586,11 @@ export const MissionFinalReport = Schema.Struct({
   finalValidation: Schema.Literals(["not_requested", "ready", "failed"]),
   finalGateResults: Schema.optional(Schema.Array(IntegrationQualityGateRun)),
   humanInterventionCount: NonNegativeInt,
+  // `knownRisks` remains the legacy historical union for old consumers.
   knownRisks: Schema.Array(TrimmedNonEmptyString),
+  historicalRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  resolvedRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  remainingRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   followUps: Schema.Array(TrimmedNonEmptyString),
   elapsedMilliseconds: NonNegativeInt,
   generatedAt: IsoDateTime,

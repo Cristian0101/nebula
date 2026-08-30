@@ -256,7 +256,9 @@ export function MissionCommandCenter({
                       <span className="text-muted-foreground">
                         {" "}
                         · {attempt.providerInstanceId} · {label(attempt.kind)} ·{" "}
-                        {label(attempt.status)}
+                        {attempt.status === "completed"
+                          ? "Execution completed"
+                          : label(attempt.status)}
                         {attempt.failureClass ? ` · ${label(attempt.failureClass)}` : ""}
                       </span>
                     </li>
@@ -428,6 +430,43 @@ export function MissionCommandCenter({
               <dd>{run.finalReport.integrationConflictCount ?? 0}</dd>
             </div>
           </dl>
+          {run.finalReport.remainingRisks !== undefined ? (
+            <div className="mt-3 grid gap-3 border-t border-black/[0.08] pt-3 text-xs sm:grid-cols-2">
+              <div>
+                <h4 className="text-muted-foreground">Remaining risks</h4>
+                {run.finalReport.remainingRisks.length > 0 ? (
+                  <ul className="mt-1 space-y-1">
+                    {run.finalReport.remainingRisks.map((risk) => (
+                      <li key={risk}>• {risk}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1">None</p>
+                )}
+              </div>
+              <div>
+                <h4 className="text-muted-foreground">Resolved during Mission</h4>
+                {(run.finalReport.resolvedRisks ?? []).length > 0 ? (
+                  <ul className="mt-1 space-y-1">
+                    {(run.finalReport.resolvedRisks ?? []).map((risk) => (
+                      <li key={risk}>• {risk}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1">None</p>
+                )}
+              </div>
+            </div>
+          ) : run.finalReport.knownRisks.length > 0 ? (
+            <div className="mt-3 border-t border-black/[0.08] pt-3 text-xs">
+              <h4 className="text-muted-foreground">Known risks at completion · Legacy report</h4>
+              <ul className="mt-1 space-y-1">
+                {run.finalReport.knownRisks.map((risk) => (
+                  <li key={risk}>• {risk}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </details>
       ) : null}
 

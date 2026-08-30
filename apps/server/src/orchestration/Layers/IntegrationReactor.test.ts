@@ -12,6 +12,7 @@ import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import {
   createDeterministicTaskArtifact,
+  integrationResolvedRisksFromCommitMessage,
   orderedRemainingIntegrationTasks,
   taskIntegrationArtifactRef,
 } from "./IntegrationReactor.ts";
@@ -47,6 +48,20 @@ it("resumes with B after restart when A is already durably applied", () => {
   expect(firstRecovery[0]?.taskId).toBe("task-b");
   expect(secondRecovery).toEqual(firstRecovery);
   expect(secondRecovery.some((task) => task.taskId === "task-a")).toBe(false);
+});
+
+it("extracts only explicit non-sensitive Integration risk-resolution trailers", () => {
+  expect(
+    integrationResolvedRisksFromCommitMessage(
+      [
+        "fix: restore notification export",
+        "",
+        "Nebula-Resolved-Risk: Integration export may be missing",
+        "Nebula-Resolved-Risk: migration requires production observation",
+        "Nebula-Resolved-Risk: token=do-not-serialize",
+      ].join("\n"),
+    ),
+  ).toEqual(["Integration export may be missing", "migration requires production observation"]);
 });
 
 it.layer(layer)("deterministic Task Integration artifacts", (it) => {

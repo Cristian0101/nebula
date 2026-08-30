@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  activeExecutionAttemptOwnsProviderTurn,
   activeReplacementOwnsProviderTurn,
+  beginReviewRemediationAttempt,
   finalizeAttemptForAttention,
+  finalizeSuccessfulProviderExecution,
   finalizeTerminalTaskAttempts,
   interruptRestartedReplacementAttempt,
   interruptedReplacementRequiresAttention,
@@ -132,6 +135,81 @@ describe("MissionRunReactor recovery", () => {
     ]);
   });
 
+  it("keeps successful execution completed when its review requests changes", () => {
+    const completed = finalizeSuccessfulProviderExecution({
+      state: recoveryState(),
+      threadId: "thread-a" as never,
+      completedAt: "2026-08-29T12:01:00.000Z",
+    });
+    const changesRequested = finalizeAttemptForAttention({
+      state: completed,
+      failureClass: "review_request_changes",
+      detail: "Add coverage for the fallback.",
+      completedAt: "2026-08-29T12:02:00.000Z",
+      failureSignature: "review:request-changes",
+    });
+
+    expect(changesRequested).toMatchObject({
+      latestFailureClass: "review_request_changes",
+      attentionRequired: true,
+    });
+    expect(changesRequested.attempts).toEqual([
+      expect.objectContaining({
+        number: 1,
+        status: "completed",
+        failureClass: null,
+        completedAt: "2026-08-29T12:01:00.000Z",
+      }),
+    ]);
+  });
+
+  it("records review remediation as a new execution attempt and leaves both terminal", () => {
+    const completed = finalizeSuccessfulProviderExecution({
+      state: recoveryState(),
+      threadId: "thread-a" as never,
+      completedAt: "2026-08-29T12:01:00.000Z",
+    });
+    const changesRequested = finalizeAttemptForAttention({
+      state: completed,
+      failureClass: "review_request_changes",
+      detail: "Add coverage for the fallback.",
+      completedAt: "2026-08-29T12:02:00.000Z",
+      failureSignature: "review:request-changes",
+    });
+    const remediation = beginReviewRemediationAttempt({
+      state: changesRequested,
+      providerInstanceId: "claude" as never,
+      threadId: "thread-a" as never,
+      startedAt: "2026-08-29T12:03:00.000Z",
+    });
+    expect(remediation).not.toBeNull();
+    expect(
+      beginReviewRemediationAttempt({
+        state: remediation!,
+        providerInstanceId: "claude" as never,
+        threadId: "thread-a" as never,
+        startedAt: "2026-08-29T12:03:00.000Z",
+      }),
+    ).toBeNull();
+
+    const approved = finalizeSuccessfulProviderExecution({
+      state: remediation!,
+      threadId: "thread-a" as never,
+      completedAt: "2026-08-29T12:04:00.000Z",
+    });
+    expect(approved.remediationRounds).toBe(1);
+    expect(approved.attempts).toEqual([
+      expect.objectContaining({ number: 1, status: "completed", failureClass: null }),
+      expect.objectContaining({
+        number: 2,
+        kind: "remediation",
+        status: "completed",
+        failureClass: null,
+      }),
+    ]);
+    expect(approved.attempts.some((attempt) => attempt.status === "active")).toBe(false);
+  });
+
   it("keeps the replaced attempt terminal and finalizes only the active replacement", () => {
     const [state] = finalizeTerminalTaskAttempts({
       recovery: [
@@ -255,6 +333,13 @@ describe("MissionRunReactor recovery", () => {
         latestTurn: { state: "completed" },
       }),
     ).toBe(false);
+    expect(
+      activeExecutionAttemptOwnsProviderTurn(recoveryState(), {
+        id: "thread-a" as never,
+        session: { status: "running" },
+        latestTurn: { state: "running" },
+      } as never),
+    ).toBe(true);
   });
 
   it("lets the Task Inspector own the provider turn for a manual replacement", () => {

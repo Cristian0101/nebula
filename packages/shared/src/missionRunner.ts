@@ -4,6 +4,7 @@ import type {
   MissionRunAttention,
   MissionFinalReport,
   IntegrationBatch,
+  IntegrationHumanChange,
   IntegrationQualityGateRun,
   MissionCheckpoint,
   OrchestrationProject,
@@ -380,7 +381,7 @@ export function buildMissionFinalReport(input: {
   readonly integrationBranch: string | null;
   readonly finalValidation: MissionFinalReport["finalValidation"];
   readonly integrationQualityGateRuns?: ReadonlyArray<IntegrationQualityGateRun>;
-  readonly integrationHumanChangeCount?: number;
+  readonly integrationHumanChanges?: ReadonlyArray<IntegrationHumanChange>;
   readonly integrationConflictCount?: number;
   readonly finalIntegrationCommit?: string | null;
   readonly planVersion?: number;
@@ -433,6 +434,14 @@ export function buildMissionFinalReport(input: {
     (task) =>
       task.ownership?.status === "violation" || task.resourceCompliance?.status === "violation",
   ).length;
+  const historicalRisks = [
+    ...new Set(input.tasks.flatMap((task) => task.result?.knownRisks ?? [])),
+  ];
+  const explicitResolutionEvidence = new Set(
+    (input.integrationHumanChanges ?? []).flatMap((change) => change.resolvedRisks ?? []),
+  );
+  const resolvedRisks = historicalRisks.filter((risk) => explicitResolutionEvidence.has(risk));
+  const remainingRisks = historicalRisks.filter((risk) => !explicitResolutionEvidence.has(risk));
   return {
     missionObjective: input.mission.objective,
     ...(input.planVersion ? { planVersion: input.planVersion } : {}),
@@ -480,9 +489,12 @@ export function buildMissionFinalReport(input: {
       reviewRemediationCount +
       resolvedCoordinationCount +
       resolvedOwnershipCount +
-      (input.integrationHumanChangeCount ?? 0) +
+      (input.integrationHumanChanges?.length ?? 0) +
       (input.planHumanEditCount ?? 0),
-    knownRisks: [...new Set(input.tasks.flatMap((task) => task.result?.knownRisks ?? []))],
+    knownRisks: historicalRisks,
+    historicalRisks,
+    resolvedRisks,
+    remainingRisks,
     followUps: [...new Set(input.tasks.flatMap((task) => task.result?.followUps ?? []))],
     elapsedMilliseconds: Math.max(
       0,

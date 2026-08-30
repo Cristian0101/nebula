@@ -508,7 +508,15 @@ describe("Swarm Alpha evidence", () => {
       tasks,
       integrationBranch: "nebula/integration/swarm-alpha",
       finalValidation: "ready",
-      integrationHumanChangeCount: 1,
+      integrationHumanChanges: [
+        {
+          commit: "human-change",
+          summary: "Resolve Integration details",
+          files: ["packages/shared/src/swarm.test.ts"],
+          resolvedRisks: [],
+          createdAt: now,
+        },
+      ],
       planHumanEditCount: 2,
       generatedAt: "2026-08-23T12:10:00.000Z",
     });
@@ -526,6 +534,71 @@ describe("Swarm Alpha evidence", () => {
     });
     expect(report.filesChanged).toHaveLength(4);
     expect(report.knownRisks).toEqual(["Final follow-up risk"]);
+    expect(report.historicalRisks).toEqual(["Final follow-up risk"]);
+    expect(report.resolvedRisks).toEqual([]);
+    expect(report.remainingRisks).toEqual(["Final follow-up risk"]);
+  });
+
+  it("preserves historical risks while excluding explicitly resolved Integration risks", () => {
+    const risky = {
+      ...completed("A", "packages/shared/src/notifications.ts"),
+      result: {
+        ...completed("A", "packages/shared/src/notifications.ts").result!,
+        knownRisks: [
+          "Integration export may be missing",
+          "Migration requires production observation",
+        ],
+      },
+    };
+    const report = buildMissionFinalReport({
+      mission: { ...mission, taskIds: [taskId("A")] },
+      run,
+      tasks: [risky],
+      integrationBranch: "nebula/integration/risk-resolution",
+      finalValidation: "ready",
+      integrationHumanChanges: [
+        {
+          commit: "resolved-risk-commit",
+          summary: "Restore the notification export",
+          files: ["packages/shared/src/notifications.ts"],
+          resolvedRisks: ["Integration export may be missing"],
+          createdAt: now,
+        },
+      ],
+      generatedAt: "2026-08-23T12:10:00.000Z",
+    });
+
+    expect(report.historicalRisks).toEqual([
+      "Integration export may be missing",
+      "Migration requires production observation",
+    ]);
+    expect(report.resolvedRisks).toEqual(["Integration export may be missing"]);
+    expect(report.remainingRisks).toEqual(["Migration requires production observation"]);
+    expect(report.knownRisks).toEqual(report.historicalRisks);
+  });
+
+  it("keeps a Task risk remaining when later evidence does not explicitly resolve it", () => {
+    const report = buildMissionFinalReport({
+      mission: { ...mission, taskIds: [taskId("D")] },
+      run,
+      tasks: [completed("D", "apps/web/src/notifications.ts")],
+      integrationBranch: "nebula/integration/unresolved-risk",
+      finalValidation: "ready",
+      integrationHumanChanges: [
+        {
+          commit: "unrelated-fix",
+          summary: "Repair an unrelated Integration issue",
+          files: ["apps/web/src/other.ts"],
+          resolvedRisks: ["An unrelated exact risk"],
+          createdAt: now,
+        },
+      ],
+      generatedAt: "2026-08-23T12:10:00.000Z",
+    });
+
+    expect(report.historicalRisks).toEqual(["Final follow-up risk"]);
+    expect(report.resolvedRisks).toEqual([]);
+    expect(report.remainingRisks).toEqual(["Final follow-up risk"]);
   });
 
   it("separates required current review coverage from immutable historical attempts", () => {

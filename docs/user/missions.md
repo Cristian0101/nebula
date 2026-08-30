@@ -50,6 +50,8 @@ The Mission timeline filters and searches the canonical Mission activity history
 
 When the canonical completion criteria pass, Nebula persists both the Mission and Run as **Completed** and stores the factual final report with the Run. Mission History reconstructs the Plan, graph, Tasks, attempts, reviews, Integration Batch, final gates, exact Integration SHA, and final report from canonical events after reload, runtime restart, or a new frontend session. The report counts deliberate operator actions such as provider replacement, sent review remediation, resolved ownership or coordination requests, Integration intervention, and human Plan edits; automatic scheduling and bounded retry are not human interventions.
 
+Task handoffs keep every historical risk. The final report separately shows **Remaining risks** and **Resolved during Mission**. A risk leaves the remaining set only when a captured Integration remediation commit contains an exact `Nebula-Resolved-Risk: <historical risk>` trailer. Passing gates, a later approval, or an unrelated Integration change does not erase a warning by itself. Older persisted reports keep their original legacy known-risk presentation and are not rewritten.
+
 ## Current limitations
 
 Shared Resource blocking is implemented separately from dependency readiness. A Task may be ready by

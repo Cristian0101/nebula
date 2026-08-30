@@ -66,6 +66,10 @@ describe("Swarm product surface", () => {
     expect(center).toContain('aria-label="Mission Command Center"');
     expect(center).toContain('aria-label="Needs Attention"');
     expect(center).toContain("Task attempt history");
+    expect(center).toContain("Execution completed");
+    expect(center).toContain("Remaining risks");
+    expect(center).toContain("Resolved during Mission");
+    expect(center).toContain("Known risks at completion · Legacy report");
     expect(center).toContain('aria-label="Search Mission events"');
     expect(center).toContain(
       "Provider processes are resumed or interrupted only when the runtime confirms it",
