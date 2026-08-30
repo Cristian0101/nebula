@@ -374,6 +374,53 @@ export function missionIntegrationOverlapPaths(
     .toSorted();
 }
 
+const missingArtifactRiskPattern =
+  /\b(?:absent|missing|does not exist|neither .+ exists|not currently executable|incomplete)\b/i;
+const repositoryPathPattern = /\b(?:apps|docs|packages|src|tests)\/[a-z0-9_./-]+\.[a-z0-9]+\b/gi;
+
+export function reconcileMissionRisks(input: {
+  readonly historicalRisks: ReadonlyArray<string>;
+  readonly explicitResolvedRisks: ReadonlySet<string>;
+  readonly integratedFiles: ReadonlyArray<string>;
+  readonly finalEvidenceComplete: boolean;
+}) {
+  const integratedFiles = new Set(input.integratedFiles.map((file) => file.toLowerCase()));
+  const integratedArtifactNames = input.integratedFiles
+    .map(
+      (file) =>
+        file
+          .split("/")
+          .at(-1)
+          ?.replace(/\.[^.]+$/, "")
+          .toLowerCase() ?? "",
+    )
+    .filter((name) => name.length >= 8);
+  const hasIntegratedArtifactEvidence = (risk: string) => {
+    if (!input.finalEvidenceComplete || !missingArtifactRiskPattern.test(risk)) return false;
+    const normalizedRisk = risk.toLowerCase();
+    const referencedPaths = [...risk.matchAll(repositoryPathPattern)].map((match) =>
+      match[0].toLowerCase(),
+    );
+    if (referencedPaths.length > 0) {
+      return referencedPaths.every((path) => integratedFiles.has(path));
+    }
+    return integratedArtifactNames.some((name) => normalizedRisk.includes(name));
+  };
+  const hasCanonicalReplacementEvidence = (risk: string) =>
+    input.finalEvidenceComplete && /^builder-reported evidence:\s*none retained\.?$/i.test(risk);
+  const resolvedRisks = input.historicalRisks.filter(
+    (risk) =>
+      input.explicitResolvedRisks.has(risk) ||
+      hasIntegratedArtifactEvidence(risk) ||
+      hasCanonicalReplacementEvidence(risk),
+  );
+  const resolved = new Set(resolvedRisks);
+  return {
+    resolvedRisks,
+    remainingRisks: input.historicalRisks.filter((risk) => !resolved.has(risk)),
+  };
+}
+
 export function buildMissionFinalReport(input: {
   readonly mission: Mission;
   readonly run: MissionRun;
@@ -434,14 +481,25 @@ export function buildMissionFinalReport(input: {
     (task) =>
       task.ownership?.status === "violation" || task.resourceCompliance?.status === "violation",
   ).length;
+  const filesChanged = [
+    ...new Set(input.tasks.flatMap((task) => (task.result?.files ?? []).map((file) => file.path))),
+  ].toSorted();
   const historicalRisks = [
     ...new Set(input.tasks.flatMap((task) => task.result?.knownRisks ?? [])),
   ];
   const explicitResolutionEvidence = new Set(
     (input.integrationHumanChanges ?? []).flatMap((change) => change.resolvedRisks ?? []),
   );
-  const resolvedRisks = historicalRisks.filter((risk) => explicitResolutionEvidence.has(risk));
-  const remainingRisks = historicalRisks.filter((risk) => !explicitResolutionEvidence.has(risk));
+  const { resolvedRisks, remainingRisks } = reconcileMissionRisks({
+    historicalRisks,
+    explicitResolvedRisks: explicitResolutionEvidence,
+    integratedFiles: filesChanged,
+    finalEvidenceComplete:
+      requiredFinalGates.length > 0 &&
+      requiredFinalGates.every((run) => run.status === "passed") &&
+      reviewSummary.required > 0 &&
+      reviewSummary.approved === reviewSummary.required,
+  });
   return {
     missionObjective: input.mission.objective,
     ...(input.planVersion ? { planVersion: input.planVersion } : {}),
@@ -474,11 +532,7 @@ export function buildMissionFinalReport(input: {
     ownershipViolationCount,
     unresolvedOwnershipViolationCount: ownershipViolationCount,
     integrationConflictCount: input.integrationConflictCount ?? 0,
-    filesChanged: [
-      ...new Set(
-        input.tasks.flatMap((task) => (task.result?.files ?? []).map((file) => file.path)),
-      ),
-    ].toSorted(),
+    filesChanged,
     integrationBranch: input.integrationBranch,
     baseCommit: input.mission.baseCommit ?? null,
     finalIntegrationCommit: input.finalIntegrationCommit ?? null,

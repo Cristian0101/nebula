@@ -21,6 +21,7 @@ import {
   missionIntegrationOverlapPaths,
   missionRunCompletionBlockers,
   planMissionRunScheduling,
+  reconcileMissionRisks,
   resolveMissionCheckpointState,
   summarizeMissionReviewCoverage,
 } from "./missionRunner.js";
@@ -599,6 +600,61 @@ describe("Swarm Alpha evidence", () => {
     expect(report.historicalRisks).toEqual(["Final follow-up risk"]);
     expect(report.resolvedRisks).toEqual([]);
     expect(report.remainingRisks).toEqual(["Final follow-up risk"]);
+  });
+
+  it("resolves only named missing artifacts when final Integration evidence is complete", () => {
+    expect(
+      reconcileMissionRisks({
+        historicalRisks: [
+          "Integration proof is incomplete because src/notification-policy.js is missing.",
+          "The referenced notification-copy module is absent from the snapshot.",
+          "Migration requires production observation.",
+        ],
+        explicitResolvedRisks: new Set(),
+        integratedFiles: ["src/notification-policy.js", "src/notification-copy.js"],
+        finalEvidenceComplete: true,
+      }),
+    ).toEqual({
+      resolvedRisks: [
+        "Integration proof is incomplete because src/notification-policy.js is missing.",
+        "The referenced notification-copy module is absent from the snapshot.",
+      ],
+      remainingRisks: ["Migration requires production observation."],
+    });
+  });
+
+  it("keeps missing-artifact and evidence warnings without complete canonical evidence", () => {
+    expect(
+      reconcileMissionRisks({
+        historicalRisks: [
+          "Integration proof is incomplete because src/notification-policy.js is missing.",
+          "Builder-reported evidence: None retained.",
+        ],
+        explicitResolvedRisks: new Set(),
+        integratedFiles: ["src/notification-policy.js"],
+        finalEvidenceComplete: false,
+      }),
+    ).toEqual({
+      resolvedRisks: [],
+      remainingRisks: [
+        "Integration proof is incomplete because src/notification-policy.js is missing.",
+        "Builder-reported evidence: None retained.",
+      ],
+    });
+  });
+
+  it("resolves the exact missing Builder-evidence note after canonical evidence replaces it", () => {
+    expect(
+      reconcileMissionRisks({
+        historicalRisks: ["Builder-reported evidence: None retained."],
+        explicitResolvedRisks: new Set(),
+        integratedFiles: [],
+        finalEvidenceComplete: true,
+      }),
+    ).toEqual({
+      resolvedRisks: ["Builder-reported evidence: None retained."],
+      remainingRisks: [],
+    });
   });
 
   it("separates required current review coverage from immutable historical attempts", () => {
