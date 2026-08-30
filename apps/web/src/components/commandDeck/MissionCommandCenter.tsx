@@ -165,12 +165,14 @@ function ReplanRequestForm({
 function ReplanProposalCard({
   proposal,
   tasks,
+  planVersions,
   onPropose,
   onResolve,
   onApply,
 }: {
   readonly proposal: ReplanProposal;
   readonly tasks: ReadonlyArray<OrchestrationTask>;
+  readonly planVersions: Mission["planVersions"];
   readonly onPropose: (proposal: ReplanProposal, changeSet: ReplanChangeSet) => void;
   readonly onResolve: (
     proposal: ReplanProposal,
@@ -179,6 +181,10 @@ function ReplanProposalCard({
   readonly onApply: (proposal: ReplanProposal) => void;
 }) {
   const sourceTask = tasks.find((task) => task.id === proposal.sourceTaskId) ?? null;
+  const previousTaskSpecification = (taskId: TaskId) =>
+    planVersions
+      ?.find((version) => version.version === (proposal.currentPlanVersion ?? 1))
+      ?.taskSpecifications?.find((task) => task.taskId === taskId);
   const [title, setTitle] = useState("Registry foundation");
   const [objective, setObjective] = useState("");
   const [ownership, setOwnership] = useState("");
@@ -256,14 +262,46 @@ function ReplanProposalCard({
       ) : null}
       {proposal.changeSet ? (
         <div className="mt-2 grid gap-1 rounded-md border border-black/[0.08] p-2">
-          {proposal.changeSet.newTasks.map((task) => (
-            <p key={task.taskId}>Added · {task.title}</p>
-          ))}
-          {proposal.changeSet.modifiedTasks.map((task) => (
-            <p key={task.taskId}>
-              Modified · {tasks.find((item) => item.id === task.taskId)?.title ?? task.taskId}
-            </p>
-          ))}
+          {proposal.changeSet.newTasks.map((task) => {
+            const superseded = tasks.find((item) => item.id === task.supersedesTaskId);
+            const previous = task.supersedesTaskId
+              ? previousTaskSpecification(task.supersedesTaskId)
+              : undefined;
+            return (
+              <div key={task.taskId} className="rounded-md bg-muted/30 p-2">
+                <p className="font-medium">
+                  {superseded ? "Replacement" : "Added"} · {task.title}
+                </p>
+                {superseded ? (
+                  <p className="mt-1 text-muted-foreground">
+                    Plan v{proposal.currentPlanVersion ?? 1} objective ·{" "}
+                    {previous?.objective ?? superseded.objective}
+                  </p>
+                ) : null}
+                <p className="mt-1">
+                  Plan v{proposal.proposedPlanVersion ?? 2} objective · {task.objective}
+                </p>
+              </div>
+            );
+          })}
+          {proposal.changeSet.modifiedTasks.map((task) => {
+            const current = tasks.find((item) => item.id === task.taskId);
+            const previous = previousTaskSpecification(task.taskId);
+            return (
+              <div key={task.taskId} className="rounded-md bg-muted/30 p-2">
+                <p className="font-medium">Modified · {current?.title ?? task.taskId}</p>
+                {task.objective ? (
+                  <>
+                    <p className="mt-1 text-muted-foreground">
+                      Previous objective ·{" "}
+                      {previous?.objective ?? current?.objective ?? "Not retained"}
+                    </p>
+                    <p className="mt-1">Current objective · {task.objective}</p>
+                  </>
+                ) : null}
+              </div>
+            );
+          })}
           {proposal.changeSet.supersededTaskIds.map((taskId) => (
             <p key={taskId}>
               Superseded · {tasks.find((item) => item.id === taskId)?.title ?? taskId}
@@ -730,12 +768,48 @@ export function MissionCommandCenter({
             Compare the current Plan with proposed or applied changes. Runtime mutation occurs only
             after validation, explicit approval, and a separate apply action.
           </p>
+          {(mission.planVersions ?? []).length > 0 ? (
+            <div className="mt-2 grid gap-2 lg:grid-cols-2" aria-label="Mission Plan versions">
+              {(mission.planVersions ?? []).map((version) => (
+                <article
+                  key={version.version}
+                  className="rounded-md border border-black/[0.08] bg-background/70 p-2 text-xs"
+                >
+                  <p className="font-medium">
+                    Plan v{version.version} · {version.source === "initial" ? "Initial" : "Replan"}
+                  </p>
+                  <div className="mt-1 space-y-1 text-muted-foreground">
+                    {version.taskIds
+                      .filter((taskId) => !version.supersededTaskIds.includes(taskId))
+                      .map((taskId) => {
+                        const task =
+                          version.taskSpecifications?.find(
+                            (specification) => specification.taskId === taskId,
+                          ) ?? taskById.get(taskId);
+                        return task ? (
+                          <p key={taskId}>
+                            {task.title} · {task.objective}
+                          </p>
+                        ) : null;
+                      })}
+                  </div>
+                  {version.addedTaskIds.length > 0 ? (
+                    <p className="mt-1">Added · {version.addedTaskIds.length}</p>
+                  ) : null}
+                  {version.supersededTaskIds.length > 0 ? (
+                    <p className="mt-1">Superseded · {version.supersededTaskIds.length}</p>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          ) : null}
           <div className="mt-2 space-y-2">
             {(run?.replanProposals ?? []).map((proposal) => (
               <ReplanProposalCard
                 key={proposal.id}
                 proposal={proposal}
                 tasks={tasks}
+                planVersions={mission.planVersions}
                 onPropose={onProposeReplan}
                 onResolve={onResolveReplan}
                 onApply={onApplyReplan}

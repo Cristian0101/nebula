@@ -321,6 +321,12 @@ const make = Effect.gen(function* () {
         interfaceChanges,
         migrations,
         knownRisks,
+        historicalRisks: [
+          ...new Set([
+            ...(task.handoff?.historicalRisks ?? task.handoff?.knownRisks ?? []),
+            ...knownRisks,
+          ]),
+        ],
         followUps,
         generation: resolvedGeneration,
         generationError,

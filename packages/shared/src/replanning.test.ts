@@ -199,10 +199,42 @@ const splitChangeSet: ReplanChangeSet = {
       supersedesTaskId: null,
     },
   ],
-  modifiedTasks: [],
+  modifiedTasks: [
+    {
+      taskId: id("B"),
+      objective: "Implement Backend using the approved Registry foundation and handoff.",
+      acceptanceCriteria: ["Backend consumes the current Registry contract"],
+    },
+  ],
   supersededTaskIds: [],
   dependencyChanges: [
     { operation: "add", prerequisiteTaskId: id("REGISTRY"), dependentTaskId: id("B") },
+  ],
+  contractChanges: [],
+};
+
+const replacementChangeSet: ReplanChangeSet = {
+  newTasks: [
+    ...splitChangeSet.newTasks,
+    {
+      taskId: id("B2"),
+      title: "Backend implementation",
+      objective: "Implement Backend using the approved Registry foundation and handoff.",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "auto" },
+      acceptanceCriteria: ["Backend consumes the current Registry contract"],
+      ownership: [{ pattern: "B/**", access: "write", reason: "Replacement execution Task" }],
+      requiredResourceIds: [],
+      supersedesTaskId: id("B"),
+    },
+  ],
+  modifiedTasks: [],
+  supersededTaskIds: [id("B")],
+  dependencyChanges: [
+    { operation: "remove", prerequisiteTaskId: id("A"), dependentTaskId: id("B") },
+    { operation: "remove", prerequisiteTaskId: id("B"), dependentTaskId: id("D") },
+    { operation: "add", prerequisiteTaskId: id("A"), dependentTaskId: id("B2") },
+    { operation: "add", prerequisiteTaskId: id("REGISTRY"), dependentTaskId: id("B2") },
+    { operation: "add", prerequisiteTaskId: id("B2"), dependentTaskId: id("D") },
   ],
   contractChanges: [],
 };
@@ -270,7 +302,38 @@ describe("bounded Mission replanning", () => {
       changeSet: splitChangeSet,
       validatedAt: later,
     });
-    expect(activeDependent).toMatchObject({ status: "valid", blockers: [] });
+    expect(activeDependent.status).toBe("invalid");
+    expect(activeDependent.blockers.join(" ")).toMatch(/must be superseded/i);
+
+    const activeReplacement = validateReplanChangeSet({
+      mission,
+      tasks: [task("A", "completed"), task("B", "active"), task("C"), task("D")],
+      project: { sharedResources: [] },
+      proposal,
+      changeSet: replacementChangeSet,
+      validatedAt: later,
+    });
+    expect(activeReplacement).toMatchObject({ status: "valid", blockers: [] });
+  });
+
+  it("rejects a prerequisite-only replan that leaves the affected execution intent obsolete", () => {
+    const proposal = requestedProposal();
+    const invalid = validateReplanChangeSet({
+      mission,
+      tasks: [task("A", "completed"), task("B", "active"), task("C"), task("D")],
+      project: { sharedResources: [] },
+      proposal,
+      changeSet: {
+        ...splitChangeSet,
+        modifiedTasks: [],
+      },
+      validatedAt: later,
+    });
+
+    expect(invalid.status).toBe("invalid");
+    expect(invalid.blockers.join(" ")).toMatch(
+      /refreshed execution specification|no refreshed objective/i,
+    );
   });
 
   it("persists Plan v1 and applies Plan v2 without recreating unaffected work", () => {
@@ -303,6 +366,16 @@ describe("bounded Mission replanning", () => {
     expect(applied.mission.planVersions?.map((version) => version.version)).toEqual([1, 2]);
     expect(applied.mission.planVersions?.[0]?.taskIds).toEqual(mission.taskIds);
     expect(applied.mission.planVersions?.[1]?.addedTaskIds).toEqual([id("REGISTRY")]);
+    expect(
+      applied.mission.planVersions?.[0]?.taskSpecifications?.find(
+        (specification) => specification.taskId === id("B"),
+      )?.objective,
+    ).toBe("Deliver B");
+    expect(
+      applied.mission.planVersions?.[1]?.taskSpecifications?.find(
+        (specification) => specification.taskId === id("B"),
+      )?.objective,
+    ).toBe("Implement Backend using the approved Registry foundation and handoff.");
     expect(applied.tasks.find((candidate) => candidate.id === id("C"))).toBe(preserved);
     expect(applied.tasks.find((candidate) => candidate.id === id("REGISTRY"))).toMatchObject({
       status: "draft",
@@ -327,7 +400,7 @@ describe("bounded Mission replanning", () => {
     ).toThrow(/approval is required/i);
   });
 
-  it("pauses an affected active Task and records its provider thread for interruption", () => {
+  it("supersedes an affected active Task and records its provider thread for interruption", () => {
     const activeThreadId = ThreadId.make("thread-B-plan-1");
     const activeTask = { ...task("B", "active"), threadId: activeThreadId };
     const requested = requestedProposal();
@@ -336,12 +409,12 @@ describe("bounded Mission replanning", () => {
       tasks: [task("A", "completed"), activeTask, task("C", "completed"), task("D")],
       project: { sharedResources: [] },
       proposal: requested,
-      changeSet: splitChangeSet,
+      changeSet: replacementChangeSet,
       validatedAt: later,
     });
     const approved: ReplanProposal = {
       ...requested,
-      changeSet: splitChangeSet,
+      changeSet: replacementChangeSet,
       validation,
       status: "approved",
       resolvedAt: later,
@@ -357,10 +430,20 @@ describe("bounded Mission replanning", () => {
     expect(validation.status).toBe("valid");
     expect(applied.interruptedThreadIds).toEqual([activeThreadId]);
     expect(applied.tasks.find((candidate) => candidate.id === id("B"))).toMatchObject({
+      status: "cancelled",
+      threadId: activeThreadId,
+      objective: "Deliver B",
+      replan: { planVersion: 2, state: "superseded", supersededByTaskId: id("B2") },
+    });
+    expect(applied.tasks.find((candidate) => candidate.id === id("B2"))).toMatchObject({
       status: "draft",
-      threadId: null,
-      activatedAt: null,
+      objective: "Implement Backend using the approved Registry foundation and handoff.",
       replan: { planVersion: 2, state: "current" },
+    });
+    expect(applied.mission.planVersions?.[0]?.taskIds).toContain(id("B"));
+    expect(applied.mission.planVersions?.[1]).toMatchObject({
+      supersededTaskIds: [id("B")],
+      addedTaskIds: [id("REGISTRY"), id("B2")],
     });
   });
 

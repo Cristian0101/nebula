@@ -442,6 +442,14 @@ export const MissionTaskDependency = Schema.Struct({
 });
 export type MissionTaskDependency = typeof MissionTaskDependency.Type;
 
+export const MissionPlanTaskSpecification = Schema.Struct({
+  taskId: TaskId,
+  title: TrimmedNonEmptyString,
+  objective: TrimmedNonEmptyString,
+  acceptanceCriteria: Schema.Array(TrimmedNonEmptyString),
+});
+export type MissionPlanTaskSpecification = typeof MissionPlanTaskSpecification.Type;
+
 export const MissionPlanVersion = Schema.Struct({
   version: PositiveInt,
   source: Schema.Literals(["initial", "replan"]),
@@ -452,6 +460,7 @@ export const MissionPlanVersion = Schema.Struct({
   preservedTaskIds: Schema.Array(TaskId),
   supersededTaskIds: Schema.Array(TaskId),
   addedTaskIds: Schema.Array(TaskId),
+  taskSpecifications: Schema.optional(Schema.Array(MissionPlanTaskSpecification)),
   createdAt: IsoDateTime,
 });
 export type MissionPlanVersion = typeof MissionPlanVersion.Type;
@@ -858,6 +867,9 @@ export const TaskHandoff = Schema.Struct({
   interfaceChanges: Schema.Array(TrimmedNonEmptyString),
   migrations: Schema.Array(TrimmedNonEmptyString),
   knownRisks: Schema.Array(TrimmedNonEmptyString),
+  // Optional lineage keeps pre-remediation warnings auditable while newer
+  // snapshots project only the risks that remain current.
+  historicalRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   followUps: Schema.Array(TrimmedNonEmptyString),
   generation: Schema.Literals(["provider", "manual"]),
   generationError: Schema.NullOr(Schema.String),
@@ -966,6 +978,9 @@ export const TaskResult = Schema.Struct({
   interfaceChanges: Schema.Array(TrimmedNonEmptyString),
   migrations: Schema.Array(TrimmedNonEmptyString),
   knownRisks: Schema.Array(TrimmedNonEmptyString),
+  historicalRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  resolvedRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  remainingRisks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   followUps: Schema.Array(TrimmedNonEmptyString),
   providerInstanceId: Schema.NullOr(ProviderInstanceId),
   threadId: Schema.NullOr(ThreadId),

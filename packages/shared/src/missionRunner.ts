@@ -384,6 +384,50 @@ export function missionIntegrationOverlapPaths(
 const missingArtifactRiskPattern =
   /\b(?:absent|missing|does not exist|neither .+ exists|not currently executable|incomplete)\b/i;
 const repositoryPathPattern = /\b(?:apps|docs|packages|src|tests)\/[a-z0-9_./-]+\.[a-z0-9]+\b/gi;
+const missingRequiredTestEvidenceRiskPattern =
+  /(?:\b(?:missing|absent|no)\b.{0,80}\b(?:required|focused|canonical)?\s*(?:test|quality gate)\s+evidence\b|\b(?:required|focused|canonical)?\s*(?:test|quality gate)\s+evidence\b.{0,80}\b(?:missing|absent|not (?:run|recorded|retained|available))\b)/i;
+
+export function projectTaskRisks(task: OrchestrationTask) {
+  const historicalRisks = [
+    ...new Set([
+      ...(task.result?.historicalRisks ?? []),
+      ...(task.handoff?.historicalRisks ?? []),
+      ...(task.result?.knownRisks ?? []),
+      ...(task.handoff?.knownRisks ?? []),
+    ]),
+  ];
+  const snapshotId = task.reviewSnapshot?.status === "current" ? task.reviewSnapshot.id : null;
+  const requiredQualityRuns = (task.qualityGateRuns ?? []).filter(
+    (run) => run.required && run.snapshotId === snapshotId,
+  );
+  const canonicalTestEvidence =
+    snapshotId !== null &&
+    requiredQualityRuns.length > 0 &&
+    requiredQualityRuns.every((run) => run.status === "passed");
+  const crossProviderApproval =
+    snapshotId !== null &&
+    (task.reviews ?? []).some(
+      (review) =>
+        review.snapshotId === snapshotId &&
+        review.status === "completed" &&
+        review.diversity === "cross-provider" &&
+        (review.verdict === "approve" || review.verdict === "approve_with_notes"),
+    );
+  const persistedResolved = new Set(task.result?.resolvedRisks ?? []);
+  const resolvedRisks = historicalRisks.filter(
+    (risk) =>
+      persistedResolved.has(risk) ||
+      (canonicalTestEvidence &&
+        crossProviderApproval &&
+        missingRequiredTestEvidenceRiskPattern.test(risk)),
+  );
+  const resolved = new Set(resolvedRisks);
+  return {
+    historicalRisks,
+    resolvedRisks,
+    remainingRisks: historicalRisks.filter((risk) => !resolved.has(risk)),
+  };
+}
 
 export function reconcileMissionRisks(input: {
   readonly historicalRisks: ReadonlyArray<string>;
@@ -506,12 +550,14 @@ export function buildMissionFinalReport(input: {
   const filesChanged = [
     ...new Set(input.tasks.flatMap((task) => (task.result?.files ?? []).map((file) => file.path))),
   ].toSorted();
+  const taskRiskProjections = input.tasks.map(projectTaskRisks);
   const historicalRisks = [
-    ...new Set(input.tasks.flatMap((task) => task.result?.knownRisks ?? [])),
+    ...new Set(taskRiskProjections.flatMap((projection) => projection.historicalRisks)),
   ];
-  const explicitResolutionEvidence = new Set(
-    (input.integrationHumanChanges ?? []).flatMap((change) => change.resolvedRisks ?? []),
-  );
+  const explicitResolutionEvidence = new Set([
+    ...taskRiskProjections.flatMap((projection) => projection.resolvedRisks),
+    ...(input.integrationHumanChanges ?? []).flatMap((change) => change.resolvedRisks ?? []),
+  ]);
   const { resolvedRisks, remainingRisks } = reconcileMissionRisks({
     historicalRisks,
     explicitResolvedRisks: explicitResolutionEvidence,
@@ -694,13 +740,26 @@ export function buildTaskContextPackage(input: {
     const handoff = prerequisite.handoff;
     const result = prerequisite.result;
     const review = prerequisite.reviews?.findLast((candidate) => candidate.status === "completed");
+    const risks = projectTaskRisks(prerequisite);
+    const tests = handoff?.testsRun ?? result?.testsRun ?? [];
     return [
       `Prerequisite Task: ${prerequisite.title} (${prerequisite.id})`,
       `Handoff: ${bounded(handoff?.summary || result?.summary || "No structured summary retained.", 1_500)}`,
+      `Artifact identity: ${prerequisite.reviewSnapshot?.branchHead ?? result?.snapshotId ?? "No canonical artifact identity retained."}`,
+      `Task branch: ${result?.branch ?? prerequisite.workspace?.branch ?? "No canonical Task branch retained."}`,
       "Interface changes:",
       ...lines(handoff?.interfaceChanges ?? result?.interfaceChanges ?? [], 12),
-      "Known risks:",
-      ...lines(handoff?.knownRisks ?? result?.knownRisks ?? [], 12),
+      "Canonical tests:",
+      ...lines(
+        tests.map((test) => `${test.command}: ${test.result} (${test.evidence})`),
+        20,
+      ),
+      "Historical risks:",
+      ...lines(risks.historicalRisks, 12),
+      "Resolved risks:",
+      ...lines(risks.resolvedRisks, 12),
+      "Current remaining risks:",
+      ...lines(risks.remainingRisks, 12),
       "Relevant changed files:",
       ...lines(
         (result?.files ?? []).map((file) => file.path),
@@ -716,14 +775,18 @@ export function buildTaskContextPackage(input: {
     "Mission context injected by Nebula (not user-authored)",
     `Mission: ${input.mission.title}`,
     `Mission objective: ${bounded(input.mission.objective, 2_000)}`,
+    `Current Plan: v${input.mission.currentPlanVersion ?? 1}`,
     `Task: ${input.task.title}`,
     `Task objective: ${bounded(input.task.objective, 2_000)}`,
+    `Task specification: current Plan-v${input.task.replan?.planVersion ?? input.mission.currentPlanVersion ?? 1} execution intent`,
     "Acceptance criteria:",
     ...lines(input.task.acceptanceCriteria ?? [], 20),
     "",
     ...prerequisiteSections,
     "Resource context:",
     ...lines(resourceContext, 20),
+    "",
+    "The current Task objective, acceptance criteria, and prerequisite handoffs are authoritative for execution. Earlier Plan specifications are historical evidence only.",
     "",
     "This bounded package contains durable Mission, handoff, review, file, assumption, risk, and resource evidence only. It excludes provider transcripts, hidden reasoning, credentials, and unbounded diffs.",
   ].join("\n");

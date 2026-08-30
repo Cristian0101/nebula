@@ -233,6 +233,33 @@ export function validateReplanChangeSet(input: {
       }
     }
   }
+  const replacementTasksBySupersededId = new Map<TaskId, ReplanChangeSet["newTasks"]>();
+  for (const task of input.changeSet.newTasks) {
+    if (task.supersedesTaskId === null) continue;
+    replacementTasksBySupersededId.set(task.supersedesTaskId, [
+      ...(replacementTasksBySupersededId.get(task.supersedesTaskId) ?? []),
+      task,
+    ]);
+  }
+  const sourceTaskId = input.proposal.sourceTaskId;
+  if (
+    sourceTaskId !== null &&
+    (input.proposal.trigger === "assumption_invalidated" ||
+      input.proposal.trigger === "task_blocked_architecturally")
+  ) {
+    const modification = input.changeSet.modifiedTasks.find(
+      (candidate) => candidate.taskId === sourceTaskId,
+    );
+    const replacementTasks = replacementTasksBySupersededId.get(sourceTaskId) ?? [];
+    const hasFreshInPlaceIntent =
+      modification?.objective !== undefined &&
+      modification.acceptanceCriteria !== undefined &&
+      modification.acceptanceCriteria.length > 0;
+    if (!hasFreshInPlaceIntent && replacementTasks.length !== 1)
+      blockers.push(
+        `Affected source Task '${sourceTaskId}' requires one explicit refreshed execution specification: update its objective and acceptance criteria, or supersede it with exactly one replacement Task.`,
+      );
+  }
   for (const taskId of input.changeSet.supersededTaskIds)
     if (!currentTaskIds.has(taskId))
       blockers.push(`Superseded Task '${taskId}' is not in the Mission.`);
@@ -240,6 +267,33 @@ export function validateReplanChangeSet(input: {
   let dependencies = [...input.mission.dependencies];
   for (const change of input.changeSet.dependencyChanges) {
     const dependent = input.tasks.find((task) => task.id === change.dependentTaskId);
+    if (
+      change.operation === "add" &&
+      input.changeSet.supersededTaskIds.includes(change.dependentTaskId)
+    )
+      blockers.push(
+        `Dependency '${change.prerequisiteTaskId}' cannot target superseded Task '${change.dependentTaskId}'; retarget it to the current replacement Task.`,
+      );
+    if (
+      change.operation === "add" &&
+      input.changeSet.newTasks.some(
+        (task) => task.taskId === change.prerequisiteTaskId && task.supersedesTaskId === null,
+      ) &&
+      currentTaskIds.has(change.dependentTaskId) &&
+      input.proposal.affectedTaskIds.includes(change.dependentTaskId)
+    ) {
+      const modification = input.changeSet.modifiedTasks.find(
+        (candidate) => candidate.taskId === change.dependentTaskId,
+      );
+      if (
+        modification?.objective === undefined ||
+        modification.acceptanceCriteria === undefined ||
+        modification.acceptanceCriteria.length === 0
+      )
+        blockers.push(
+          `Affected Task '${change.dependentTaskId}' receives a new prerequisite but has no refreshed objective and acceptance criteria. Modify its execution specification or target a replacement Task.`,
+        );
+    }
     if (
       change.operation === "add" &&
       dependent &&
@@ -547,6 +601,12 @@ export function applyReplanChangeSet(input: {
       });
   }
   const taskIds = unique([...input.mission.taskIds, ...newTasks.map((task) => task.id)]);
+  const taskSpecification = (task: OrchestrationTask) => ({
+    taskId: task.id,
+    title: task.title,
+    objective: task.objective,
+    acceptanceCriteria: [...(task.acceptanceCriteria ?? [])],
+  });
   const initialVersion: MissionPlanVersion = {
     version: currentVersion,
     source: "initial",
@@ -557,6 +617,9 @@ export function applyReplanChangeSet(input: {
     preservedTaskIds: [...input.mission.taskIds],
     supersededTaskIds: [],
     addedTaskIds: [],
+    taskSpecifications: input.tasks
+      .filter((task) => input.mission.taskIds.includes(task.id))
+      .map(taskSpecification),
     createdAt: input.mission.activatedAt ?? input.mission.createdAt,
   };
   const previousVersions = input.mission.planVersions?.length
@@ -572,6 +635,9 @@ export function applyReplanChangeSet(input: {
     preservedTaskIds: input.proposal.impact?.unaffectedTaskIds ?? [],
     supersededTaskIds: [...changeSet.supersededTaskIds],
     addedTaskIds: newTasks.map((task) => task.id),
+    taskSpecifications: [...currentTasks, ...newTasks]
+      .filter((task) => taskIds.includes(task.id))
+      .map(taskSpecification),
     createdAt: input.appliedAt,
   };
   let contractVersions = [...(input.mission.contractVersions ?? [])];

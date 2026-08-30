@@ -13,6 +13,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 import { computeMissionPlan, validateMissionGraph } from "@t3tools/shared/missionGraph";
+import { projectTaskRisks } from "@t3tools/shared/missionRunner";
 import { validateArchitectPlan } from "@t3tools/shared/architectPlan";
 import {
   analyzeReplanImpact,
@@ -4162,6 +4163,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Task '${command.taskId}' cannot produce a durable result from incomplete review evidence.`,
         });
       }
+      const riskProjection = projectTaskRisks(task);
       const completed = {
         ...(yield* withEventBase({
           aggregateKind: "task",
@@ -4185,7 +4187,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             assumptions: handoff.assumptions,
             interfaceChanges: handoff.interfaceChanges,
             migrations: handoff.migrations,
-            knownRisks: handoff.knownRisks,
+            knownRisks: riskProjection.remainingRisks,
+            historicalRisks: riskProjection.historicalRisks,
+            resolvedRisks: riskProjection.resolvedRisks,
+            remainingRisks: riskProjection.remainingRisks,
             followUps: handoff.followUps,
             providerInstanceId: thread?.modelSelection.instanceId ?? null,
             threadId: task.threadId,

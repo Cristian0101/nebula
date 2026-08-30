@@ -745,7 +745,14 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
             supersedesTaskId: null,
           },
         ],
-        modifiedTasks: [],
+        modifiedTasks: [
+          {
+            taskId: taskB,
+            objective:
+              "Implement the notification Service using the approved Registry foundation and canonical handoff.",
+            acceptanceCriteria: ["Service consumes the current Registry contract"],
+          },
+        ],
         supersededTaskIds: [],
         dependencyChanges: [
           {
@@ -788,6 +795,7 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
           model: "test",
         },
         architectContextFingerprint: "bounded-context-fingerprint",
+        architectPlanProposalId: proposalId,
         architectReportedPreservedTaskIds: [taskA, taskC],
         architectReportedAffectedTaskIds: [taskB],
         architectRisks: [
@@ -801,11 +809,18 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
       expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
         status: "awaiting_approval",
         validation: { status: "valid", blockers: [] },
+        architectPlanProposalId: proposalId,
+        architectModelSelection: { instanceId: "codex", model: "test" },
+        architectContextFingerprint: "bounded-context-fingerprint",
         architectAnalysisFailure: null,
         architectRisks: [{ risk: "Registry contract may drift." }],
       });
       model = restartFromPersistedSnapshot(model);
-      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("awaiting_approval");
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
+        status: "awaiting_approval",
+        architectPlanProposalId: proposalId,
+        architectContextFingerprint: "bounded-context-fingerprint",
+      });
       expect(model.missions?.[0]?.taskIds).not.toContain(registryTask);
 
       const rejected = yield* apply(model, {
@@ -840,14 +855,42 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
       });
       expect(model.missions?.[0]).toMatchObject({ currentPlanVersion: 2 });
       expect(model.missions?.[0]?.planVersions?.map((version) => version.version)).toEqual([1, 2]);
+      expect(
+        model.missions?.[0]?.planVersions?.[0]?.taskSpecifications?.find(
+          (specification) => specification.taskId === taskB,
+        )?.objective,
+      ).toBe(`Complete ${taskB}`);
+      expect(
+        model.missions?.[0]?.planVersions?.[1]?.taskSpecifications?.find(
+          (specification) => specification.taskId === taskB,
+        )?.objective,
+      ).toBe(
+        "Implement the notification Service using the approved Registry foundation and canonical handoff.",
+      );
       expect(model.missions?.[0]?.taskIds).toContain(registryTask);
       expect(model.tasks?.find((task) => task.id === registryTask)).toMatchObject({
         status: "draft",
         replan: { planVersion: 2, state: "current" },
       });
+      expect(model.tasks?.find((task) => task.id === taskB)).toMatchObject({
+        objective:
+          "Implement the notification Service using the approved Registry foundation and canonical handoff.",
+        acceptanceCriteria: ["Service consumes the current Registry contract"],
+        replan: { planVersion: 2, state: "current" },
+      });
       expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("applied");
       model = restartFromPersistedSnapshot(model);
       expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("applied");
+      expect(
+        model.missions?.[0]?.planVersions?.map(
+          (version) =>
+            version.taskSpecifications?.find((specification) => specification.taskId === taskB)
+              ?.objective,
+        ),
+      ).toEqual([
+        `Complete ${taskB}`,
+        "Implement the notification Service using the approved Registry foundation and canonical handoff.",
+      ]);
 
       const duplicate = yield* Effect.flip(
         decideOrchestrationCommand({

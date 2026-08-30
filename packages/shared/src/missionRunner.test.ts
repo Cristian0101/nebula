@@ -21,6 +21,7 @@ import {
   missionIntegrationOverlapPaths,
   missionRunCompletionBlockers,
   planMissionRunScheduling,
+  projectTaskRisks,
   reconcileMissionRisks,
   resolveMissionCheckpointState,
   summarizeMissionReviewCoverage,
@@ -459,6 +460,93 @@ describe("supervised Mission scheduler", () => {
     expect(context.text.length).toBeLessThanOrEqual(16_000);
     expect(context.text).toContain("excludes provider transcripts, hidden reasoning, credentials");
   });
+
+  it("injects the current Plan-v2 objective and canonical dependency handoff, not obsolete Plan-v1 intent", () => {
+    const registryId = taskId("REGISTRY");
+    const oldServiceId = taskId("SERVICE_V1");
+    const serviceId = taskId("SERVICE_V2");
+    const snapshotId = TaskReviewSnapshotId.make("registry-current");
+    const risk = "Missing required test evidence for the Registry contract.";
+    const registry = {
+      ...task("REGISTRY", "completed"),
+      reviewSnapshot: {
+        id: snapshotId,
+        status: "current",
+        branchHead: "registry-artifact-sha",
+      },
+      handoff: {
+        summary: "Registry foundation exports getPreference and setPreference.",
+        interfaceChanges: ["src/registry.ts exports createRegistry"],
+        testsRun: [{ command: "npm test", result: "3 passed", evidence: "observed" }],
+        assumptions: ["Keys are normalized."],
+        knownRisks: [risk],
+        historicalRisks: [risk],
+      },
+      qualityGateRuns: [{ snapshotId, required: true, status: "passed" }],
+      reviews: [
+        {
+          snapshotId,
+          status: "completed",
+          diversity: "cross-provider",
+          verdict: "approve",
+          summary: "Antigravity approved the current Registry snapshot.",
+        },
+      ],
+      result: {
+        summary: "Registry foundation exports getPreference and setPreference.",
+        snapshotId,
+        branch: "nebula/registry",
+        files: [{ path: "src/registry.ts" }],
+        interfaceChanges: ["src/registry.ts exports createRegistry"],
+        testsRun: [{ command: "npm test", result: "3 passed", evidence: "observed" }],
+        assumptions: ["Keys are normalized."],
+        knownRisks: [],
+        historicalRisks: [risk],
+        resolvedRisks: [risk],
+      },
+    } as unknown as OrchestrationTask;
+    const oldService = {
+      ...task("SERVICE_V1", "cancelled"),
+      objective: "Inspect the missing Registry and request bounded replan.",
+      replan: { state: "superseded" },
+    } as unknown as OrchestrationTask;
+    const service = {
+      ...task("SERVICE_V2"),
+      objective:
+        "Implement the notification Service using the approved Registry foundation and canonical handoff.",
+      acceptanceCriteria: ["Service persists and reads notification preferences"],
+      replan: { planVersion: 2, state: "current" },
+    } as unknown as OrchestrationTask;
+    const replannedMission = {
+      ...mission,
+      taskIds: [oldServiceId, registryId, serviceId],
+      dependencies: [
+        {
+          missionId,
+          prerequisiteTaskId: registryId,
+          dependentTaskId: serviceId,
+          createdAt: now,
+        },
+      ],
+      currentPlanVersion: 2,
+    };
+
+    const context = buildTaskContextPackage({
+      mission: replannedMission,
+      task: service,
+      tasks: [oldService, registry, service],
+      project,
+    });
+
+    expect(context.sourceTaskIds).toEqual([registryId]);
+    expect(context.text).toContain("Current Plan: v2");
+    expect(context.text).toContain("Implement the notification Service");
+    expect(context.text).toContain("Registry foundation exports getPreference");
+    expect(context.text).toContain("npm test: 3 passed (observed)");
+    expect(context.text).toContain("registry-artifact-sha");
+    expect(context.text).toContain(`Resolved risks:\n- ${risk}`);
+    expect(context.text).not.toContain("Inspect the missing Registry and request bounded replan");
+  });
 });
 
 describe("Swarm Alpha evidence", () => {
@@ -731,6 +819,67 @@ describe("Swarm Alpha evidence", () => {
     expect(report.resolvedRisks).toEqual(["Integration export may be missing"]);
     expect(report.remainingRisks).toEqual(["Migration requires production observation"]);
     expect(report.knownRisks).toEqual(report.historicalRisks);
+  });
+
+  it("preserves a missing-test warning historically while canonical quality and cross-provider review resolve it", () => {
+    const risk = "Missing required test evidence for the Registry contract.";
+    const snapshotId = TaskReviewSnapshotId.make("registry-remediated");
+    const registry = {
+      ...completed("REGISTRY", "src/registry.ts"),
+      reviewSnapshot: { id: snapshotId, status: "current" },
+      handoff: { knownRisks: [risk], historicalRisks: [risk] },
+      qualityGateRuns: [{ snapshotId, required: true, status: "passed" }],
+      reviews: [
+        {
+          snapshotId,
+          status: "completed",
+          diversity: "cross-provider",
+          verdict: "approve",
+        },
+      ],
+    } as unknown as OrchestrationTask;
+
+    expect(projectTaskRisks(registry)).toEqual({
+      historicalRisks: [risk],
+      resolvedRisks: [risk],
+      remainingRisks: [],
+    });
+    const report = buildMissionFinalReport({
+      mission: { ...mission, taskIds: [registry.id] },
+      run,
+      tasks: [registry],
+      integrationBranch: "nebula/integration/registry-risk",
+      finalValidation: "ready",
+      generatedAt: "2026-08-23T12:10:00.000Z",
+    });
+    expect(report.historicalRisks).toEqual([risk]);
+    expect(report.resolvedRisks).toEqual([risk]);
+    expect(report.remainingRisks).toEqual([]);
+  });
+
+  it("retains superseded Plan-v1 Task risks in adaptive Mission history", () => {
+    const historicalRisk = "The assumed Registry does not exist in src/registry.ts.";
+    const planV1Service = {
+      ...completed("SERVICE_V1", "src/service.ts"),
+      replan: { state: "superseded" },
+      result: {
+        ...completed("SERVICE_V1", "src/service.ts").result!,
+        knownRisks: [historicalRisk],
+      },
+    } as unknown as OrchestrationTask;
+    const planV2Service = completed("SERVICE_V2", "src/service.ts");
+    const report = buildMissionFinalReport({
+      mission: { ...mission, taskIds: [planV1Service.id, planV2Service.id] },
+      run,
+      tasks: [planV1Service, planV2Service],
+      integrationBranch: "nebula/integration/adaptive-history",
+      finalValidation: "ready",
+      generatedAt: "2026-08-23T12:10:00.000Z",
+    });
+
+    expect(report.taskIds).toEqual([planV2Service.id]);
+    expect(report.historicalRisks).toEqual([historicalRisk]);
+    expect(report.remainingRisks).toEqual([historicalRisk]);
   });
 
   it("keeps a Task risk remaining when later evidence does not explicitly resolve it", () => {
