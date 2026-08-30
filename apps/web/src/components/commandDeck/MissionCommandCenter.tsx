@@ -1,11 +1,16 @@
 import type {
   CoordinationRequest,
   Mission,
+  MissionActivity,
   MissionRun,
   OrchestrationTask,
+  ReplanChangeSet,
+  ReplanEvidence,
   ReplanProposal,
-  TaskId,
+  ReplanScope,
+  ReplanTrigger,
 } from "@t3tools/contracts";
+import { TaskId } from "@t3tools/contracts";
 import type { MissionPlan } from "@t3tools/shared/missionGraph";
 import {
   ActivityIcon,
@@ -17,8 +22,11 @@ import {
 } from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
 
+import { randomUUID } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
 import {
   filterMissionTimeline,
   missionAttentionItems,
@@ -29,6 +37,7 @@ import {
 
 const timelineCategories = [
   "all",
+  "replans",
   "tasks",
   "providers",
   "ownership",
@@ -39,6 +48,376 @@ const timelineCategories = [
 ] as const satisfies ReadonlyArray<MissionTimelineCategory>;
 
 const label = (value: string) => value.replaceAll("_", " ");
+
+function ReplanRequestForm({
+  tasks,
+  onRequest,
+}: {
+  readonly tasks: ReadonlyArray<OrchestrationTask>;
+  readonly onRequest: (input: {
+    sourceTaskId: TaskId | null;
+    trigger: ReplanTrigger;
+    scope: ReplanScope;
+    reason: string;
+    evidence: ReadonlyArray<ReplanEvidence>;
+  }) => void;
+}) {
+  const [sourceTaskId, setSourceTaskId] = useState<TaskId | "">(tasks[0]?.id ?? "");
+  const [scope, setScope] = useState<ReplanScope>("task_repair");
+  const [reason, setReason] = useState("");
+  const [expected, setExpected] = useState("");
+  const [observed, setObserved] = useState("");
+  const ready = reason.trim().length > 0 && observed.trim().length > 0;
+  return (
+    <details className="rounded-lg border border-black/[0.08] p-3">
+      <summary className="cursor-pointer text-sm font-medium">Request a bounded replan</summary>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Record a changed requirement or invalid assumption. The current Plan remains authoritative
+        until a validated proposal is explicitly approved and applied.
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <label className="grid gap-1 text-xs">
+          Source Task
+          <select
+            className="h-8 rounded-md border border-black/[0.08] bg-background px-2"
+            value={sourceTaskId}
+            onChange={(event) => setSourceTaskId(event.target.value as TaskId | "")}
+          >
+            <option value="">Mission objective</option>
+            {tasks
+              .filter((task) => task.replan?.state !== "superseded")
+              .map((task) => (
+                <option key={task.id} value={task.id}>
+                  {task.title}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs">
+          Smallest safe scope
+          <select
+            className="h-8 rounded-md border border-black/[0.08] bg-background px-2"
+            value={scope}
+            onChange={(event) => setScope(event.target.value as ReplanScope)}
+          >
+            <option value="task_repair">Task</option>
+            <option value="mission_subgraph">Downstream subgraph</option>
+            <option value="full_mission">Mission</option>
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs sm:col-span-2">
+          Changed requirement or reason
+          <Textarea
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Use the existing SQLite repository instead of local JSON."
+          />
+        </label>
+        <label className="grid gap-1 text-xs">
+          Previously expected
+          <Input
+            value={expected}
+            onChange={(event) => setExpected(event.target.value)}
+            placeholder="An existing preference registry"
+          />
+        </label>
+        <label className="grid gap-1 text-xs">
+          Observed now
+          <Input
+            value={observed}
+            onChange={(event) => setObserved(event.target.value)}
+            placeholder="The registry does not exist"
+          />
+        </label>
+      </div>
+      <Button
+        className="mt-3"
+        size="xs"
+        disabled={!ready}
+        onClick={() => {
+          if (!ready) return;
+          onRequest({
+            sourceTaskId: sourceTaskId || null,
+            trigger: "user_requirement_changed",
+            scope,
+            reason: reason.trim(),
+            evidence: [
+              {
+                kind: "user_decision",
+                summary: reason.trim(),
+                expected: expected.trim() || null,
+                observed: observed.trim(),
+                source: "Mission Command Center decision",
+              },
+            ],
+          });
+          setReason("");
+          setExpected("");
+          setObserved("");
+        }}
+      >
+        Record Replan Request
+      </Button>
+    </details>
+  );
+}
+
+function ReplanProposalCard({
+  proposal,
+  tasks,
+  planVersions,
+  onPropose,
+  onResolve,
+  onApply,
+}: {
+  readonly proposal: ReplanProposal;
+  readonly tasks: ReadonlyArray<OrchestrationTask>;
+  readonly planVersions: Mission["planVersions"];
+  readonly onPropose: (proposal: ReplanProposal, changeSet: ReplanChangeSet) => void;
+  readonly onResolve: (
+    proposal: ReplanProposal,
+    resolution: "approved" | "rejected" | "cancelled",
+  ) => void;
+  readonly onApply: (proposal: ReplanProposal) => void;
+}) {
+  const sourceTask = tasks.find((task) => task.id === proposal.sourceTaskId) ?? null;
+  const previousTaskSpecification = (taskId: TaskId) =>
+    planVersions
+      ?.find((version) => version.version === (proposal.currentPlanVersion ?? 1))
+      ?.taskSpecifications?.find((task) => task.taskId === taskId);
+  const [title, setTitle] = useState("Registry foundation");
+  const [objective, setObjective] = useState("");
+  const [ownership, setOwnership] = useState("");
+  const [taskId] = useState(() => TaskId.make(`replan-task:${randomUUID()}`));
+  const canPrepare =
+    proposal.sourceTaskId !== null &&
+    title.trim().length > 0 &&
+    objective.trim().length > 0 &&
+    ownership.trim().length > 0;
+  const canEdit = proposal.status === "analysis_failed";
+  return (
+    <article className="rounded-md border border-black/[0.08] bg-background/75 p-3 text-xs">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="font-medium">
+            Proposed Plan v{proposal.proposedPlanVersion ?? 2} · {label(proposal.scope)}
+          </p>
+          <p className="mt-1 text-muted-foreground">{proposal.summary}</p>
+        </div>
+        <Badge
+          size="sm"
+          variant={
+            proposal.status === "applied"
+              ? "success"
+              : proposal.status === "rejected"
+                ? "outline"
+                : "warning"
+          }
+        >
+          {label(proposal.status)}
+        </Badge>
+      </div>
+      {proposal.architectModelSelection ? (
+        <p className="mt-2 text-muted-foreground">
+          Architect · {proposal.architectModelSelection.instanceId} ·{" "}
+          {proposal.architectModelSelection.model}
+        </p>
+      ) : null}
+      {proposal.status === "requested" || proposal.status === "analyzing" ? (
+        <p className="mt-2 rounded-md bg-info/10 p-2 text-info">
+          Architect is analyzing bounded canonical Mission evidence. No Task graph mutation has
+          occurred.
+        </p>
+      ) : null}
+      {(proposal.evidence ?? []).map((item) => (
+        <div
+          key={`${item.kind}:${item.source}:${item.summary}:${item.observed}`}
+          className="mt-2 rounded-md bg-muted/35 p-2"
+        >
+          <p className="font-medium">{item.summary}</p>
+          {item.expected ? <p className="mt-1">Expected: {item.expected}</p> : null}
+          <p className="mt-1">Observed: {item.observed}</p>
+          <p className="mt-1 text-muted-foreground">Evidence: {item.source}</p>
+        </div>
+      ))}
+      {proposal.impact ? (
+        <dl className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <dt className="text-muted-foreground">Affected</dt>
+            <dd>{proposal.impact.affectedTaskIds.length}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Downstream</dt>
+            <dd>{proposal.impact.downstreamTaskIds.length}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Preserved</dt>
+            <dd>{proposal.impact.unaffectedTaskIds.length}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Reviews invalidated</dt>
+            <dd>{proposal.impact.reviewsInvalidatedTaskIds.length}</dd>
+          </div>
+        </dl>
+      ) : null}
+      {proposal.changeSet ? (
+        <div className="mt-2 grid gap-1 rounded-md border border-black/[0.08] p-2">
+          {proposal.changeSet.newTasks.map((task) => {
+            const superseded = tasks.find((item) => item.id === task.supersedesTaskId);
+            const previous = task.supersedesTaskId
+              ? previousTaskSpecification(task.supersedesTaskId)
+              : undefined;
+            return (
+              <div key={task.taskId} className="rounded-md bg-muted/30 p-2">
+                <p className="font-medium">
+                  {superseded ? "Replacement" : "Added"} · {task.title}
+                </p>
+                {superseded ? (
+                  <p className="mt-1 text-muted-foreground">
+                    Plan v{proposal.currentPlanVersion ?? 1} objective ·{" "}
+                    {previous?.objective ?? superseded.objective}
+                  </p>
+                ) : null}
+                <p className="mt-1">
+                  Plan v{proposal.proposedPlanVersion ?? 2} objective · {task.objective}
+                </p>
+              </div>
+            );
+          })}
+          {proposal.changeSet.modifiedTasks.map((task) => {
+            const current = tasks.find((item) => item.id === task.taskId);
+            const previous = previousTaskSpecification(task.taskId);
+            return (
+              <div key={task.taskId} className="rounded-md bg-muted/30 p-2">
+                <p className="font-medium">Modified · {current?.title ?? task.taskId}</p>
+                {task.objective ? (
+                  <>
+                    <p className="mt-1 text-muted-foreground">
+                      Previous objective ·{" "}
+                      {previous?.objective ?? current?.objective ?? "Not retained"}
+                    </p>
+                    <p className="mt-1">Current objective · {task.objective}</p>
+                  </>
+                ) : null}
+              </div>
+            );
+          })}
+          {proposal.changeSet.supersededTaskIds.map((taskId) => (
+            <p key={taskId}>
+              Superseded · {tasks.find((item) => item.id === taskId)?.title ?? taskId}
+            </p>
+          ))}
+          {proposal.changeSet.dependencyChanges.map((change) => (
+            <p key={`${change.operation}:${change.prerequisiteTaskId}:${change.dependentTaskId}`}>
+              Dependency {change.operation} · {change.prerequisiteTaskId} → {change.dependentTaskId}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {proposal.validation ? (
+        <div className="mt-2 rounded-md bg-muted/35 p-2">
+          <p className="font-medium">Validation {proposal.validation.status}</p>
+          {proposal.validation.blockers.map((blocker) => (
+            <p key={blocker} className="mt-1 text-warning">
+              {blocker}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {(proposal.architectRisks ?? []).length > 0 ? (
+        <div className="mt-2 rounded-md bg-muted/35 p-2">
+          <p className="font-medium">Architect risks</p>
+          {(proposal.architectRisks ?? []).map((risk) => (
+            <p key={`${risk.risk}:${risk.mitigation ?? ""}`} className="mt-1">
+              {risk.risk}
+              {risk.mitigation ? ` · ${risk.mitigation}` : ""}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {canEdit ? (
+        <details className="mt-2" open>
+          <summary className="cursor-pointer font-medium">Prepare smallest fix</summary>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <label className="grid gap-1">
+              New Task title
+              <Input value={title} onChange={(event) => setTitle(event.target.value)} />
+            </label>
+            <label className="grid gap-1">
+              Write ownership
+              <Input
+                value={ownership}
+                onChange={(event) => setOwnership(event.target.value)}
+                placeholder="src/preferences/registry/**"
+              />
+            </label>
+            <label className="grid gap-1 sm:col-span-2">
+              Objective
+              <Textarea
+                value={objective}
+                onChange={(event) => setObjective(event.target.value)}
+                placeholder="Create the missing foundation required by the affected Task."
+              />
+            </label>
+          </div>
+          <Button
+            className="mt-2"
+            size="xs"
+            disabled={!canPrepare}
+            onClick={() => {
+              if (!canPrepare || proposal.sourceTaskId === null) return;
+              onPropose(proposal, {
+                newTasks: [
+                  {
+                    taskId,
+                    title: title.trim(),
+                    objective: objective.trim(),
+                    modelSelection: sourceTask?.modelSelection ?? null,
+                    acceptanceCriteria: [objective.trim()],
+                    ownership: [
+                      { pattern: ownership.trim(), access: "write", reason: proposal.summary },
+                    ],
+                    requiredResourceIds: [],
+                    supersedesTaskId: null,
+                  },
+                ],
+                modifiedTasks: [],
+                supersededTaskIds: [],
+                dependencyChanges: [
+                  {
+                    operation: "add",
+                    prerequisiteTaskId: taskId,
+                    dependentTaskId: proposal.sourceTaskId,
+                  },
+                ],
+                contractChanges: [],
+              });
+            }}
+          >
+            Validate Proposed Plan
+          </Button>
+        </details>
+      ) : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {proposal.status === "awaiting_approval" && proposal.validation?.status === "valid" ? (
+          <Button size="xs" onClick={() => onResolve(proposal, "approved")}>
+            Approve Plan v{proposal.proposedPlanVersion ?? 2}
+          </Button>
+        ) : null}
+        {proposal.status === "approved" ? (
+          <Button size="xs" onClick={() => onApply(proposal)}>
+            Apply approved Plan
+          </Button>
+        ) : null}
+        {!["applied", "rejected", "cancelled"].includes(proposal.status) ? (
+          <Button size="xs" variant="outline" onClick={() => onResolve(proposal, "rejected")}>
+            Reject
+          </Button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
 
 export function MissionCommandCenter({
   mission,
@@ -51,7 +430,11 @@ export function MissionCommandCenter({
   onOpenIntegration,
   onOpenTerminalCenter,
   onResolveCoordinationRequest,
+  onRequestReplan,
+  onProposeReplan,
   onResolveReplan,
+  onApplyReplan,
+  onResolveProviderSubstitution,
 }: {
   readonly mission: Mission;
   readonly run: MissionRun | null;
@@ -67,9 +450,22 @@ export function MissionCommandCenter({
     resolution: "approved" | "denied" | "answered" | "cancelled",
     answer?: string | null,
   ) => void;
+  readonly onRequestReplan: (input: {
+    sourceTaskId: TaskId | null;
+    trigger: ReplanTrigger;
+    scope: ReplanScope;
+    reason: string;
+    evidence: ReadonlyArray<ReplanEvidence>;
+  }) => void;
+  readonly onProposeReplan: (proposal: ReplanProposal, changeSet: ReplanChangeSet) => void;
   readonly onResolveReplan: (
     proposal: ReplanProposal,
     resolution: "approved" | "rejected" | "cancelled",
+  ) => void;
+  readonly onApplyReplan: (proposal: ReplanProposal) => void;
+  readonly onResolveProviderSubstitution: (
+    taskId: TaskId,
+    resolution: "approved" | "rejected",
   ) => void;
 }) {
   const [timelineCategory, setTimelineCategory] = useState<MissionTimelineCategory>("all");
@@ -81,13 +477,24 @@ export function MissionCommandCenter({
   );
   const attention = useMemo(() => missionAttentionItems({ plan, run, tasks }), [plan, run, tasks]);
   const recovery = useMemo(() => missionRecoverySummary({ plan, run }), [plan, run]);
-  const timeline = useMemo(
-    () =>
-      filterMissionTimeline(mission.activities, timelineCategory, deferredSearch)
-        .toReversed()
-        .slice(0, 250),
-    [deferredSearch, mission.activities, timelineCategory],
-  );
+  const timeline = useMemo(() => {
+    const decisions: MissionActivity[] = (run?.decisions ?? []).map((decision) => ({
+      id: decision.id,
+      type: `mission.decision.${decision.kind}`,
+      summary: decision.reason,
+      taskId: decision.taskId,
+      occurredAt: decision.occurredAt,
+    }));
+    return filterMissionTimeline(
+      [...mission.activities, ...decisions].toSorted((left, right) =>
+        left.occurredAt.localeCompare(right.occurredAt),
+      ),
+      timelineCategory,
+      deferredSearch,
+    )
+      .toReversed()
+      .slice(0, 250);
+  }, [deferredSearch, mission.activities, run?.decisions, timelineCategory]);
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task] as const)), [tasks]);
   const integrationBranch = plan.integration?.branch ?? run?.finalReport?.integrationBranch ?? null;
   const elapsedSeconds = run
@@ -117,6 +524,12 @@ export function MissionCommandCenter({
                 }
               >
                 Run {run?.status ?? "not started"}
+              </Badge>
+              <Badge variant="outline">
+                Plan v{mission.currentPlanVersion ?? 1} ·{" "}
+                {run?.replanProposals?.filter((proposal) => proposal.status === "applied").length ??
+                  0}{" "}
+                replans
               </Badge>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -264,6 +677,30 @@ export function MissionCommandCenter({
                     </li>
                   ))}
                 </ol>
+                {state.providerEscalation ? (
+                  <div className="mt-2 rounded-md border border-warning/30 bg-warning/10 p-2">
+                    <p className="font-medium">Provider substitution recommended</p>
+                    <p className="mt-1 text-muted-foreground">{state.providerEscalation.reason}</p>
+                    <Button
+                      className="mt-2"
+                      size="xs"
+                      variant="outline"
+                      onClick={() => onResolveProviderSubstitution(state.taskId, "approved")}
+                    >
+                      Replace Agent
+                    </Button>
+                    <Button
+                      className="mt-2"
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => onResolveProviderSubstitution(state.taskId, "rejected")}
+                    >
+                      {state.attempts.at(-1)?.status === "interrupted"
+                        ? "Retry with current provider"
+                        : "Keep current provider"}
+                    </Button>
+                  </div>
+                ) : null}
                 <Button size="xs" variant="ghost" onClick={() => onOpenTask(state.taskId)}>
                   Open Agent Thread
                 </Button>
@@ -317,30 +754,67 @@ export function MissionCommandCenter({
         </section>
       ) : null}
 
-      {(run?.replanProposals ?? []).some((proposal) => proposal.status === "pending") ? (
-        <section className="rounded-lg border border-warning/30 p-3">
-          <h3 className="text-sm font-medium">Bounded replan proposals</h3>
-          <div className="mt-2 space-y-2">
-            {(run?.replanProposals ?? [])
-              .filter((proposal) => proposal.status === "pending")
-              .map((proposal) => (
-                <div key={proposal.id} className="rounded-md bg-muted/30 p-2 text-xs">
-                  <p className="font-medium">{label(proposal.scope)}</p>
-                  <p className="mt-1 text-muted-foreground">{proposal.summary}</p>
-                  <div className="mt-2 flex gap-2">
-                    <Button size="xs" onClick={() => onResolveReplan(proposal, "approved")}>
-                      Approve proposal
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onClick={() => onResolveReplan(proposal, "rejected")}
-                    >
-                      Reject
-                    </Button>
+      {run && !["completed", "stopped", "failed"].includes(run.status) ? (
+        <ReplanRequestForm tasks={tasks} onRequest={onRequestReplan} />
+      ) : null}
+
+      {(run?.replanProposals ?? []).length > 0 ? (
+        <section
+          className="rounded-lg border border-warning/30 p-3"
+          aria-label="Plan history and replans"
+        >
+          <h3 className="text-sm font-medium">Plan history and bounded replans</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Compare the current Plan with proposed or applied changes. Runtime mutation occurs only
+            after validation, explicit approval, and a separate apply action.
+          </p>
+          {(mission.planVersions ?? []).length > 0 ? (
+            <div className="mt-2 grid gap-2 lg:grid-cols-2" aria-label="Mission Plan versions">
+              {(mission.planVersions ?? []).map((version) => (
+                <article
+                  key={version.version}
+                  className="rounded-md border border-black/[0.08] bg-background/70 p-2 text-xs"
+                >
+                  <p className="font-medium">
+                    Plan v{version.version} · {version.source === "initial" ? "Initial" : "Replan"}
+                  </p>
+                  <div className="mt-1 space-y-1 text-muted-foreground">
+                    {version.taskIds
+                      .filter((taskId) => !version.supersededTaskIds.includes(taskId))
+                      .map((taskId) => {
+                        const task =
+                          version.taskSpecifications?.find(
+                            (specification) => specification.taskId === taskId,
+                          ) ?? taskById.get(taskId);
+                        return task ? (
+                          <p key={taskId}>
+                            {task.title} · {task.objective}
+                          </p>
+                        ) : null;
+                      })}
                   </div>
-                </div>
+                  {version.addedTaskIds.length > 0 ? (
+                    <p className="mt-1">Added · {version.addedTaskIds.length}</p>
+                  ) : null}
+                  {version.supersededTaskIds.length > 0 ? (
+                    <p className="mt-1">Superseded · {version.supersededTaskIds.length}</p>
+                  ) : null}
+                </article>
               ))}
+            </div>
+          ) : null}
+          <div className="mt-2 space-y-2">
+            {(run?.replanProposals ?? []).map((proposal) => (
+              <ReplanProposalCard
+                key={proposal.id}
+                proposal={proposal}
+                tasks={tasks}
+                planVersions={mission.planVersions}
+                onPropose={onProposeReplan}
+                onResolve={onResolveReplan}
+                onApply={onApplyReplan}
+              />
+            ))}
           </div>
         </section>
       ) : null}
@@ -356,8 +830,9 @@ export function MissionCommandCenter({
             <div>
               <dt className="text-muted-foreground">Plan and Tasks</dt>
               <dd>
-                v{run.finalReport.planVersion ?? 1} · {run.finalReport.completedTaskIds.length} /{" "}
-                {run.finalReport.taskIds.length} complete
+                v{run.finalReport.planVersion ?? 1} of {run.finalReport.planVersionCount ?? 1} ·{" "}
+                {run.finalReport.completedTaskIds.length} / {run.finalReport.taskIds.length}{" "}
+                complete
               </dd>
             </div>
             <div>
@@ -374,6 +849,22 @@ export function MissionCommandCenter({
                 {run.finalReport.attemptCount ?? 0} attempts · {run.finalReport.retryCount} retries
                 · {run.finalReport.providerReplacementCount} replacements
               </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Adaptation</dt>
+              <dd>
+                {run.finalReport.appliedReplanCount ?? 0} replans ·{" "}
+                {run.finalReport.dynamicTaskCount ?? 0} new Tasks ·{" "}
+                {run.finalReport.preservedTaskCount ?? 0} preserved ·{" "}
+                {run.finalReport.modifiedTaskCount ?? 0} modified ·{" "}
+                {run.finalReport.supersededTaskCount ?? 0} superseded
+              </dd>
+              {(run.finalReport.replanTriggers ?? []).length > 0 ? (
+                <dd className="text-muted-foreground">
+                  {(run.finalReport.replanTriggers ?? []).map(label).join(", ")} ·{" "}
+                  {(run.finalReport.replanScopes ?? []).map(label).join(", ")}
+                </dd>
+              ) : null}
             </div>
             <div>
               <dt className="text-muted-foreground">Reviews</dt>

@@ -3,9 +3,12 @@ import type {
   FailureClass,
   ProviderInstanceId,
   ReplanScope,
+  ReplanEvidence,
+  ReplanTrigger,
   RoutingDecision,
   RoutingProfile,
   TaskId,
+  TaskRecoveryState,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
@@ -82,6 +85,70 @@ export function recoveryAction(input: {
   // Retaining them as explicit attention prevents subscription-burning loops and
   // keeps the canonical Task/worktree available for the Mission operator.
   return "attention";
+}
+
+const providerEscalationFailureClasses = new Set<FailureClass>([
+  "provider_execution_error",
+  "planning_architecture_blocker",
+  "provider_capability_mismatch",
+  "execution_loop",
+]);
+
+export function hasRepeatedExecutionFailureLoop(
+  state: Pick<TaskRecoveryState, "attempts">,
+  providerInstanceId: ProviderInstanceId,
+): boolean {
+  const failures = state.attempts.filter(
+    (attempt) =>
+      attempt.providerInstanceId === providerInstanceId &&
+      attempt.status === "failed" &&
+      attempt.failureClass !== null &&
+      attempt.summary.trim().length > 0,
+  );
+  const latest = failures.at(-1);
+  const previous = failures.at(-2);
+  return (
+    latest !== undefined &&
+    previous !== undefined &&
+    latest.failureClass === previous.failureClass &&
+    latest.summary.trim() === previous.summary.trim()
+  );
+}
+
+export function recommendProviderEscalation(input: {
+  readonly state: TaskRecoveryState;
+  readonly failedProviderInstanceId: ProviderInstanceId;
+  readonly candidates: ReadonlyArray<RoutingCandidate>;
+  readonly failureClass: FailureClass;
+  readonly createdAt: string;
+}): NonNullable<TaskRecoveryState["providerEscalation"]> | null {
+  if (!providerEscalationFailureClasses.has(input.failureClass)) return null;
+  const sameProviderFailures = input.state.attempts.filter(
+    (attempt) =>
+      attempt.providerInstanceId === input.failedProviderInstanceId &&
+      attempt.status === "failed" &&
+      attempt.failureClass !== null &&
+      providerEscalationFailureClasses.has(attempt.failureClass),
+  ).length;
+  if (input.failureClass !== "provider_capability_mismatch" && sameProviderFailures < 2)
+    return null;
+  const alternative = input.candidates
+    .filter(
+      (candidate) => candidate.ready && candidate.instanceId !== input.failedProviderInstanceId,
+    )
+    .toSorted((left, right) => left.instanceId.localeCompare(right.instanceId))[0];
+  const possibleLoop = hasRepeatedExecutionFailureLoop(input.state, input.failedProviderInstanceId);
+  return {
+    failedProviderInstanceId: input.failedProviderInstanceId,
+    recommendedProviderInstanceId: alternative?.instanceId ?? null,
+    reason:
+      input.failureClass === "provider_capability_mismatch"
+        ? `The current provider cannot satisfy a required Task capability. ${alternative ? `Provider '${alternative.instanceId}' is available as an alternative.` : "No alternative provider is currently ready."}`
+        : `This Task has ${sameProviderFailures} non-transient failures with provider '${input.failedProviderInstanceId}'.${possibleLoop ? " Repeated identical failure evidence indicates a possible execution loop." : ""} ${alternative ? `Provider '${alternative.instanceId}' is available as an alternative.` : "No alternative provider is currently ready."}`,
+    status: "recommended",
+    createdAt: input.createdAt,
+    resolvedAt: null,
+  };
 }
 
 export interface RoutingCandidate {
@@ -208,6 +275,36 @@ const CoordinationRequestDraft = Schema.Struct({
   scope: Schema.optional(
     Schema.Literals(["task_repair", "task_split", "mission_subgraph", "full_mission"]),
   ),
+  trigger: Schema.optional(
+    Schema.Literals([
+      "assumption_invalidated",
+      "dependency_contract_changed",
+      "ownership_expansion",
+      "task_blocked_architecturally",
+      "provider_repeated_failure",
+      "integration_semantic_conflict",
+      "user_requirement_changed",
+      "new_required_work",
+    ]),
+  ),
+  evidence: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        kind: Schema.Literals([
+          "repository_fact",
+          "contract_diff",
+          "ownership_fact",
+          "attempt_history",
+          "integration_fact",
+          "user_decision",
+        ]),
+        summary: Schema.String,
+        expected: Schema.optional(Schema.NullOr(Schema.String)),
+        observed: Schema.String,
+        source: Schema.String,
+      }),
+    ),
+  ),
 });
 const decodeCoordinationRequestDraft = Schema.decodeUnknownSync(CoordinationRequestDraft);
 
@@ -222,6 +319,8 @@ export interface ParsedCoordinationRequest {
   readonly resource: string | null;
   readonly question: string | null;
   readonly scope: ReplanScope | null;
+  readonly trigger: ReplanTrigger | null;
+  readonly evidence: ReadonlyArray<ReplanEvidence>;
 }
 
 export function parseCoordinationRequest(text: string): ParsedCoordinationRequest | null {
@@ -260,6 +359,21 @@ export function parseCoordinationRequest(text: string): ParsedCoordinationReques
         resource: value.resource?.trim() || null,
         question: value.question?.trim() || null,
         scope: value.scope ?? null,
+        trigger: value.trigger ?? null,
+        evidence: (value.evidence ?? [])
+          .filter(
+            (item) =>
+              item.summary.trim().length > 0 &&
+              item.observed.trim().length > 0 &&
+              item.source.trim().length > 0,
+          )
+          .map((item) => ({
+            kind: item.kind,
+            summary: item.summary.trim(),
+            expected: item.expected?.trim() || null,
+            observed: item.observed.trim(),
+            source: item.source.trim(),
+          })),
       };
     } catch {
       // Provider prose is untrusted; malformed proposals cannot mutate policy.

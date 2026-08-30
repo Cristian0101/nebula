@@ -1,4 +1,5 @@
 import { IntegrationBatchId } from "@t3tools/contracts";
+import { canRetryIntegrationOperation } from "@t3tools/shared/missionRunner";
 import type {
   EnvironmentId,
   IntegrationBatch,
@@ -378,6 +379,22 @@ export function IntegrationPanel({
                 }
               >
                 Continue after resolution
+              </Button>
+            ) : null}
+            {canRetryIntegrationOperation(activeBatch) ? (
+              <Button
+                size="xs"
+                disabled={busy}
+                onClick={() =>
+                  void run("Could not retry Integration", () =>
+                    continueIntegration({
+                      environmentId,
+                      input: { projectId: project.id, batchId: activeBatch.id },
+                    }),
+                  )
+                }
+              >
+                Retry operation
               </Button>
             ) : null}
             {["preparing", "applying", "conflict", "validating"].includes(activeBatch.status) ? (

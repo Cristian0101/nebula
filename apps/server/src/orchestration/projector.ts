@@ -31,6 +31,7 @@ import {
   MissionLifecyclePayload,
   MissionIntegrationLinkedPayload,
   MissionRunPayload,
+  MissionReplanAppliedPayload,
   TaskActivatedPayload,
   TaskCancelledPayload,
   TaskCompletedPayload,
@@ -786,6 +787,37 @@ export function projectEvent(
             ...(nextBase.missionRuns ?? []).filter((run) => run.id !== payload.run.id),
             payload.run,
           ],
+        })),
+      );
+
+    case "mission.replan-applied":
+      return decodeForEvent(MissionReplanAppliedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          missions: (nextBase.missions ?? []).map((mission) =>
+            mission.id === payload.mission.id ? payload.mission : mission,
+          ),
+          missionRuns: [
+            ...(nextBase.missionRuns ?? []).filter((run) => run.id !== payload.run.id),
+            payload.run,
+          ],
+          tasks: payload.tasks,
+          projects:
+            payload.integrationBatch === null
+              ? nextBase.projects
+              : nextBase.projects.map((project) =>
+                  project.id === payload.projectId
+                    ? {
+                        ...project,
+                        integrationBatches: (project.integrationBatches ?? []).map((batch) =>
+                          batch.id === payload.integrationBatch!.id
+                            ? payload.integrationBatch!
+                            : batch,
+                        ),
+                        updatedAt: payload.integrationBatch!.updatedAt,
+                      }
+                    : project,
+                ),
         })),
       );
 

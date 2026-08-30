@@ -17,10 +17,14 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildMissionFinalReport,
   buildTaskContextPackage,
+  canRetryIntegrationOperation,
+  currentMissionRunTaskIds,
+  currentMissionRunTasks,
   deterministicMissionTaskIds,
   missionIntegrationOverlapPaths,
   missionRunCompletionBlockers,
   planMissionRunScheduling,
+  projectTaskRisks,
   reconcileMissionRisks,
   resolveMissionCheckpointState,
   summarizeMissionReviewCoverage,
@@ -243,6 +247,103 @@ describe("supervised Mission scheduler", () => {
     expect(deterministicMissionTaskIds(mission)).toEqual(["A", "B", "C", "D"]);
   });
 
+  it("keeps superseded Tasks historical while excluding them from current completion and Integration", () => {
+    const frontendId = taskId("FRONTEND");
+    const supersededServiceId = taskId("SERVICE_V1");
+    const registryId = taskId("REGISTRY");
+    const serviceId = taskId("SERVICE_V2");
+    const replannedMission = {
+      ...mission,
+      taskIds: [frontendId, supersededServiceId, registryId, serviceId],
+      dependencies: [
+        {
+          missionId,
+          prerequisiteTaskId: registryId,
+          dependentTaskId: serviceId,
+          createdAt: now,
+        },
+      ],
+      currentPlanVersion: 2,
+    };
+    const tasks = [
+      task("FRONTEND", "completed"),
+      {
+        ...task("SERVICE_V1", "cancelled"),
+        replan: {
+          planVersion: 2,
+          state: "superseded",
+          replanProposalId: "replan-1",
+          supersededByTaskId: serviceId,
+          updatedAt: now,
+        },
+      } as never,
+      {
+        ...task("REGISTRY", "completed"),
+        replan: {
+          planVersion: 2,
+          state: "current",
+          replanProposalId: "replan-1",
+          supersededByTaskId: null,
+          updatedAt: now,
+        },
+      } as never,
+      {
+        ...task("SERVICE_V2", "completed"),
+        replan: {
+          planVersion: 2,
+          state: "current",
+          replanProposalId: "replan-1",
+          supersededByTaskId: null,
+          updatedAt: now,
+        },
+      } as never,
+    ];
+
+    expect(currentMissionRunTasks(tasks).map((candidate) => candidate.id)).toEqual([
+      frontendId,
+      registryId,
+      serviceId,
+    ]);
+    expect(
+      currentMissionRunTasks(tasks).every((candidate) => candidate.status === "completed"),
+    ).toBe(true);
+    expect(currentMissionRunTaskIds(replannedMission, tasks)).toEqual([
+      frontendId,
+      registryId,
+      serviceId,
+    ]);
+  });
+
+  it("allows only preserved operation failures with unapplied artifacts to retry", () => {
+    type RetryBatch = Parameters<typeof canRetryIntegrationOperation>[0];
+    const integrationTask = (
+      status: RetryBatch["tasks"][number]["status"],
+      order: number,
+    ): RetryBatch["tasks"][number] => ({
+      taskId: `retry-task-${order}` as never,
+      taskResultId: `retry-result-${order}` as never,
+      snapshotId: `retry-snapshot-${order}` as never,
+      order,
+      status,
+      artifact: null,
+      appliedCommit: null,
+    });
+    const retryable: RetryBatch = {
+      status: "failed",
+      failureCode: "integration-operation-failed",
+      workspacePath: "/tmp/integration",
+      tasks: [integrationTask("applied", 0), integrationTask("pending", 1)],
+    };
+
+    expect(canRetryIntegrationOperation(retryable)).toBe(true);
+    expect(canRetryIntegrationOperation({ ...retryable, failureCode: "quality-gate-failed" })).toBe(
+      false,
+    );
+    expect(
+      canRetryIntegrationOperation({ ...retryable, tasks: [integrationTask("applied", 0)] }),
+    ).toBe(false);
+  });
+
   it("advances a dependency wave and respects the active writable concurrency cap", () => {
     const tasks = [task("A", "completed"), task("B"), task("C"), task("D")];
     const plan = planMissionRunScheduling({
@@ -259,6 +360,96 @@ describe("supervised Mission scheduler", () => {
         expect.objectContaining({ taskId: taskId("C"), kind: "waiting_concurrency" }),
         expect.objectContaining({ taskId: taskId("D"), kind: "waiting_dependency" }),
       ]),
+    );
+  });
+
+  it("releases a replanned downstream Task only after the new prerequisite completes", () => {
+    const registryId = taskId("REGISTRY");
+    const serviceId = taskId("SERVICE");
+    const frontendId = taskId("FRONTEND");
+    const replannedMission = {
+      ...mission,
+      taskIds: [frontendId, serviceId, registryId],
+      dependencies: [
+        {
+          missionId,
+          prerequisiteTaskId: registryId,
+          dependentTaskId: serviceId,
+          createdAt: now,
+        },
+      ],
+      currentPlanVersion: 2,
+    };
+    const frontend = task("FRONTEND", "completed");
+    const service = task("SERVICE");
+    const registry = task("REGISTRY");
+    const waiting = planMissionRunScheduling({
+      mission: replannedMission,
+      run,
+      tasks: [frontend, service, registry],
+      project,
+      providerReadyTaskIds: new Set([serviceId, registryId]),
+    });
+    expect(waiting.scheduledTaskIds).toContain(registryId);
+    expect(waiting.scheduledTaskIds).not.toContain(serviceId);
+    expect(waiting.decisions).toContainEqual(
+      expect.objectContaining({ taskId: serviceId, kind: "waiting_dependency" }),
+    );
+
+    const released = planMissionRunScheduling({
+      mission: replannedMission,
+      run: { ...run, scheduledTaskIds: [] },
+      tasks: [frontend, service, task("REGISTRY", "completed")],
+      project,
+      providerReadyTaskIds: new Set([serviceId]),
+    });
+    expect(released.scheduledTaskIds).toEqual([serviceId]);
+    expect(released.decisions).toContainEqual(
+      expect.objectContaining({ taskId: serviceId, kind: "scheduled" }),
+    );
+  });
+
+  it("releases scheduling capacity held by a superseded cancelled Task", () => {
+    const frontendId = taskId("FRONTEND");
+    const supersededServiceId = taskId("SERVICE_V1");
+    const registryId = taskId("REGISTRY");
+    const serviceId = taskId("SERVICE_V2");
+    const replannedMission = {
+      ...mission,
+      taskIds: [frontendId, supersededServiceId, registryId, serviceId],
+      dependencies: [
+        {
+          missionId,
+          prerequisiteTaskId: registryId,
+          dependentTaskId: serviceId,
+          createdAt: now,
+        },
+      ],
+      currentPlanVersion: 2,
+    };
+    const plan = planMissionRunScheduling({
+      mission: replannedMission,
+      run: {
+        ...run,
+        maxConcurrentTasks: 2,
+        scheduledTaskIds: [frontendId, supersededServiceId],
+      },
+      tasks: [
+        task("FRONTEND", "completed"),
+        task("SERVICE_V1", "cancelled"),
+        task("REGISTRY"),
+        task("SERVICE_V2"),
+      ],
+      project,
+      providerReadyTaskIds: new Set([registryId, serviceId]),
+    });
+
+    expect(plan.scheduledTaskIds).toEqual([registryId]);
+    expect(plan.decisions).toContainEqual(
+      expect.objectContaining({ taskId: registryId, kind: "scheduled" }),
+    );
+    expect(plan.decisions).toContainEqual(
+      expect.objectContaining({ taskId: serviceId, kind: "waiting_dependency" }),
     );
   });
 
@@ -412,6 +603,95 @@ describe("supervised Mission scheduler", () => {
     expect(context.text).toContain("packages/contracts/src/api.ts");
     expect(context.text.length).toBeLessThanOrEqual(16_000);
     expect(context.text).toContain("excludes provider transcripts, hidden reasoning, credentials");
+    expect(context.text).toContain('"type":"nebula_coordination_request"');
+    expect(context.text).toContain('"kind":"replan_request"');
+  });
+
+  it("injects the current Plan-v2 objective and canonical dependency handoff, not obsolete Plan-v1 intent", () => {
+    const registryId = taskId("REGISTRY");
+    const oldServiceId = taskId("SERVICE_V1");
+    const serviceId = taskId("SERVICE_V2");
+    const snapshotId = TaskReviewSnapshotId.make("registry-current");
+    const risk = "Missing required test evidence for the Registry contract.";
+    const registry = {
+      ...task("REGISTRY", "completed"),
+      reviewSnapshot: {
+        id: snapshotId,
+        status: "current",
+        branchHead: "registry-artifact-sha",
+      },
+      handoff: {
+        summary: "Registry foundation exports getPreference and setPreference.",
+        interfaceChanges: ["src/registry.ts exports createRegistry"],
+        testsRun: [{ command: "npm test", result: "3 passed", evidence: "observed" }],
+        assumptions: ["Keys are normalized."],
+        knownRisks: [risk],
+        historicalRisks: [risk],
+      },
+      qualityGateRuns: [{ snapshotId, required: true, status: "passed" }],
+      reviews: [
+        {
+          snapshotId,
+          status: "completed",
+          diversity: "cross-provider",
+          verdict: "approve",
+          summary: "Antigravity approved the current Registry snapshot.",
+        },
+      ],
+      result: {
+        summary: "Registry foundation exports getPreference and setPreference.",
+        snapshotId,
+        branch: "nebula/registry",
+        files: [{ path: "src/registry.ts" }],
+        interfaceChanges: ["src/registry.ts exports createRegistry"],
+        testsRun: [{ command: "npm test", result: "3 passed", evidence: "observed" }],
+        assumptions: ["Keys are normalized."],
+        knownRisks: [],
+        historicalRisks: [risk],
+        resolvedRisks: [risk],
+      },
+    } as unknown as OrchestrationTask;
+    const oldService = {
+      ...task("SERVICE_V1", "cancelled"),
+      objective: "Inspect the missing Registry and request bounded replan.",
+      replan: { state: "superseded" },
+    } as unknown as OrchestrationTask;
+    const service = {
+      ...task("SERVICE_V2"),
+      objective:
+        "Implement the notification Service using the approved Registry foundation and canonical handoff.",
+      acceptanceCriteria: ["Service persists and reads notification preferences"],
+      replan: { planVersion: 2, state: "current" },
+    } as unknown as OrchestrationTask;
+    const replannedMission = {
+      ...mission,
+      taskIds: [oldServiceId, registryId, serviceId],
+      dependencies: [
+        {
+          missionId,
+          prerequisiteTaskId: registryId,
+          dependentTaskId: serviceId,
+          createdAt: now,
+        },
+      ],
+      currentPlanVersion: 2,
+    };
+
+    const context = buildTaskContextPackage({
+      mission: replannedMission,
+      task: service,
+      tasks: [oldService, registry, service],
+      project,
+    });
+
+    expect(context.sourceTaskIds).toEqual([registryId]);
+    expect(context.text).toContain("Current Plan: v2");
+    expect(context.text).toContain("Implement the notification Service");
+    expect(context.text).toContain("Registry foundation exports getPreference");
+    expect(context.text).toContain("npm test: 3 passed (observed)");
+    expect(context.text).toContain("registry-artifact-sha");
+    expect(context.text).toContain(`Resolved risks:\n- ${risk}`);
+    expect(context.text).not.toContain("Inspect the missing Registry and request bounded replan");
   });
 });
 
@@ -540,6 +820,115 @@ describe("Swarm Alpha evidence", () => {
     expect(report.remainingRisks).toEqual(["Final follow-up risk"]);
   });
 
+  it("reports replans and provider replacements as distinct adaptive Mission metrics", () => {
+    const frontend = completed("A", "src/frontend.ts");
+    const registry = completed("REGISTRY", "src/registry.ts");
+    const report = buildMissionFinalReport({
+      mission: {
+        ...mission,
+        taskIds: [frontend.id, registry.id],
+        currentPlanVersion: 2,
+        planVersions: [
+          {
+            version: 1,
+            source: "initial",
+            taskIds: [frontend.id],
+            dependencies: [],
+            replanProposalId: null,
+            trigger: null,
+            preservedTaskIds: [frontend.id],
+            supersededTaskIds: [],
+            addedTaskIds: [],
+            createdAt: now,
+          },
+          {
+            version: 2,
+            source: "replan",
+            taskIds: [frontend.id, registry.id],
+            dependencies: [],
+            replanProposalId: "replan-1" as never,
+            trigger: "assumption_invalidated",
+            preservedTaskIds: [frontend.id],
+            supersededTaskIds: [],
+            addedTaskIds: [registry.id],
+            createdAt: now,
+          },
+        ],
+      },
+      run: {
+        ...run,
+        replanProposals: [
+          {
+            id: "replan-1",
+            status: "applied",
+            scope: "mission_subgraph",
+            trigger: "assumption_invalidated",
+            changeSet: {
+              newTasks: [],
+              modifiedTasks: [],
+              supersededTaskIds: [],
+              dependencyChanges: [],
+              contractChanges: [],
+            },
+          },
+        ] as never,
+        taskRecovery: [
+          {
+            taskId: registry.id,
+            transientRetries: 0,
+            remediationRounds: 0,
+            latestFailureClass: null,
+            latestFailureSignature: null,
+            attentionRequired: false,
+            updatedAt: now,
+            attempts: [
+              {
+                number: 1,
+                kind: "initial",
+                providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+                threadId: ThreadId.make("registry-1"),
+                status: "replaced",
+                failureClass: "provider_unavailable_auth",
+                summary: "Authentication unavailable.",
+                startedAt: now,
+                completedAt: now,
+              },
+              {
+                number: 2,
+                kind: "replacement",
+                providerInstanceId: ProviderInstanceId.make("codex"),
+                threadId: ThreadId.make("registry-2"),
+                status: "completed",
+                failureClass: null,
+                summary: "Replacement completed.",
+                startedAt: now,
+                completedAt: now,
+              },
+            ],
+          },
+        ],
+      },
+      tasks: [frontend, registry],
+      integrationBranch: "nebula/integration/adaptive",
+      finalValidation: "ready",
+      planVersion: 2,
+      generatedAt: "2026-08-23T12:10:00.000Z",
+    });
+
+    expect(report).toMatchObject({
+      planVersion: 2,
+      planVersionCount: 2,
+      appliedReplanCount: 1,
+      providerReplacementCount: 1,
+      providerSubstitutionCount: 1,
+      preservedTaskCount: 1,
+      dynamicTaskCount: 1,
+      modifiedTaskCount: 0,
+      replanTriggers: ["assumption_invalidated"],
+      replanScopes: ["mission_subgraph"],
+    });
+  });
+
   it("preserves historical risks while excluding explicitly resolved Integration risks", () => {
     const risky = {
       ...completed("A", "packages/shared/src/notifications.ts"),
@@ -576,6 +965,68 @@ describe("Swarm Alpha evidence", () => {
     expect(report.resolvedRisks).toEqual(["Integration export may be missing"]);
     expect(report.remainingRisks).toEqual(["Migration requires production observation"]);
     expect(report.knownRisks).toEqual(report.historicalRisks);
+  });
+
+  it("preserves a missing-test warning historically while canonical quality and cross-provider review resolve it", () => {
+    const risk = "Missing required test evidence for the Registry contract.";
+    const snapshotId = TaskReviewSnapshotId.make("registry-remediated");
+    const registry = {
+      ...completed("REGISTRY", "src/registry.ts"),
+      reviewSnapshot: { id: snapshotId, status: "current" },
+      handoff: { knownRisks: [risk], historicalRisks: [risk] },
+      qualityGateRuns: [{ snapshotId, required: true, status: "passed" }],
+      reviews: [
+        {
+          snapshotId,
+          status: "completed",
+          diversity: "cross-provider",
+          verdict: "approve",
+        },
+      ],
+    } as unknown as OrchestrationTask;
+
+    expect(projectTaskRisks(registry)).toEqual({
+      historicalRisks: [risk],
+      resolvedRisks: [risk],
+      remainingRisks: [],
+    });
+    const report = buildMissionFinalReport({
+      mission: { ...mission, taskIds: [registry.id] },
+      run,
+      tasks: [registry],
+      integrationBranch: "nebula/integration/registry-risk",
+      finalValidation: "ready",
+      generatedAt: "2026-08-23T12:10:00.000Z",
+    });
+    expect(report.historicalRisks).toEqual([risk]);
+    expect(report.resolvedRisks).toEqual([risk]);
+    expect(report.remainingRisks).toEqual([]);
+  });
+
+  it("retains superseded Plan-v1 Task risks in adaptive Mission history", () => {
+    const historicalRisk = "The assumed Registry does not exist in src/registry.ts.";
+    const planV1Service = {
+      ...completed("SERVICE_V1", "src/service.ts"),
+      replan: { state: "superseded" },
+      result: {
+        ...completed("SERVICE_V1", "src/service.ts").result!,
+        knownRisks: [historicalRisk],
+      },
+    } as unknown as OrchestrationTask;
+    const planV2Service = completed("SERVICE_V2", "src/service.ts");
+    const report = buildMissionFinalReport({
+      mission: { ...mission, taskIds: [planV1Service.id, planV2Service.id] },
+      run,
+      tasks: [planV1Service, planV2Service],
+      integrationBranch: "nebula/integration/adaptive-history",
+      finalValidation: "ready",
+      generatedAt: "2026-08-23T12:10:00.000Z",
+    });
+
+    expect(report.taskIds).toEqual([planV2Service.id]);
+    expect(report.supersededTaskCount).toBe(1);
+    expect(report.historicalRisks).toEqual([historicalRisk]);
+    expect(report.remainingRisks).toEqual([historicalRisk]);
   });
 
   it("keeps a Task risk remaining when later evidence does not explicitly resolve it", () => {
@@ -640,6 +1091,26 @@ describe("Swarm Alpha evidence", () => {
         "Integration proof is incomplete because src/notification-policy.js is missing.",
         "Builder-reported evidence: None retained.",
       ],
+    });
+  });
+
+  it("resolves superseded untracked-artifact and failed-validation risks after final evidence", () => {
+    expect(
+      reconcileMissionRisks({
+        historicalRisks: [
+          "README.md's full validation sequence does not pass in this snapshot.",
+          "src/registry.js and test/registry.test.js are untracked.",
+        ],
+        explicitResolvedRisks: new Set(),
+        integratedFiles: ["src/registry.js", "test/registry.test.js"],
+        finalEvidenceComplete: true,
+      }),
+    ).toEqual({
+      resolvedRisks: [
+        "README.md's full validation sequence does not pass in this snapshot.",
+        "src/registry.js and test/registry.test.js are untracked.",
+      ],
+      remainingRisks: [],
     });
   });
 
@@ -836,6 +1307,17 @@ describe("Swarm Alpha evidence", () => {
     expect(
       missionRunCompletionBlockers({
         mission: completionMission,
+        run: completionRun,
+        tasks: [completedTask],
+        integrationBatch: batch as never,
+      }),
+    ).toEqual([]);
+    expect(
+      missionRunCompletionBlockers({
+        mission: {
+          ...completionMission,
+          taskIds: ["superseded-task" as never, completedTask.id],
+        },
         run: completionRun,
         tasks: [completedTask],
         integrationBatch: batch as never,

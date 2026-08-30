@@ -8,6 +8,7 @@ import {
   ProviderInstanceId,
   ReplanProposalId,
   TaskId,
+  OrchestrationReadModel as OrchestrationReadModelSchema,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -16,8 +17,9 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
-import { decideOrchestrationCommand } from "./decider.ts";
+import { continuesInterruptedProviderReplacement, decideOrchestrationCommand } from "./decider.ts";
 import { createEmptyReadModel, projectEvent } from "./projector.ts";
 
 const now = "2026-08-22T12:00:00.000Z";
@@ -31,6 +33,140 @@ const taskC = TaskId.make("task-c");
 const proposalId = ArchitectPlanProposalId.make("architect-plan-1");
 const runId = MissionRunId.make("mission-run-1");
 const replanProposalId = ReplanProposalId.make("replan-proposal-1");
+const decodeOrchestrationReadModel = Schema.decodeUnknownSync(OrchestrationReadModelSchema);
+const restartFromPersistedSnapshot = (model: OrchestrationReadModel) =>
+  decodeOrchestrationReadModel(JSON.parse(JSON.stringify(model)));
+
+it("treats keeping an interrupted replacement provider as explicit continuation", () => {
+  expect(
+    continuesInterruptedProviderReplacement({
+      resolution: "rejected",
+      attempts: [
+        { kind: "initial", status: "failed" },
+        { kind: "replacement", status: "interrupted" },
+      ],
+    }),
+  ).toBe(true);
+  expect(
+    continuesInterruptedProviderReplacement({
+      resolution: "rejected",
+      attempts: [{ kind: "initial", status: "failed" }],
+    }),
+  ).toBe(false);
+});
+
+it.effect("allows a completed Run to refresh only its persisted final report", () =>
+  Effect.gen(function* () {
+    let model = yield* seed;
+    model = {
+      ...model,
+      projects: model.projects.map((project) =>
+        project.id === projectId ? { ...project, architectPlans: [approvedPlan] } : project,
+      ),
+    };
+    model = yield* apply(model, {
+      ...createMission(missionId, proposalId),
+      taskIds: [taskA],
+    });
+    model = yield* apply(model, {
+      type: "mission.activate",
+      commandId: CommandId.make("activate-report-refresh-mission"),
+      missionId,
+      projectId,
+      createdAt: now,
+    });
+    model = yield* apply(model, {
+      type: "mission.run.start",
+      commandId: CommandId.make("start-report-refresh-run"),
+      runId,
+      missionId,
+      projectId,
+      maxConcurrentTasks: 1,
+      createdAt: now,
+    });
+    const report = {
+      missionObjective: "Complete the Mission",
+      taskIds: [taskA],
+      completedTaskIds: [taskA],
+      providersUsed: [ProviderInstanceId.make("codex")],
+      providerReplacementCount: 0,
+      retryCount: 0,
+      remediationRoundCount: 0,
+      qualityGateCount: 0,
+      reviewCount: 0,
+      filesChanged: ["src/result.ts"],
+      integrationBranch: null,
+      finalValidation: "not_requested" as const,
+      humanInterventionCount: 0,
+      knownRisks: ["Historical risk"],
+      historicalRisks: ["Historical risk"],
+      resolvedRisks: [],
+      remainingRisks: ["Historical risk"],
+      followUps: [],
+      elapsedMilliseconds: 0,
+      generatedAt: now,
+    };
+    model = yield* apply(model, {
+      type: "mission.run.reconcile",
+      commandId: CommandId.make("complete-report-refresh-run"),
+      runId,
+      status: "completed",
+      currentReadyTaskIds: [],
+      scheduledTaskIds: [],
+      attention: [],
+      attentionReason: null,
+      decision: null,
+      completedAt: now,
+      failureReason: null,
+      finalReport: report,
+      createdAt: now,
+    });
+    model = yield* apply(model, {
+      type: "mission.run.reconcile",
+      commandId: CommandId.make("refresh-completed-report"),
+      runId,
+      status: "completed",
+      currentReadyTaskIds: [],
+      scheduledTaskIds: [],
+      attention: [],
+      attentionReason: null,
+      decision: null,
+      completedAt: now,
+      failureReason: null,
+      finalReport: {
+        ...report,
+        resolvedRisks: ["Historical risk"],
+        remainingRisks: [],
+      },
+      createdAt: now,
+    });
+    expect(model.missionRuns?.[0]?.finalReport).toMatchObject({
+      resolvedRisks: ["Historical risk"],
+      remainingRisks: [],
+    });
+
+    const invalid = yield* Effect.flip(
+      decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "mission.run.reconcile",
+          commandId: CommandId.make("reopen-completed-report-run"),
+          runId,
+          status: "running",
+          currentReadyTaskIds: [],
+          scheduledTaskIds: [],
+          attention: [],
+          attentionReason: null,
+          decision: null,
+          completedAt: null,
+          failureReason: null,
+          createdAt: now,
+        },
+      }),
+    );
+    expect(invalid.message).toContain("not reconcilable");
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
 
 const persistedEvent = (
   sequence: number,
@@ -610,6 +746,279 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
         createdAt: now,
       });
       expect(model.missionRuns?.[0]?.status).toBe("stopped");
+    }),
+  );
+
+  it.effect("versions and atomically applies an approved bounded Replan exactly once", () =>
+    Effect.gen(function* () {
+      const registryTask = TaskId.make("task-registry");
+      let model = yield* seed;
+      model = {
+        ...model,
+        projects: model.projects.map((project) =>
+          project.id === projectId ? { ...project, architectPlans: [approvedPlan] } : project,
+        ),
+      };
+      model = yield* apply(model, {
+        ...createMission(missionId, proposalId),
+        taskIds: [taskA, taskB, taskC],
+      });
+      model = yield* apply(model, addDependency(taskA, taskB));
+      model = yield* apply(model, {
+        type: "mission.activate",
+        commandId: CommandId.make("activate-replan-mission"),
+        missionId,
+        projectId,
+        createdAt: now,
+      });
+      model = yield* apply(model, {
+        type: "mission.run.start",
+        commandId: CommandId.make("start-replan-run"),
+        runId,
+        missionId,
+        projectId,
+        maxConcurrentTasks: 2,
+        createdAt: now,
+      });
+      model = yield* apply(model, {
+        type: "mission.run.replan.request",
+        commandId: CommandId.make("request-replan"),
+        runId,
+        proposalId: replanProposalId,
+        sourceTaskId: taskB,
+        trigger: "assumption_invalidated",
+        scope: "task_split",
+        reason: "The expected registry does not exist. token=private-provider-token",
+        evidence: [
+          {
+            kind: "repository_fact",
+            summary: "Registry path is absent.",
+            expected: "fixture/registry/index.ts",
+            observed:
+              "Repository search found no registry implementation. Authorization: Bearer private-provider-token",
+            source: "git tree abc123 password=private-environment-password",
+          },
+        ],
+        userInitiated: false,
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
+        status: "requested",
+        affectedTaskIds: [taskB],
+        preservedCompletedTaskIds: [],
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.summary).toContain("token=[REDACTED]");
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.evidence?.[0]).toMatchObject({
+        observed:
+          "Repository search found no registry implementation. Authorization: Bearer [REDACTED]",
+        source: "git tree abc123 password=[REDACTED]",
+      });
+      model = restartFromPersistedSnapshot(model);
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("requested");
+      expect(model.missions?.[0]?.taskIds).not.toContain(registryTask);
+
+      model = yield* apply(model, {
+        type: "mission.run.replan.analysis.start",
+        commandId: CommandId.make("start-architect-replan-analysis"),
+        runId,
+        proposalId: replanProposalId,
+        architectModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "test",
+        },
+        architectContextFingerprint: "bounded-context-fingerprint",
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
+        status: "analyzing",
+        architectModelSelection: { instanceId: "codex", model: "test" },
+      });
+      model = restartFromPersistedSnapshot(model);
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("analyzing");
+
+      const changeSet = {
+        newTasks: [
+          {
+            taskId: registryTask,
+            title: "Registry foundation",
+            objective: "Create the missing registry before Task B continues.",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "test",
+            },
+            acceptanceCriteria: ["Registry contract exists"],
+            ownership: [
+              {
+                pattern: "fixture/registry/**",
+                access: "write" as const,
+                reason: "New bounded foundation",
+              },
+            ],
+            requiredResourceIds: [],
+            supersedesTaskId: null,
+          },
+        ],
+        modifiedTasks: [
+          {
+            taskId: taskB,
+            objective:
+              "Implement the notification Service using the approved Registry foundation and canonical handoff.",
+            acceptanceCriteria: ["Service consumes the current Registry contract"],
+          },
+        ],
+        supersededTaskIds: [],
+        dependencyChanges: [
+          {
+            operation: "add" as const,
+            prerequisiteTaskId: registryTask,
+            dependentTaskId: taskB,
+          },
+        ],
+        contractChanges: [],
+      };
+
+      model = yield* apply(model, {
+        type: "mission.run.replan.propose",
+        commandId: CommandId.make("reject-invalid-architect-replan-output"),
+        runId,
+        proposalId: replanProposalId,
+        scope: "full_mission",
+        changeSet,
+        architectReportedPreservedTaskIds: [taskA, taskC],
+        architectReportedAffectedTaskIds: [taskB],
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
+        status: "analysis_failed",
+        validation: { status: "invalid" },
+      });
+      expect(model.missions?.[0]?.taskIds).not.toContain(registryTask);
+
+      model = yield* apply(model, {
+        type: "mission.run.replan.propose",
+        commandId: CommandId.make("propose-replan"),
+        runId,
+        proposalId: replanProposalId,
+        scope: "task_split",
+        summary: "Architect adds the missing Registry foundation.",
+        rationale: "Canonical repository evidence invalidated the Registry assumption.",
+        changeSet,
+        architectModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "test",
+        },
+        architectContextFingerprint: "bounded-context-fingerprint",
+        architectPlanProposalId: proposalId,
+        architectReportedPreservedTaskIds: [taskA, taskC],
+        architectReportedAffectedTaskIds: [taskB],
+        architectRisks: [
+          {
+            risk: "Registry contract may drift.",
+            mitigation: "Require current handoff and review evidence.",
+          },
+        ],
+        createdAt: now,
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
+        status: "awaiting_approval",
+        validation: { status: "valid", blockers: [] },
+        architectPlanProposalId: proposalId,
+        architectModelSelection: { instanceId: "codex", model: "test" },
+        architectContextFingerprint: "bounded-context-fingerprint",
+        architectAnalysisFailure: null,
+        architectRisks: [{ risk: "Registry contract may drift." }],
+      });
+      model = restartFromPersistedSnapshot(model);
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]).toMatchObject({
+        status: "awaiting_approval",
+        architectPlanProposalId: proposalId,
+        architectContextFingerprint: "bounded-context-fingerprint",
+      });
+      expect(model.missions?.[0]?.taskIds).not.toContain(registryTask);
+
+      const rejected = yield* apply(model, {
+        type: "mission.run.replan.resolve",
+        commandId: CommandId.make("reject-replan-proof"),
+        runId,
+        proposalId: replanProposalId,
+        resolution: "rejected",
+        createdAt: now,
+      });
+      expect(rejected.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("rejected");
+      expect(rejected.missions?.[0]?.taskIds).toEqual(model.missions?.[0]?.taskIds);
+      expect(rejected.tasks?.map((task) => task.id)).toEqual(model.tasks?.map((task) => task.id));
+
+      model = yield* apply(model, {
+        type: "mission.run.replan.resolve",
+        commandId: CommandId.make("approve-replan"),
+        runId,
+        proposalId: replanProposalId,
+        resolution: "approved",
+        createdAt: now,
+      });
+      model = restartFromPersistedSnapshot(model);
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("approved");
+      expect(model.missions?.[0]?.taskIds).not.toContain(registryTask);
+      model = yield* apply(model, {
+        type: "mission.run.replan.apply",
+        commandId: CommandId.make("apply-replan"),
+        runId,
+        proposalId: replanProposalId,
+        createdAt: now,
+      });
+      expect(model.missions?.[0]).toMatchObject({ currentPlanVersion: 2 });
+      expect(model.missions?.[0]?.planVersions?.map((version) => version.version)).toEqual([1, 2]);
+      expect(
+        model.missions?.[0]?.planVersions?.[0]?.taskSpecifications?.find(
+          (specification) => specification.taskId === taskB,
+        )?.objective,
+      ).toBe(`Complete ${taskB}`);
+      expect(
+        model.missions?.[0]?.planVersions?.[1]?.taskSpecifications?.find(
+          (specification) => specification.taskId === taskB,
+        )?.objective,
+      ).toBe(
+        "Implement the notification Service using the approved Registry foundation and canonical handoff.",
+      );
+      expect(model.missions?.[0]?.taskIds).toContain(registryTask);
+      expect(model.tasks?.find((task) => task.id === registryTask)).toMatchObject({
+        status: "draft",
+        replan: { planVersion: 2, state: "current" },
+      });
+      expect(model.tasks?.find((task) => task.id === taskB)).toMatchObject({
+        objective:
+          "Implement the notification Service using the approved Registry foundation and canonical handoff.",
+        acceptanceCriteria: ["Service consumes the current Registry contract"],
+        replan: { planVersion: 2, state: "current" },
+      });
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("applied");
+      model = restartFromPersistedSnapshot(model);
+      expect(model.missionRuns?.[0]?.replanProposals?.[0]?.status).toBe("applied");
+      expect(
+        model.missions?.[0]?.planVersions?.map(
+          (version) =>
+            version.taskSpecifications?.find((specification) => specification.taskId === taskB)
+              ?.objective,
+        ),
+      ).toEqual([
+        `Complete ${taskB}`,
+        "Implement the notification Service using the approved Registry foundation and canonical handoff.",
+      ]);
+
+      const duplicate = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            type: "mission.run.replan.apply",
+            commandId: CommandId.make("apply-replan-again"),
+            runId,
+            proposalId: replanProposalId,
+            createdAt: now,
+          },
+        }),
+      );
+      expect(duplicate.message).toMatch(/already applied|not approved/i);
+      expect(model.tasks?.filter((task) => task.id === registryTask)).toHaveLength(1);
     }),
   );
 });

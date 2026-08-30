@@ -123,6 +123,14 @@
       "types": "./src/recoveryRouting.ts",
       "import": "./src/recoveryRouting.ts"
     },
+    "./replanning": {
+      "types": "./src/replanning.ts",
+      "import": "./src/replanning.ts"
+    },
+    "./redaction": {
+      "types": "./src/redaction.ts",
+      "import": "./src/redaction.ts"
+    },
     "./resourceCoordination": {
       "types": "./src/resourceCoordination.ts",
       "import": "./src/resourceCoordination.ts"

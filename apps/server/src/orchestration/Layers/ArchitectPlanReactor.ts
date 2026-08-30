@@ -1,6 +1,8 @@
 import {
   ArchitectPlanGenerationError,
   CommandId,
+  type MissionRunId,
+  type ReplanProposalId,
   type ArchitectPlanningFailureCategory,
   type ArchitectPlanningPhase,
   type ArchitectPlanProposal,
@@ -13,6 +15,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import {
+  buildArchitectReplanContext,
+  generateArchitectReplan,
   generateArchitectPlan,
   type ArchitectPlanningProgressPatch,
 } from "../ArchitectPlanGeneration.ts";
@@ -63,7 +67,7 @@ const make = Effect.gen(function* () {
       createdAt: DateTime.now.pipe(Effect.map(DateTime.formatIso)),
     });
 
-  const process = Effect.fn("ArchitectPlanReactor.process")(function* (
+  const processPlan = Effect.fn("ArchitectPlanReactor.processPlan")(function* (
     plan: ArchitectPlanProposal,
   ) {
     const readModel = yield* snapshots.getCommandReadModel();
@@ -229,25 +233,144 @@ const make = Effect.gen(function* () {
       plan: nextPlan,
     });
   });
+
+  const processReplan = Effect.fn("ArchitectPlanReactor.processReplan")(function* (
+    runId: MissionRunId,
+    proposalId: ReplanProposalId,
+  ) {
+    let readModel = yield* snapshots.getCommandReadModel();
+    let run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === runId);
+    let proposal = run?.replanProposals?.find((candidate) => candidate.id === proposalId);
+    if (!run || !proposal || !["requested", "analyzing"].includes(proposal.status)) return;
+    const mission = (readModel.missions ?? []).find((candidate) => candidate.id === run!.missionId);
+    const project = readModel.projects.find(
+      (candidate) => candidate.id === run!.projectId && candidate.deletedAt === null,
+    );
+    if (!mission || !project) return;
+    const architectPlan = mission.architectPlanProposalId
+      ? project.architectPlans?.find(
+          (candidate) => candidate.id === mission.architectPlanProposalId,
+        )
+      : undefined;
+    const selection =
+      proposal.architectModelSelection ??
+      architectPlan?.architectModelSelection ??
+      project.defaultModelSelection;
+    if (!selection) {
+      const meta = yield* metadata("architect-replan-fail:no-selection");
+      yield* engine.dispatch({
+        type: "mission.run.replan.analysis.fail",
+        ...meta,
+        runId,
+        proposalId,
+        architectModelSelection: null,
+        failureReason: "No approved Architect provider/model is available for this Mission Replan.",
+      });
+      return;
+    }
+    const integrationBatch = mission.integrationBatchId
+      ? ((project.integrationBatches ?? []).find(
+          (candidate) => candidate.id === mission.integrationBatchId,
+        ) ?? null)
+      : null;
+    const context = buildArchitectReplanContext({
+      project,
+      mission,
+      run,
+      tasks: readModel.tasks ?? [],
+      proposal,
+      integrationBatch,
+    });
+    if (proposal.status === "requested") {
+      const meta = yield* metadata("architect-replan-start");
+      yield* engine.dispatch({
+        type: "mission.run.replan.analysis.start",
+        ...meta,
+        runId,
+        proposalId,
+        architectModelSelection: selection,
+        architectContextFingerprint: context.fingerprint,
+      });
+      readModel = yield* snapshots.getCommandReadModel();
+      run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === runId);
+      proposal = run?.replanProposals?.find((candidate) => candidate.id === proposalId);
+      if (!run || !proposal || proposal.status !== "analyzing") return;
+    }
+    const result = yield* Effect.result(
+      generateArchitectReplan({
+        project,
+        mission,
+        run,
+        tasks: readModel.tasks ?? [],
+        proposal,
+        integrationBatch,
+        modelSelection: selection,
+      }),
+    );
+    const meta = yield* metadata("architect-replan-finish");
+    const latestModel = yield* snapshots.getCommandReadModel();
+    const latestRun = (latestModel.missionRuns ?? []).find((candidate) => candidate.id === runId);
+    const latestProposal = latestRun?.replanProposals?.find(
+      (candidate) => candidate.id === proposalId,
+    );
+    if (!latestProposal || latestProposal.status !== "analyzing") return;
+    if (result._tag === "Failure") {
+      yield* engine.dispatch({
+        type: "mission.run.replan.analysis.fail",
+        ...meta,
+        runId,
+        proposalId,
+        architectModelSelection: selection,
+        failureReason: result.failure.message,
+      });
+      return;
+    }
+    const draft = result.success.draft;
+    yield* engine.dispatch({
+      type: "mission.run.replan.propose",
+      ...meta,
+      runId,
+      proposalId,
+      scope: draft.scope,
+      summary: draft.summary,
+      rationale: draft.rationale,
+      changeSet: draft.changeSet,
+      architectModelSelection: selection,
+      architectContextFingerprint: result.success.contextFingerprint,
+      architectReportedPreservedTaskIds: draft.preservedTaskIds,
+      architectReportedAffectedTaskIds: draft.affectedTaskIds,
+      architectRisks: draft.risks,
+      architectPlanProposalId: mission.architectPlanProposalId ?? null,
+    });
+  });
+  type ArchitectWork =
+    | { readonly kind: "plan"; readonly plan: ArchitectPlanProposal }
+    | {
+        readonly kind: "replan";
+        readonly runId: MissionRunId;
+        readonly proposalId: ReplanProposalId;
+      };
   const pendingWork = new Set<string>();
-  const workKey = (plan: ArchitectPlanProposal) =>
-    `${plan.id}:${plan.lifecycle?.attempt ?? Math.max(1, plan.attempts?.length ?? 1)}`;
-  const worker = yield* makeDrainableWorker((plan: ArchitectPlanProposal) => {
-    const key = workKey(plan);
-    return process(plan).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Architect Plan generation failed", { cause }),
-      ),
+  const workKey = (work: ArchitectWork) =>
+    work.kind === "plan"
+      ? `plan:${work.plan.id}:${work.plan.lifecycle?.attempt ?? Math.max(1, work.plan.attempts?.length ?? 1)}`
+      : `replan:${work.runId}:${work.proposalId}`;
+  const worker = yield* makeDrainableWorker((work: ArchitectWork) => {
+    const key = workKey(work);
+    return (
+      work.kind === "plan" ? processPlan(work.plan) : processReplan(work.runId, work.proposalId)
+    ).pipe(
+      Effect.catchCause((cause) => Effect.logWarning("Architect generation failed", { cause })),
       Effect.ensuring(Effect.sync(() => pendingWork.delete(key))),
     );
   });
-  const enqueue = (plan: ArchitectPlanProposal) =>
+  const enqueue = (work: ArchitectWork) =>
     Effect.suspend(() => {
-      const key = workKey(plan);
+      const key = workKey(work);
       if (pendingWork.has(key)) return Effect.void;
       pendingWork.add(key);
       return worker
-        .enqueue(plan)
+        .enqueue(work)
         .pipe(Effect.tapError(() => Effect.sync(() => pendingWork.delete(key))));
     });
   const start: ArchitectPlanReactorShape["start"] = Effect.fn("ArchitectPlanReactor.start")(
@@ -256,8 +379,21 @@ const make = Effect.gen(function* () {
         event.type === "architect.plan-saved" &&
         event.payload.plan.status === "generating" &&
         (event.payload.plan.lifecycle?.phase ?? "validating_repository") === "validating_repository"
-          ? enqueue(event.payload.plan)
-          : Effect.void,
+          ? enqueue({ kind: "plan", plan: event.payload.plan })
+          : event.type === "mission.run.reconciled"
+            ? Effect.forEach(
+                (event.payload.run.replanProposals ?? []).filter((proposal) =>
+                  ["requested", "analyzing"].includes(proposal.status),
+                ),
+                (proposal) =>
+                  enqueue({
+                    kind: "replan",
+                    runId: event.payload.run.id,
+                    proposalId: proposal.id,
+                  }),
+                { discard: true },
+              )
+            : Effect.void,
       );
       yield* forkParked(
         Effect.gen(function* () {
@@ -270,10 +406,15 @@ const make = Effect.gen(function* () {
                 ),
               ),
             );
-          if (readModel)
+          if (readModel) {
             for (const project of readModel.projects)
               for (const plan of project.architectPlans ?? [])
-                if (plan.status === "generating") yield* enqueue(plan);
+                if (plan.status === "generating") yield* enqueue({ kind: "plan", plan });
+            for (const run of readModel.missionRuns ?? [])
+              for (const proposal of run.replanProposals ?? [])
+                if (["requested", "analyzing"].includes(proposal.status))
+                  yield* enqueue({ kind: "replan", runId: run.id, proposalId: proposal.id });
+          }
         }),
       );
     },

@@ -18,6 +18,10 @@ import {
   OwnershipRequest,
   MissionRun,
   MissionCheckpoint,
+  MissionPlanVersion,
+  MissionContractVersion,
+  TaskReplanState,
+  type OrchestrationTask,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -32,7 +36,10 @@ import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../per
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
-import { ProjectionTaskRepository } from "../../persistence/Services/ProjectionTasks.ts";
+import {
+  ProjectionTaskRepository,
+  type ProjectionTask,
+} from "../../persistence/Services/ProjectionTasks.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { type ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -122,12 +129,69 @@ const encodeMissionRun = Schema.encodeSync(Schema.fromJsonString(MissionRun));
 const encodeMissionCheckpoints = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(MissionCheckpoint)),
 );
+const encodeMissionPlanVersions = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(MissionPlanVersion)),
+);
+const encodeMissionContractVersions = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(MissionContractVersion)),
+);
+const encodeTaskReplan = Schema.encodeSync(Schema.fromJsonString(TaskReplanState));
 const decodeMissionCheckpoints = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Array(MissionCheckpoint)),
 );
 const decodeTaskReviewSnapshot = Schema.decodeSync(Schema.fromJsonString(TaskReviewSnapshot));
 const decodeTaskHandoff = Schema.decodeSync(Schema.fromJsonString(TaskHandoff));
 const decodeTaskRestore = Schema.decodeUnknownEffect(Schema.fromJsonString(TaskRestoreState));
+
+const projectionTaskRowFromTask = (task: OrchestrationTask): ProjectionTask => ({
+  taskId: task.id,
+  projectId: task.projectId,
+  title: task.title,
+  objective: task.objective,
+  role: task.role,
+  modelSelectionJson: task.modelSelection ? encodeModelSelection(task.modelSelection) : null,
+  acceptanceCriteriaJson: encodeAcceptanceCriteria(task.acceptanceCriteria ?? []),
+  reviewRequired: task.reviewRequired ? 1 : 0,
+  preferDifferentReviewerProvider: task.preferDifferentReviewerProvider ? 1 : 0,
+  status: task.status,
+  threadId: task.threadId,
+  createdAt: task.createdAt,
+  updatedAt: task.updatedAt,
+  activatedAt: task.activatedAt,
+  completedAt: task.completedAt,
+  cancelledAt: task.cancelledAt,
+  workspaceStatus: task.workspace?.status ?? null,
+  workspaceSourceRepository: task.workspace?.sourceRepository ?? null,
+  workspaceBaseCommit: task.workspace?.baseCommit ?? null,
+  workspaceBranch: task.workspace?.branch ?? null,
+  workspacePath: task.workspace?.path ?? null,
+  workspaceCreatedAt: task.workspace?.createdAt ?? null,
+  workspaceRemovedAt: task.workspace?.removedAt ?? null,
+  workspaceFailureCode: task.workspace?.failureCode ?? null,
+  workspaceFailureReason: task.workspace?.failureReason ?? null,
+  workspaceUpdatedAt: task.workspace?.updatedAt ?? null,
+  ownershipRequired: task.ownership?.required ? 1 : 0,
+  ownershipRulesJson: encodeOwnershipRules(task.ownership?.rules ?? []),
+  ownershipStatus: task.ownership?.status ?? null,
+  ownershipValidatedAt: task.ownership?.validatedAt ?? null,
+  ownershipChangedPathCount: task.ownership?.changedPathCount ?? 0,
+  ownershipViolationsJson: encodeOwnershipViolations(task.ownership?.violations ?? []),
+  ownershipErrorReason: task.ownership?.errorReason ?? null,
+  ownershipUpdatedAt: task.ownership?.updatedAt ?? null,
+  reviewSnapshotJson: task.reviewSnapshot ? encodeTaskReviewSnapshot(task.reviewSnapshot) : null,
+  handoffJson: task.handoff ? encodeTaskHandoff(task.handoff) : null,
+  restoreJson: task.restore ? encodeTaskRestore(task.restore) : null,
+  reviewError: task.reviewError ?? null,
+  resultJson: task.result ? encodeTaskResult(task.result) : null,
+  qualityGateRunsJson: encodeQualityGateRuns(task.qualityGateRuns ?? []),
+  reviewsJson: encodeTaskReviews(task.reviews ?? []),
+  requiredResourceIdsJson: encodeResourceIds(task.requiredResourceIds ?? []),
+  resourceComplianceJson: task.resourceCompliance
+    ? encodeResourceCompliance(task.resourceCompliance)
+    : null,
+  ownershipRequestsJson: encodeOwnershipRequests(task.ownershipRequests ?? []),
+  replanJson: task.replan ? encodeTaskReplan(task.replan) : null,
+});
 
 type ProjectorName =
   (typeof ORCHESTRATION_PROJECTOR_NAMES)[keyof typeof ORCHESTRATION_PROJECTOR_NAMES];
@@ -718,6 +782,24 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "mission.replan-applied": {
+          if (!event.payload.integrationBatch) return;
+          const existingRow = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isNone(existingRow)) return;
+          yield* projectionProjectRepository.upsert({
+            ...existingRow.value,
+            integrationBatches: (existingRow.value.integrationBatches ?? []).map((batch) =>
+              batch.id === event.payload.integrationBatch!.id
+                ? event.payload.integrationBatch!
+                : batch,
+            ),
+            updatedAt: event.payload.integrationBatch.updatedAt,
+          });
+          return;
+        }
+
         default:
           return;
       }
@@ -778,7 +860,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               requiredResourceIdsJson: encodeResourceIds(event.payload.requiredResourceIds ?? []),
               resourceComplianceJson: null,
               ownershipRequestsJson: "[]",
+              replanJson: null,
             });
+            return;
+          case "mission.replan-applied":
+            yield* Effect.forEach(
+              event.payload.tasks,
+              (task) => projectionTaskRepository.upsert(projectionTaskRowFromTask(task)),
+              { discard: true },
+            );
             return;
           case "task.acceptance-criteria-updated": {
             const existing = yield* projectionTaskRepository.getById(event.payload.taskId);
@@ -1701,20 +1791,24 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             INSERT INTO projection_missions (
               mission_id, project_id, title, objective, description, status,
               integration_batch_id, created_at, updated_at, activated_at, completed_at, cancelled_at,
-              base_commit, architect_plan_proposal_id, checkpoints_json
+              base_commit, architect_plan_proposal_id, checkpoints_json,
+              current_plan_version, plan_versions_json, contract_versions_json
             ) VALUES (
               ${event.payload.missionId}, ${event.payload.projectId}, ${event.payload.title},
               ${event.payload.objective}, ${event.payload.description}, 'draft', NULL,
               ${event.payload.createdAt}, ${event.payload.updatedAt}, NULL, NULL, NULL,
               ${event.payload.baseCommit ?? null}, ${event.payload.architectPlanProposalId ?? null},
-              ${encodeMissionCheckpoints(event.payload.checkpoints ?? [])}
+              ${encodeMissionCheckpoints(event.payload.checkpoints ?? [])}, 1, '[]', '[]'
             ) ON CONFLICT (mission_id) DO UPDATE SET
               project_id = excluded.project_id, title = excluded.title,
               objective = excluded.objective, description = excluded.description,
               updated_at = excluded.updated_at,
               base_commit = excluded.base_commit,
               architect_plan_proposal_id = excluded.architect_plan_proposal_id,
-              checkpoints_json = excluded.checkpoints_json
+              checkpoints_json = excluded.checkpoints_json,
+              current_plan_version = excluded.current_plan_version,
+              plan_versions_json = excluded.plan_versions_json,
+              contract_versions_json = excluded.contract_versions_json
           `.pipe(Effect.mapError(toPersistenceSqlError("ProjectionMissions.created:query")));
           yield* Effect.forEach(
             event.payload.taskIds ?? [],
@@ -1959,6 +2053,67 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             occurredAt: event.occurredAt,
           });
           return;
+        case "mission.replan-applied": {
+          const mission = event.payload.mission;
+          yield* sql`
+            UPDATE projection_missions SET
+              title = ${mission.title}, objective = ${mission.objective},
+              description = ${mission.description}, status = ${mission.status},
+              integration_batch_id = ${mission.integrationBatchId},
+              updated_at = ${mission.updatedAt}, activated_at = ${mission.activatedAt},
+              completed_at = ${mission.completedAt}, cancelled_at = ${mission.cancelledAt},
+              base_commit = ${mission.baseCommit ?? null},
+              architect_plan_proposal_id = ${mission.architectPlanProposalId ?? null},
+              checkpoints_json = ${encodeMissionCheckpoints(mission.checkpoints ?? [])},
+              current_plan_version = ${mission.currentPlanVersion ?? 1},
+              plan_versions_json = ${encodeMissionPlanVersions(mission.planVersions ?? [])},
+              contract_versions_json = ${encodeMissionContractVersions(mission.contractVersions ?? [])}
+            WHERE mission_id = ${mission.id}
+          `.pipe(Effect.mapError(toPersistenceSqlError("ProjectionMissions.replan:mission")));
+          yield* sql`DELETE FROM projection_mission_tasks WHERE mission_id = ${mission.id}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.replan:clearTasks")),
+          );
+          yield* Effect.forEach(
+            mission.taskIds,
+            (taskId, position) =>
+              sql`INSERT INTO projection_mission_tasks (mission_id, task_id, position, added_at) VALUES (${mission.id}, ${taskId}, ${position}, ${mission.updatedAt})`.pipe(
+                Effect.mapError(toPersistenceSqlError("ProjectionMissions.replan:tasks")),
+              ),
+            { discard: true },
+          );
+          yield* sql`DELETE FROM projection_mission_dependencies WHERE mission_id = ${mission.id}`.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionMissions.replan:clearDependencies")),
+          );
+          yield* Effect.forEach(
+            mission.dependencies,
+            (dependency) =>
+              sql`INSERT INTO projection_mission_dependencies (mission_id, prerequisite_task_id, dependent_task_id, created_at) VALUES (${mission.id}, ${dependency.prerequisiteTaskId}, ${dependency.dependentTaskId}, ${dependency.createdAt})`.pipe(
+                Effect.mapError(toPersistenceSqlError("ProjectionMissions.replan:dependencies")),
+              ),
+            { discard: true },
+          );
+          yield* sql`
+            INSERT INTO projection_mission_runs (
+              run_id, mission_id, project_id, status, run_json, started_at, updated_at
+            ) VALUES (
+              ${event.payload.run.id}, ${event.payload.run.missionId},
+              ${event.payload.run.projectId}, ${event.payload.run.status},
+              ${encodeMissionRun(event.payload.run)}, ${event.payload.run.startedAt},
+              ${event.payload.run.updatedAt}
+            ) ON CONFLICT (run_id) DO UPDATE SET
+              status = excluded.status, run_json = excluded.run_json,
+              updated_at = excluded.updated_at
+          `.pipe(Effect.mapError(toPersistenceSqlError("ProjectionMissions.replan:run")));
+          yield* appendMissionActivity({
+            missionId: mission.id,
+            eventId: event.eventId,
+            type: event.type,
+            summary: `Applied approved Plan v${mission.currentPlanVersion ?? 1}`,
+            taskId: event.payload.run.replanProposals?.at(-1)?.sourceTaskId ?? null,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        }
         default:
           return;
       }

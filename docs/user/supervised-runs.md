@@ -2,7 +2,7 @@
 
 For bounded retry, remediation, provider replacement, routing profiles, structured requests, and human-gated replanning, see [Recover and route supervised Missions](recovery-routing.md).
 
-A Supervised Mission Run executes an already approved and activated Architect Mission. It does not author or rewrite the plan, change Task ownership, invent Tasks, approve ownership requests, resolve conflicts, or merge `main`. In **Supervised Swarm**, it may choose a provider under the frozen routing profile and may start the existing Integration Engine when the launch policy explicitly enables Automatic Integration.
+A Supervised Mission Run executes an already approved and activated Architect Mission. It may record an evidence-grounded Replan Request, but it cannot approve or apply that request. Only a separately approved and validated bounded Replan may append a new Plan version, change ownership or dependencies, or materialize new canonical Tasks. The Run never approves ownership requests, resolves conflicts, or merges `main`. In **Supervised Swarm**, it may choose a provider under the frozen routing profile and may start the existing Integration Engine when the launch policy explicitly enables Automatic Integration.
 
 ## Start a Run
 

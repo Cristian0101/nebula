@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { canRetryIntegrationOperation } from "@t3tools/shared/missionRunner";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -19,6 +20,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { boundedGitRefPathSegment } from "../../checkpointing/Utils.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { forkParked, forkParkedStream } from "../../serverActivation.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
@@ -45,12 +47,12 @@ type IntegrationEvent = Extract<
 >;
 
 export const taskIntegrationArtifactRef = (artifactId: string) =>
-  `refs/t3/integration-artifacts/${encodeURIComponent(artifactId)}`;
+  `refs/t3/integration-artifacts/${boundedGitRefPathSegment(encodeURIComponent(artifactId), artifactId)}`;
 
 export const orderedRemainingIntegrationTasks = (batch: Pick<IntegrationBatch, "tasks">) =>
   batch.tasks
     .toSorted((left, right) => left.order - right.order)
-    .filter((task) => task.status !== "applied");
+    .filter((task) => task.status === "pending" || task.status === "applying");
 
 const SENSITIVE_RISK_EVIDENCE =
   /(?:authorization|api[_ -]?key|password|secret|token|cookie|credential)|(?:\b(?:gh[opusr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{25,}|sk-(?:ant-)?[A-Za-z0-9_-]{20,}|xox[pbar]-[A-Za-z0-9-]{20,})\b|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b|\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,})/i;
@@ -536,6 +538,18 @@ const make = Effect.gen(function* () {
     batchId: IntegrationBatchId,
   ) {
     const { batch } = yield* readBatch(projectId, batchId);
+    if (batch && canRetryIntegrationOperation(batch)) {
+      const retried: IntegrationBatch = {
+        ...batch,
+        status: "applying",
+        failureCode: null,
+        failureReason: null,
+        updatedAt: yield* now,
+      };
+      yield* update(projectId, retried, "operation-retried");
+      yield* applyRemaining(projectId, batchId);
+      return;
+    }
     if (!batch?.workspacePath || batch.status !== "conflict" || !batch.conflict) return;
     const unresolved = yield* unresolvedFiles(batch.workspacePath);
     if (unresolved.length > 0) {

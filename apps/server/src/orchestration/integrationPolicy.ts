@@ -31,6 +31,11 @@ export function integrationEligibility(
   const snapshot = task.reviewSnapshot ?? null;
   const handoff = task.handoff ?? null;
 
+  if (task.replan?.state === "superseded")
+    reasons.push("Task was superseded by an applied Replan.");
+  if (task.replan?.state === "stale" || task.replan?.state === "requires_review")
+    reasons.push("Task evidence is stale after an applied Replan.");
+
   if (task.projectId !== project.id) reasons.push("Task belongs to another project.");
   if (task.status !== "completed" || result === null) reasons.push("Task is not completed.");
   if (snapshot === null || result?.snapshotId !== snapshot.id) {

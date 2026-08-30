@@ -5,6 +5,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   collectArchitectContextFiles,
   collectArchitectContextTree,
+  buildArchitectReplanContext,
   normalizeGeneratedDraft,
   validateArchitectContextPath,
 } from "./ArchitectPlanGeneration.ts";
@@ -149,5 +150,113 @@ describe("Architect context security", () => {
     } finally {
       NodeFS.rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("builds a bounded redacted canonical context for provider-backed replanning", () => {
+    const context = buildArchitectReplanContext({
+      project: {
+        id: "project" as never,
+        title: "Fixture",
+        workspaceRoot: "/fixture",
+        defaultModelSelection: null,
+        scripts: [],
+        sharedResources: [],
+        resourceLeases: [],
+        createdAt: "2026-08-30T12:00:00.000Z",
+        updatedAt: "2026-08-30T12:00:00.000Z",
+        deletedAt: null,
+      } as never,
+      mission: {
+        id: "mission" as never,
+        projectId: "project" as never,
+        title: "Notification preferences",
+        objective: "Deliver the registry-backed service.",
+        description: null,
+        status: "active",
+        taskIds: ["frontend", "service"] as never,
+        dependencies: [],
+        activities: [],
+        integrationBatchId: null,
+        currentPlanVersion: 1,
+        createdAt: "2026-08-30T12:00:00.000Z",
+        updatedAt: "2026-08-30T12:00:00.000Z",
+        activatedAt: "2026-08-30T12:00:00.000Z",
+        completedAt: null,
+        cancelledAt: null,
+      } as never,
+      run: {
+        id: "run" as never,
+        missionId: "mission" as never,
+        projectId: "project" as never,
+        mode: "supervised_swarm",
+        status: "attention",
+        maxConcurrentTasks: 2,
+        currentReadyTaskIds: [],
+        scheduledTaskIds: [],
+        attention: [],
+        attentionReason: null,
+        decisions: [],
+        startedAt: "2026-08-30T12:00:00.000Z",
+        pausedAt: null,
+        completedAt: null,
+        stoppedAt: null,
+        failedAt: null,
+        failureReason: null,
+        updatedAt: "2026-08-30T12:00:00.000Z",
+      } as never,
+      tasks: [
+        {
+          id: "frontend",
+          title: "Frontend",
+          objective: "Preserve the frontend.",
+          status: "completed",
+          modelSelection: { instanceId: "codex", model: "test" },
+          acceptanceCriteria: ["Frontend remains complete"],
+          ownership: { rules: [] },
+          requiredResourceIds: [],
+          reviews: [],
+        },
+        {
+          id: "service",
+          title: "Service",
+          objective: "Use src/registry.ts.",
+          status: "draft",
+          modelSelection: { instanceId: "codex", model: "test" },
+          acceptanceCriteria: ["Service uses Registry"],
+          ownership: { rules: [] },
+          requiredResourceIds: [],
+          reviews: [],
+        },
+      ] as never,
+      proposal: {
+        id: "replan-1",
+        sourceTaskId: "service",
+        scope: "mission_subgraph",
+        trigger: "assumption_invalidated",
+        summary: "Registry is missing token=private-token",
+        evidence: [
+          {
+            kind: "repository_fact",
+            summary: "The required registry is absent.",
+            expected: "src/registry.ts",
+            observed: "No tracked registry exists. Authorization: Bearer private-token",
+            source: "git tree password=private-password",
+          },
+        ],
+        impact: {
+          affectedTaskIds: ["service"],
+          unaffectedTaskIds: ["frontend"],
+        },
+      } as never,
+      integrationBatch: null,
+    });
+    expect(context.text).toContain("assumption_invalidated");
+    expect(context.text).toContain("src/registry.ts");
+    expect(context.text).toContain("frontend");
+    expect(context.text).toContain("[REDACTED]");
+    expect(context.text).not.toContain("private-token");
+    expect(context.text).not.toContain("private-password");
+    expect(Buffer.byteLength(context.text)).toBeLessThanOrEqual(64 * 1024);
+    expect(context.fingerprint).toMatch(/^[a-f0-9]{64}$/);
   });
 });

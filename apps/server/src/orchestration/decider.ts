@@ -5,13 +5,22 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type ReplanChangeSet,
+  type TaskId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 import { computeMissionPlan, validateMissionGraph } from "@t3tools/shared/missionGraph";
+import { canRetryIntegrationOperation, projectTaskRisks } from "@t3tools/shared/missionRunner";
 import { validateArchitectPlan } from "@t3tools/shared/architectPlan";
+import {
+  analyzeReplanImpact,
+  applyReplanChangeSet,
+  validateReplanChangeSet,
+} from "@t3tools/shared/replanning";
+import { redactSensitiveText } from "@t3tools/shared/redaction";
 import {
   resourceBlockers,
   validateSharedResourceDefinition,
@@ -40,6 +49,18 @@ import { buildIntegrationBatch, integrationEligibility } from "./integrationPoli
 function missionContainingTask(readModel: OrchestrationReadModel, taskId: string) {
   return (readModel.missions ?? []).find((mission) =>
     mission.taskIds.some((candidate) => candidate === taskId),
+  );
+}
+
+export function continuesInterruptedProviderReplacement(input: {
+  readonly resolution: "approved" | "rejected";
+  readonly attempts: ReadonlyArray<{ readonly kind: string; readonly status: string }>;
+}): boolean {
+  const latestAttempt = input.attempts.at(-1);
+  return (
+    input.resolution === "rejected" &&
+    latestAttempt?.kind === "replacement" &&
+    latestAttempt.status === "interrupted"
   );
 }
 
@@ -89,6 +110,40 @@ function requireMissionTaskReady(input: {
 }
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+
+const redactReplanChangeSet = (changeSet: ReplanChangeSet): ReplanChangeSet => ({
+  newTasks: changeSet.newTasks.map((task) => ({
+    ...task,
+    title: redactSensitiveText(task.title),
+    objective: redactSensitiveText(task.objective),
+    acceptanceCriteria: task.acceptanceCriteria.map((criterion) => redactSensitiveText(criterion)),
+    ownership: task.ownership.map((rule) => ({
+      ...rule,
+      reason: rule.reason === null ? null : redactSensitiveText(rule.reason),
+    })),
+  })),
+  modifiedTasks: changeSet.modifiedTasks.map((task) => ({
+    ...task,
+    ...(task.objective !== undefined ? { objective: redactSensitiveText(task.objective) } : {}),
+    ...(task.acceptanceCriteria !== undefined
+      ? { acceptanceCriteria: task.acceptanceCriteria.map((item) => redactSensitiveText(item)) }
+      : {}),
+    ...(task.ownership !== undefined
+      ? {
+          ownership: task.ownership.map((rule) => ({
+            ...rule,
+            reason: rule.reason === null ? null : redactSensitiveText(rule.reason),
+          })),
+        }
+      : {}),
+  })),
+  supersededTaskIds: [...changeSet.supersededTaskIds],
+  dependencyChanges: [...changeSet.dependencyChanges],
+  contractChanges: changeSet.contractChanges.map((contract) => ({
+    ...contract,
+    summary: redactSensitiveText(contract.summary),
+  })),
+});
 
 // Session adoption takes seconds; a user message still unadopted after this
 // window is a failed/stale start, not pending work. Mirrors the client's
@@ -1707,11 +1762,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "mission.run.reconcile": {
       const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      const completedReportRefresh =
+        run?.status === "completed" &&
+        command.status === "completed" &&
+        command.completedAt === run.completedAt &&
+        command.decision == null &&
+        command.finalReport != null &&
+        JSON.stringify(command.currentReadyTaskIds) === JSON.stringify(run.currentReadyTaskIds) &&
+        JSON.stringify(command.scheduledTaskIds) === JSON.stringify(run.scheduledTaskIds) &&
+        JSON.stringify(command.attention) === JSON.stringify(run.attention) &&
+        command.attentionReason === run.attentionReason &&
+        command.failureReason === run.failureReason &&
+        (command.integrationBatchId === undefined ||
+          command.integrationBatchId === run.integrationBatchId);
       if (
         !run ||
-        run.status === "completed" ||
         run.status === "stopped" ||
-        run.status === "failed"
+        run.status === "failed" ||
+        (run.status === "completed" && !completedReportRefresh)
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -1832,15 +1900,148 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       return [...resourceEvents, runEvent];
     }
 
-    case "mission.run.replan.resolve": {
+    case "mission.run.replan.request": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      if (!run || !["running", "attention", "paused"].includes(run.status)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Mission Run '${command.runId}' is not available for replanning.`,
+        });
+      }
+      const mission = yield* requireMission({
+        readModel,
+        command,
+        missionId: run.missionId,
+      });
+      if ((run.replanProposals ?? []).some((proposal) => proposal.id === command.proposalId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Replan Proposal '${command.proposalId}' already exists.`,
+        });
+      }
+      if (command.evidence.length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A Replan Request requires grounded evidence.",
+        });
+      }
+      if (command.sourceTaskId !== null && !mission.taskIds.includes(command.sourceTaskId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Source Task '${command.sourceTaskId}' is not in this Mission.`,
+        });
+      }
+      const agentProposalCount = (run.replanProposals ?? []).filter(
+        (proposal) =>
+          proposal.sourceTaskId !== null && !["rejected", "cancelled"].includes(proposal.status),
+      ).length;
+      const replanLimit = run.swarmPolicy?.agentReplanLimit ?? 2;
+      if (!command.userInitiated && agentProposalCount >= replanLimit) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Agent-proposed replan limit (${replanLimit}) reached; a user must initiate the next proposal.`,
+        });
+      }
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: mission.projectId,
+      });
+      const integrationBatch = mission.integrationBatchId
+        ? ((project.integrationBatches ?? []).find(
+            (batch) => batch.id === mission.integrationBatchId,
+          ) ?? null)
+        : null;
+      const impact = analyzeReplanImpact({
+        mission,
+        tasks: readModel.tasks ?? [],
+        sourceTaskId: command.sourceTaskId,
+        scope: command.scope,
+        trigger: command.trigger,
+        integrationBatch,
+      });
+      const safeReason = redactSensitiveText(command.reason);
+      const safeEvidence = command.evidence.map((item) => ({
+        ...item,
+        summary: redactSensitiveText(item.summary),
+        expected: item.expected === null ? null : redactSensitiveText(item.expected),
+        observed: redactSensitiveText(item.observed),
+        source: redactSensitiveText(item.source),
+      }));
+      const proposal = {
+        id: command.proposalId,
+        missionId: mission.id,
+        sourceTaskId: command.sourceTaskId,
+        scope: command.scope,
+        trigger: command.trigger,
+        evidence: safeEvidence,
+        affectedTaskIds: impact.affectedTaskIds,
+        summary: safeReason,
+        rationale: command.userInitiated
+          ? "User requested a bounded change to the approved Mission Plan."
+          : "A provider raised structured evidence that the approved Mission Plan is no longer valid.",
+        preservedCompletedTaskIds: impact.completedSafeTaskIds,
+        architectPlanProposalId: null,
+        impact,
+        changeSet: null,
+        validation: null,
+        currentPlanVersion: mission.currentPlanVersion ?? 1,
+        proposedPlanVersion: (mission.currentPlanVersion ?? 1) + 1,
+        status: "requested" as const,
+        createdAt: command.createdAt,
+        resolvedAt: null,
+        appliedAt: null,
+      };
+      const attention = [
+        ...run.attention.filter((item) => item.code !== "replan_requested"),
+        {
+          taskId: command.sourceTaskId,
+          code: "replan_requested",
+          detail: `${safeReason} Impact analysis is ready; no Mission graph mutation has occurred.`,
+          blocksMission: command.scope === "full_mission",
+        },
+      ];
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.run.reconciled" as const,
+        payload: {
+          run: {
+            ...run,
+            status: "attention" as const,
+            attention,
+            attentionReason: "A bounded Replan Request requires analysis.",
+            replanProposals: [...(run.replanProposals ?? []), proposal],
+            decisions: [
+              ...run.decisions,
+              {
+                id: EventId.make(`replan:${command.proposalId}:requested`),
+                kind: "replan" as const,
+                taskId: command.sourceTaskId,
+                reason: safeReason,
+                sourceTaskIds: impact.affectedTaskIds,
+                occurredAt: command.createdAt,
+              },
+            ],
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "mission.run.replan.analysis.start": {
       const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
       const proposal = run?.replanProposals?.find(
         (candidate) => candidate.id === command.proposalId,
       );
-      if (!run || !proposal || proposal.status !== "pending") {
+      if (!run || !proposal || proposal.status !== "requested") {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: `Replan Proposal '${command.proposalId}' is not pending.`,
+          detail: `Replan Proposal '${command.proposalId}' is not awaiting Architect analysis.`,
         });
       }
       return {
@@ -1854,11 +2055,522 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           run: {
             ...run,
+            status: "attention" as const,
+            attention: [
+              ...run.attention.filter(
+                (item) => !["replan_requested", "replan_analysis_failed"].includes(item.code),
+              ),
+              {
+                taskId: proposal.sourceTaskId,
+                code: "replan_requested",
+                detail: "The Architect is analyzing bounded canonical Mission evidence.",
+                blocksMission: proposal.scope === "full_mission",
+              },
+            ],
+            attentionReason: "Architect replan analysis is in progress.",
+            replanProposals: (run.replanProposals ?? []).map((candidate) =>
+              candidate.id === proposal.id
+                ? {
+                    ...candidate,
+                    status: "analyzing" as const,
+                    architectModelSelection: command.architectModelSelection,
+                    architectContextFingerprint: command.architectContextFingerprint,
+                    architectAnalysisStartedAt: command.createdAt,
+                    architectAnalysisCompletedAt: null,
+                    architectAnalysisFailure: null,
+                  }
+                : candidate,
+            ),
+            decisions: [
+              ...run.decisions,
+              {
+                id: EventId.make(`replan:${command.proposalId}:architect-analysis-started`),
+                kind: "replan" as const,
+                taskId: proposal.sourceTaskId,
+                reason: `Architect analysis started with '${command.architectModelSelection.instanceId}'.`,
+                sourceTaskIds: proposal.affectedTaskIds,
+                occurredAt: command.createdAt,
+              },
+            ],
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "mission.run.replan.analysis.fail": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      const proposal = run?.replanProposals?.find(
+        (candidate) => candidate.id === command.proposalId,
+      );
+      if (!run || !proposal || !["requested", "analyzing"].includes(proposal.status)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Replan Proposal '${command.proposalId}' is not in Architect analysis.`,
+        });
+      }
+      const failureReason = redactSensitiveText(command.failureReason);
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: run.missionId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.run.reconciled" as const,
+        payload: {
+          run: {
+            ...run,
+            status: "attention" as const,
+            attention: [
+              ...run.attention.filter(
+                (item) => !["replan_requested", "replan_analysis_failed"].includes(item.code),
+              ),
+              {
+                taskId: proposal.sourceTaskId,
+                code: "replan_analysis_failed",
+                detail: failureReason,
+                blocksMission: proposal.scope === "full_mission",
+              },
+            ],
+            attentionReason: "Architect replan analysis failed.",
+            replanProposals: (run.replanProposals ?? []).map((candidate) =>
+              candidate.id === proposal.id
+                ? {
+                    ...candidate,
+                    status: "analysis_failed" as const,
+                    ...(command.architectModelSelection !== undefined
+                      ? { architectModelSelection: command.architectModelSelection }
+                      : {}),
+                    architectAnalysisCompletedAt: command.createdAt,
+                    architectAnalysisFailure: failureReason,
+                  }
+                : candidate,
+            ),
+            decisions: [
+              ...run.decisions,
+              {
+                id: EventId.make(`replan:${command.proposalId}:architect-analysis-failed`),
+                kind: "replan" as const,
+                taskId: proposal.sourceTaskId,
+                reason: failureReason,
+                sourceTaskIds: proposal.affectedTaskIds,
+                occurredAt: command.createdAt,
+              },
+            ],
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "mission.run.replan.propose": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      const proposal = run?.replanProposals?.find(
+        (candidate) => candidate.id === command.proposalId,
+      );
+      if (
+        !run ||
+        !proposal ||
+        !["requested", "analyzing", "analysis_failed", "awaiting_approval"].includes(
+          proposal.status,
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Replan Proposal '${command.proposalId}' is not awaiting a proposed change set.`,
+        });
+      }
+      const mission = yield* requireMission({
+        readModel,
+        command,
+        missionId: run.missionId,
+      });
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: mission.projectId,
+      });
+      const changeSet = redactReplanChangeSet(command.changeSet);
+      const baseValidation = validateReplanChangeSet({
+        mission,
+        tasks: readModel.tasks ?? [],
+        project,
+        proposal,
+        changeSet,
+        validatedAt: command.createdAt,
+        knownProviderInstanceIds: [
+          ...new Set(
+            (readModel.tasks ?? []).flatMap((task) =>
+              task.modelSelection ? [task.modelSelection.instanceId] : [],
+            ),
+          ),
+        ],
+      });
+      const contractConsumerTaskIds = changeSet.contractChanges.flatMap(
+        (contract) => contract.consumerTaskIds,
+      );
+      const changeAffectedTaskIds = new Set([
+        ...proposal.affectedTaskIds,
+        ...changeSet.modifiedTasks.map((task) => task.taskId),
+        ...changeSet.supersededTaskIds,
+        ...contractConsumerTaskIds,
+      ]);
+      const expectedPreservedTaskIds =
+        proposal.impact?.unaffectedTaskIds.filter((taskId) => !changeAffectedTaskIds.has(taskId)) ??
+        [];
+      const sameTaskSet = (left: ReadonlyArray<TaskId>, right: ReadonlyArray<TaskId>) =>
+        left.length === right.length && left.every((taskId) => right.includes(taskId));
+      const architectBlockers = [
+        ...(command.scope !== undefined && command.scope !== proposal.scope
+          ? [
+              `Architect returned scope '${command.scope}' instead of approved analysis scope '${proposal.scope}'.`,
+            ]
+          : []),
+        ...(command.architectReportedAffectedTaskIds !== undefined &&
+        !sameTaskSet(command.architectReportedAffectedTaskIds, [...changeAffectedTaskIds])
+          ? ["Architect affected Task IDs do not match the validated change set."]
+          : []),
+        ...(command.architectReportedPreservedTaskIds !== undefined &&
+        !sameTaskSet(command.architectReportedPreservedTaskIds, expectedPreservedTaskIds)
+          ? ["Architect preserved Task IDs do not match canonical impact analysis."]
+          : []),
+      ];
+      const blockers = [...new Set([...baseValidation.blockers, ...architectBlockers])];
+      const validation = {
+        ...baseValidation,
+        status: blockers.length === 0 ? ("valid" as const) : ("invalid" as const),
+        blockers,
+      };
+      const impact = proposal.impact
+        ? {
+            ...proposal.impact,
+            affectedTaskIds: [...changeAffectedTaskIds],
+            unaffectedTaskIds: proposal.impact.unaffectedTaskIds.filter(
+              (taskId) => !changeAffectedTaskIds.has(taskId),
+            ),
+            completedSafeTaskIds: proposal.impact.completedSafeTaskIds.filter(
+              (taskId) => !changeAffectedTaskIds.has(taskId),
+            ),
+            contractsInvalidated: changeSet.contractChanges.map((contract) => contract.contractId),
+            resourceAffectedTaskIds: [
+              ...new Set([
+                ...proposal.impact.resourceAffectedTaskIds,
+                ...changeSet.modifiedTasks
+                  .filter(
+                    (task) =>
+                      task.ownership !== undefined || task.requiredResourceIds !== undefined,
+                  )
+                  .map((task) => task.taskId),
+              ]),
+            ],
+          }
+        : null;
+      const nextProposal = {
+        ...proposal,
+        ...(command.summary ? { summary: redactSensitiveText(command.summary) } : {}),
+        ...(command.rationale ? { rationale: redactSensitiveText(command.rationale) } : {}),
+        affectedTaskIds: [...changeAffectedTaskIds],
+        impact,
+        changeSet,
+        validation,
+        ...(command.architectModelSelection
+          ? { architectModelSelection: command.architectModelSelection }
+          : {}),
+        ...(command.architectContextFingerprint
+          ? { architectContextFingerprint: command.architectContextFingerprint }
+          : {}),
+        ...(command.architectReportedPreservedTaskIds
+          ? { architectReportedPreservedTaskIds: command.architectReportedPreservedTaskIds }
+          : {}),
+        ...(command.architectReportedAffectedTaskIds
+          ? { architectReportedAffectedTaskIds: command.architectReportedAffectedTaskIds }
+          : {}),
+        ...(command.architectRisks
+          ? {
+              architectRisks: command.architectRisks.map((risk) => ({
+                risk: redactSensitiveText(risk.risk),
+                mitigation: risk.mitigation === null ? null : redactSensitiveText(risk.mitigation),
+              })),
+            }
+          : {}),
+        architectAnalysisCompletedAt: command.createdAt,
+        architectAnalysisFailure: null,
+        architectPlanProposalId:
+          command.architectPlanProposalId ?? proposal.architectPlanProposalId,
+        status:
+          validation.status === "valid"
+            ? ("awaiting_approval" as const)
+            : ("analysis_failed" as const),
+      };
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.run.reconciled" as const,
+        payload: {
+          run: {
+            ...run,
+            status: "attention" as const,
+            attention: [
+              ...run.attention.filter(
+                (item) => !["replan_requested", "replan_approval_required"].includes(item.code),
+              ),
+              {
+                taskId: proposal.sourceTaskId,
+                code:
+                  validation.status === "valid"
+                    ? "replan_approval_required"
+                    : "replan_analysis_failed",
+                detail:
+                  validation.status === "valid"
+                    ? `Proposed Plan v${proposal.proposedPlanVersion ?? 2} is valid and requires explicit approval.`
+                    : `Replan validation failed: ${validation.blockers.join(" ")}`,
+                blocksMission: proposal.scope === "full_mission",
+              },
+            ],
+            attentionReason:
+              validation.status === "valid"
+                ? "A valid proposed Plan requires approval."
+                : "Replan analysis failed validation.",
+            replanProposals: (run.replanProposals ?? []).map((candidate) =>
+              candidate.id === proposal.id ? nextProposal : candidate,
+            ),
+            decisions: [
+              ...run.decisions,
+              {
+                id: EventId.make(`replan:${command.proposalId}:proposed`),
+                kind: "replan" as const,
+                taskId: proposal.sourceTaskId,
+                reason:
+                  validation.status === "valid"
+                    ? `Proposed bounded Plan v${proposal.proposedPlanVersion ?? 2}.`
+                    : "Replan analysis produced an invalid proposal.",
+                sourceTaskIds: proposal.affectedTaskIds,
+                occurredAt: command.createdAt,
+              },
+            ],
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "mission.run.replan.resolve": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      const proposal = run?.replanProposals?.find(
+        (candidate) => candidate.id === command.proposalId,
+      );
+      const pendingStatus =
+        proposal?.status === "pending" || proposal?.status === "awaiting_approval";
+      if (!run || !proposal || !pendingStatus) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Replan Proposal '${command.proposalId}' is not pending.`,
+        });
+      }
+      if (
+        command.resolution === "approved" &&
+        proposal.status !== "pending" &&
+        (proposal.changeSet === null || proposal.validation?.status !== "valid")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Replan Proposal '${command.proposalId}' must pass deterministic validation before approval.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: run.missionId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.run.reconciled" as const,
+        payload: {
+          run: {
+            ...run,
+            status: command.resolution === "approved" ? "attention" : run.status,
+            attention:
+              command.resolution === "approved"
+                ? run.attention
+                : run.attention.filter(
+                    (item) => !["replan_requested", "replan_approval_required"].includes(item.code),
+                  ),
+            attentionReason:
+              command.resolution === "approved"
+                ? "Approved Replan is ready to apply."
+                : run.attentionReason,
+            decisions: [
+              ...run.decisions,
+              {
+                id: EventId.make(`replan:${command.proposalId}:${command.resolution}`),
+                kind: "replan" as const,
+                taskId: proposal.sourceTaskId,
+                reason:
+                  command.resolution === "approved"
+                    ? `User approved proposed Plan v${proposal.proposedPlanVersion ?? 2}.`
+                    : `User ${command.resolution} the proposed Replan; the current Plan remains authoritative.`,
+                sourceTaskIds: proposal.affectedTaskIds,
+                occurredAt: command.createdAt,
+              },
+            ],
             replanProposals: (run.replanProposals ?? []).map((candidate) =>
               candidate.id === proposal.id
                 ? { ...candidate, status: command.resolution, resolvedAt: command.createdAt }
                 : candidate,
             ),
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "mission.run.replan.apply": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      const proposal = run?.replanProposals?.find(
+        (candidate) => candidate.id === command.proposalId,
+      );
+      if (!run || !proposal || proposal.status !== "approved") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Replan Proposal '${command.proposalId}' is not approved or was already applied.`,
+        });
+      }
+      const mission = yield* requireMission({
+        readModel,
+        command,
+        missionId: run.missionId,
+      });
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: mission.projectId,
+      });
+      const integrationBatch = mission.integrationBatchId
+        ? ((project.integrationBatches ?? []).find(
+            (batch) => batch.id === mission.integrationBatchId,
+          ) ?? null)
+        : null;
+      let applied;
+      try {
+        applied = applyReplanChangeSet({
+          mission,
+          tasks: readModel.tasks ?? [],
+          run,
+          proposal,
+          integrationBatch,
+          appliedAt: command.createdAt,
+        });
+      } catch (error) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: mission.id,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.replan-applied" as const,
+        payload: {
+          projectId: project.id,
+          mission: applied.mission,
+          run: applied.run,
+          tasks: applied.tasks,
+          integrationBatch: applied.integrationBatch,
+          interruptedThreadIds: applied.interruptedThreadIds,
+        },
+      };
+    }
+
+    case "mission.run.provider-substitution.resolve": {
+      const run = (readModel.missionRuns ?? []).find((candidate) => candidate.id === command.runId);
+      const recovery = run?.taskRecovery?.find((candidate) => candidate.taskId === command.taskId);
+      const recommendation = recovery?.providerEscalation;
+      const continuesInterruptedReplacement = recovery
+        ? continuesInterruptedProviderReplacement({
+            resolution: command.resolution,
+            attempts: recovery.attempts,
+          })
+        : false;
+      if (
+        !run ||
+        !recovery ||
+        !recommendation ||
+        (recommendation.status !== "recommended" && !continuesInterruptedReplacement)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.taskId}' has no pending provider substitution recommendation.`,
+        });
+      }
+      if (
+        command.resolution === "approved" &&
+        recommendation.recommendedProviderInstanceId === null
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No alternate provider is currently available for this Task.",
+        });
+      }
+      const nextRecovery = {
+        ...recovery,
+        providerEscalation: {
+          ...recommendation,
+          status: command.resolution,
+          resolvedAt: command.createdAt,
+        },
+        attentionRequired: continuesInterruptedReplacement ? false : recovery.attentionRequired,
+        updatedAt: command.createdAt,
+      };
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mission",
+          aggregateId: run.missionId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mission.run.reconciled" as const,
+        payload: {
+          run: {
+            ...run,
+            status:
+              command.resolution === "approved" || continuesInterruptedReplacement
+                ? "running"
+                : run.status,
+            attention: run.attention.filter((item) => item.taskId !== command.taskId),
+            attentionReason:
+              command.resolution === "approved"
+                ? null
+                : "Provider substitution recommendation was rejected.",
+            taskRecovery: (run.taskRecovery ?? []).map((candidate) =>
+              candidate.taskId === command.taskId ? nextRecovery : candidate,
+            ),
+            decisions: [
+              ...run.decisions,
+              {
+                id: EventId.make(
+                  `mission-run:${run.id}:provider-substitution:${command.taskId}:${command.resolution}`,
+                ),
+                kind: "replacement" as const,
+                taskId: command.taskId,
+                reason:
+                  command.resolution === "approved"
+                    ? `User approved provider substitution to '${recommendation.recommendedProviderInstanceId}'.`
+                    : continuesInterruptedReplacement
+                      ? "User kept the current provider and explicitly continued after its interrupted replacement attempt."
+                      : "User rejected provider substitution; the failed Task remains in attention.",
+                sourceTaskIds: [command.taskId],
+                occurredAt: command.createdAt,
+              },
+            ],
             updatedAt: command.createdAt,
           },
         },
@@ -1965,10 +2677,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Integration Batch '${command.batchId}' does not exist.`,
         });
       }
-      if (command.type === "integration.continue" && batch.status !== "conflict") {
+      if (
+        command.type === "integration.continue" &&
+        batch.status !== "conflict" &&
+        !canRetryIntegrationOperation(batch)
+      ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: "Only a conflicted Integration Batch can continue.",
+          detail:
+            "Only a conflicted or safely retryable operation-failed Integration Batch can continue.",
         });
       }
       if (
@@ -3464,6 +4181,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Task '${command.taskId}' cannot produce a durable result from incomplete review evidence.`,
         });
       }
+      const riskProjection = projectTaskRisks(task);
       const completed = {
         ...(yield* withEventBase({
           aggregateKind: "task",
@@ -3487,7 +4205,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             assumptions: handoff.assumptions,
             interfaceChanges: handoff.interfaceChanges,
             migrations: handoff.migrations,
-            knownRisks: handoff.knownRisks,
+            knownRisks: riskProjection.remainingRisks,
+            historicalRisks: riskProjection.historicalRisks,
+            resolvedRisks: riskProjection.resolvedRisks,
+            remainingRisks: riskProjection.remainingRisks,
             followUps: handoff.followUps,
             providerInstanceId: thread?.modelSelection.instanceId ?? null,
             threadId: task.threadId,

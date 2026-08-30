@@ -31,7 +31,8 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         ownership_updated_at
         , review_snapshot_json, handoff_json, restore_json, review_error, result_json,
           quality_gate_runs_json, reviews_json
-          , required_resource_ids_json, resource_compliance_json, ownership_requests_json
+          , required_resource_ids_json, resource_compliance_json, ownership_requests_json,
+          replan_json
       ) VALUES (
         ${row.taskId}, ${row.projectId}, ${row.title}, ${row.objective}, ${row.role},
         ${row.modelSelectionJson}, ${row.acceptanceCriteriaJson}, ${row.reviewRequired},
@@ -47,7 +48,8 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         ${row.ownershipViolationsJson}, ${row.ownershipErrorReason}, ${row.ownershipUpdatedAt}
         , ${row.reviewSnapshotJson}, ${row.handoffJson}, ${row.restoreJson}, ${row.reviewError},
           ${row.resultJson}, ${row.qualityGateRunsJson}, ${row.reviewsJson}
-          , ${row.requiredResourceIdsJson}, ${row.resourceComplianceJson}, ${row.ownershipRequestsJson}
+          , ${row.requiredResourceIdsJson}, ${row.resourceComplianceJson}, ${row.ownershipRequestsJson},
+          ${row.replanJson}
       )
       ON CONFLICT (task_id) DO UPDATE SET
         project_id = excluded.project_id,
@@ -93,6 +95,7 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
         , required_resource_ids_json = excluded.required_resource_ids_json
         , resource_compliance_json = excluded.resource_compliance_json
         , ownership_requests_json = excluded.ownership_requests_json
+        , replan_json = excluded.replan_json
     `,
   });
 
@@ -141,6 +144,7 @@ const makeProjectionTaskRepository = Effect.gen(function* () {
     , required_resource_ids_json AS "requiredResourceIdsJson"
     , resource_compliance_json AS "resourceComplianceJson"
     , ownership_requests_json AS "ownershipRequestsJson"
+    , replan_json AS "replanJson"
   `;
 
   const getRow = SqlSchema.findOneOption({

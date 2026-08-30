@@ -120,6 +120,9 @@ captures state as hidden Git refs through the VCS driver's checkpoint operations
 baseline capture, completed-turn capture, diff projection, and reverting both the workspace and the
 provider conversation. The storage contract is `VcsCheckpointOps` in
 [`VcsDriver.ts`](../../apps/server/src/vcs/VcsDriver.ts), implemented for Git in the same directory.
+Human-readable ref segments remain stable for ordinary IDs. Deeply nested Mission and Replan IDs are
+replaced with deterministic `sha256-` segments before writing loose refs, keeping each path component
+below filesystem limits without changing the checkpoint or Integration artifact identity.
 
 ## Startup
 

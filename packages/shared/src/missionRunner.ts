@@ -50,6 +50,31 @@ export function deterministicMissionTaskIds(mission: Mission): ReadonlyArray<Tas
     .map(({ taskId }) => taskId);
 }
 
+export function currentMissionRunTasks(
+  tasks: ReadonlyArray<OrchestrationTask>,
+): ReadonlyArray<OrchestrationTask> {
+  return tasks.filter((task) => task.replan?.state !== "superseded");
+}
+
+export function currentMissionRunTaskIds(
+  mission: Mission,
+  tasks: ReadonlyArray<OrchestrationTask>,
+): ReadonlyArray<TaskId> {
+  const currentTaskIds = new Set(currentMissionRunTasks(tasks).map((task) => task.id));
+  return deterministicMissionTaskIds(mission).filter((taskId) => currentTaskIds.has(taskId));
+}
+
+export function canRetryIntegrationOperation(
+  batch: Pick<IntegrationBatch, "status" | "failureCode" | "workspacePath" | "tasks">,
+): boolean {
+  return (
+    batch.status === "failed" &&
+    batch.failureCode === "integration-operation-failed" &&
+    batch.workspacePath !== null &&
+    batch.tasks.some((task) => task.status === "pending" || task.status === "applying")
+  );
+}
+
 export type MissionCheckpointState =
   | "pending_tasks"
   | "pending_gates"
@@ -131,6 +156,13 @@ function configurationAttention(input: {
 }): MissionRunAttention[] {
   const { task, project, providerReadyTaskIds } = input;
   const attention: MissionRunAttention[] = [];
+  if (task.replan?.state === "stale" || task.replan?.state === "requires_review")
+    attention.push({
+      taskId: task.id,
+      code: "replan_context_stale",
+      detail: "Task inputs or contract context are stale after an applied Replan.",
+      blocksMission: false,
+    });
   if (task.role !== "builder")
     attention.push({
       taskId: task.id,
@@ -230,7 +262,10 @@ export function planMissionRunScheduling(input: {
     ]),
   );
   const scheduled = new Set(
-    input.run.scheduledTaskIds.filter((taskId) => taskById.get(taskId)?.status !== "completed"),
+    input.run.scheduledTaskIds.filter((taskId) => {
+      const status = taskById.get(taskId)?.status;
+      return status !== "completed" && status !== "cancelled";
+    }),
   );
   const activeTaskIds = input.mission.taskIds.filter(
     (taskId) => taskById.get(taskId)?.status === "active",
@@ -375,8 +410,55 @@ export function missionIntegrationOverlapPaths(
 }
 
 const missingArtifactRiskPattern =
-  /\b(?:absent|missing|does not exist|neither .+ exists|not currently executable|incomplete)\b/i;
-const repositoryPathPattern = /\b(?:apps|docs|packages|src|tests)\/[a-z0-9_./-]+\.[a-z0-9]+\b/gi;
+  /\b(?:absent|missing|does not exist|neither .+ exists|not currently executable|incomplete|untracked)\b/i;
+const repositoryPathPattern =
+  /\b(?:apps|docs|packages|src|test|tests)\/[a-z0-9_./-]+\.[a-z0-9]+\b/gi;
+const failedValidationRiskPattern =
+  /\b(?:full|required|final|integration|unit)\b.{0,80}\b(?:validation|test|suite|gate)\b.{0,80}\b(?:does not pass|did not pass|failed|not (?:run|executable))\b/i;
+const missingRequiredTestEvidenceRiskPattern =
+  /(?:\b(?:missing|absent|no)\b.{0,80}\b(?:required|focused|canonical)?\s*(?:test|quality gate)\s+evidence\b|\b(?:required|focused|canonical)?\s*(?:test|quality gate)\s+evidence\b.{0,80}\b(?:missing|absent|not (?:run|recorded|retained|available))\b)/i;
+
+export function projectTaskRisks(task: OrchestrationTask) {
+  const historicalRisks = [
+    ...new Set([
+      ...(task.result?.historicalRisks ?? []),
+      ...(task.handoff?.historicalRisks ?? []),
+      ...(task.result?.knownRisks ?? []),
+      ...(task.handoff?.knownRisks ?? []),
+    ]),
+  ];
+  const snapshotId = task.reviewSnapshot?.status === "current" ? task.reviewSnapshot.id : null;
+  const requiredQualityRuns = (task.qualityGateRuns ?? []).filter(
+    (run) => run.required && run.snapshotId === snapshotId,
+  );
+  const canonicalTestEvidence =
+    snapshotId !== null &&
+    requiredQualityRuns.length > 0 &&
+    requiredQualityRuns.every((run) => run.status === "passed");
+  const crossProviderApproval =
+    snapshotId !== null &&
+    (task.reviews ?? []).some(
+      (review) =>
+        review.snapshotId === snapshotId &&
+        review.status === "completed" &&
+        review.diversity === "cross-provider" &&
+        (review.verdict === "approve" || review.verdict === "approve_with_notes"),
+    );
+  const persistedResolved = new Set(task.result?.resolvedRisks ?? []);
+  const resolvedRisks = historicalRisks.filter(
+    (risk) =>
+      persistedResolved.has(risk) ||
+      (canonicalTestEvidence &&
+        crossProviderApproval &&
+        missingRequiredTestEvidenceRiskPattern.test(risk)),
+  );
+  const resolved = new Set(resolvedRisks);
+  return {
+    historicalRisks,
+    resolvedRisks,
+    remainingRisks: historicalRisks.filter((risk) => !resolved.has(risk)),
+  };
+}
 
 export function reconcileMissionRisks(input: {
   readonly historicalRisks: ReadonlyArray<string>;
@@ -408,11 +490,14 @@ export function reconcileMissionRisks(input: {
   };
   const hasCanonicalReplacementEvidence = (risk: string) =>
     input.finalEvidenceComplete && /^builder-reported evidence:\s*none retained\.?$/i.test(risk);
+  const hasCurrentValidationEvidence = (risk: string) =>
+    input.finalEvidenceComplete && failedValidationRiskPattern.test(risk);
   const resolvedRisks = input.historicalRisks.filter(
     (risk) =>
       input.explicitResolvedRisks.has(risk) ||
       hasIntegratedArtifactEvidence(risk) ||
-      hasCanonicalReplacementEvidence(risk),
+      hasCanonicalReplacementEvidence(risk) ||
+      hasCurrentValidationEvidence(risk),
   );
   const resolved = new Set(resolvedRisks);
   return {
@@ -435,6 +520,7 @@ export function buildMissionFinalReport(input: {
   readonly planHumanEditCount?: number;
   readonly generatedAt: string;
 }): MissionFinalReport {
+  const currentTasks = input.tasks.filter((task) => task.replan?.state !== "superseded");
   const recovery = input.run.taskRecovery ?? [];
   const providersUsed = new Set(
     recovery.flatMap((state) => state.attempts.map((attempt) => attempt.providerInstanceId)),
@@ -442,7 +528,7 @@ export function buildMissionFinalReport(input: {
   for (const task of input.tasks) {
     if (task.result?.providerInstanceId) providersUsed.add(task.result.providerInstanceId);
   }
-  const reviewSummary = summarizeMissionReviewCoverage(input.tasks);
+  const reviewSummary = summarizeMissionReviewCoverage(currentTasks);
   const requiredFinalGates = (input.integrationQualityGateRuns ?? []).filter((run) => run.required);
   const waitingResourceTaskIds = new Set(
     input.run.decisions.flatMap((decision) =>
@@ -453,6 +539,20 @@ export function buildMissionFinalReport(input: {
     (count, state) =>
       count + state.attempts.filter((attempt) => attempt.kind === "replacement").length,
     0,
+  );
+  const appliedReplans = (input.run.replanProposals ?? []).filter(
+    (proposal) => proposal.status === "applied",
+  );
+  const rejectedReplans = (input.run.replanProposals ?? []).filter(
+    (proposal) => proposal.status === "rejected",
+  );
+  const addedTaskIds = new Set(
+    (input.mission.planVersions ?? []).flatMap((version) => version.addedTaskIds),
+  );
+  const preservedTaskIds = new Set(
+    (input.mission.planVersions ?? [])
+      .filter((version) => version.source === "replan")
+      .flatMap((version) => version.preservedTaskIds),
   );
   const remediationRoundCount = recovery.reduce(
     (count, state) => count + state.remediationRounds,
@@ -484,12 +584,14 @@ export function buildMissionFinalReport(input: {
   const filesChanged = [
     ...new Set(input.tasks.flatMap((task) => (task.result?.files ?? []).map((file) => file.path))),
   ].toSorted();
+  const taskRiskProjections = input.tasks.map(projectTaskRisks);
   const historicalRisks = [
-    ...new Set(input.tasks.flatMap((task) => task.result?.knownRisks ?? [])),
+    ...new Set(taskRiskProjections.flatMap((projection) => projection.historicalRisks)),
   ];
-  const explicitResolutionEvidence = new Set(
-    (input.integrationHumanChanges ?? []).flatMap((change) => change.resolvedRisks ?? []),
-  );
+  const explicitResolutionEvidence = new Set([
+    ...taskRiskProjections.flatMap((projection) => projection.resolvedRisks),
+    ...(input.integrationHumanChanges ?? []).flatMap((change) => change.resolvedRisks ?? []),
+  ]);
   const { resolvedRisks, remainingRisks } = reconcileMissionRisks({
     historicalRisks,
     explicitResolvedRisks: explicitResolutionEvidence,
@@ -503,13 +605,35 @@ export function buildMissionFinalReport(input: {
   return {
     missionObjective: input.mission.objective,
     ...(input.planVersion ? { planVersion: input.planVersion } : {}),
-    taskIds: [...input.mission.taskIds],
-    completedTaskIds: input.tasks
+    planVersionCount: Math.max(1, input.mission.planVersions?.length ?? 0),
+    taskIds: currentTasks.map((task) => task.id),
+    completedTaskIds: currentTasks
       .filter((task) => task.status === "completed")
       .map((task) => task.id),
     attemptCount: recovery.reduce((count, state) => count + state.attempts.length, 0),
     providersUsed: [...providersUsed].toSorted(),
     providerReplacementCount,
+    appliedReplanCount: appliedReplans.length,
+    taskReplanCount: appliedReplans.filter(
+      (proposal) => proposal.scope === "task_repair" || proposal.scope === "task_split",
+    ).length,
+    subgraphReplanCount: appliedReplans.filter((proposal) => proposal.scope === "mission_subgraph")
+      .length,
+    missionReplanCount: appliedReplans.filter((proposal) => proposal.scope === "full_mission")
+      .length,
+    rejectedReplanCount: rejectedReplans.length,
+    supersededTaskCount: input.tasks.filter((task) => task.replan?.state === "superseded").length,
+    modifiedTaskCount: appliedReplans.reduce(
+      (count, proposal) => count + (proposal.changeSet?.modifiedTasks.length ?? 0),
+      0,
+    ),
+    preservedTaskCount: preservedTaskIds.size,
+    dynamicTaskCount: addedTaskIds.size,
+    replanTriggers: appliedReplans.flatMap((proposal) =>
+      proposal.trigger ? [proposal.trigger] : [],
+    ),
+    replanScopes: appliedReplans.map((proposal) => proposal.scope),
+    providerSubstitutionCount: providerReplacementCount,
     retryCount: recovery.reduce((count, state) => count + state.transientRetries, 0),
     remediationRoundCount,
     qualityGateCount: input.tasks.reduce(
@@ -586,14 +710,12 @@ export function missionRunCompletionBlockers(input: {
   readonly integrationBatch: IntegrationBatch | null;
 }): ReadonlyArray<string> {
   const blockers: string[] = [];
+  const requiredTasks = input.tasks.filter((task) => task.replan?.state !== "superseded");
   if (input.run.swarmPolicy?.autoCompleteMission !== true)
     blockers.push("Mission auto-completion is disabled for this Run.");
-  if (
-    input.tasks.length !== input.mission.taskIds.length ||
-    input.tasks.some((task) => task.status !== "completed")
-  )
+  if (requiredTasks.some((task) => task.status !== "completed"))
     blockers.push("All required Tasks must be completed.");
-  for (const task of input.tasks) {
+  for (const task of requiredTasks) {
     if (task.reviewRequired === true) {
       const currentApproval =
         task.reviewSnapshot?.status === "current" &&
@@ -646,13 +768,26 @@ export function buildTaskContextPackage(input: {
     const handoff = prerequisite.handoff;
     const result = prerequisite.result;
     const review = prerequisite.reviews?.findLast((candidate) => candidate.status === "completed");
+    const risks = projectTaskRisks(prerequisite);
+    const tests = handoff?.testsRun ?? result?.testsRun ?? [];
     return [
       `Prerequisite Task: ${prerequisite.title} (${prerequisite.id})`,
       `Handoff: ${bounded(handoff?.summary || result?.summary || "No structured summary retained.", 1_500)}`,
+      `Artifact identity: ${prerequisite.reviewSnapshot?.branchHead ?? result?.snapshotId ?? "No canonical artifact identity retained."}`,
+      `Task branch: ${result?.branch ?? prerequisite.workspace?.branch ?? "No canonical Task branch retained."}`,
       "Interface changes:",
       ...lines(handoff?.interfaceChanges ?? result?.interfaceChanges ?? [], 12),
-      "Known risks:",
-      ...lines(handoff?.knownRisks ?? result?.knownRisks ?? [], 12),
+      "Canonical tests:",
+      ...lines(
+        tests.map((test) => `${test.command}: ${test.result} (${test.evidence})`),
+        20,
+      ),
+      "Historical risks:",
+      ...lines(risks.historicalRisks, 12),
+      "Resolved risks:",
+      ...lines(risks.resolvedRisks, 12),
+      "Current remaining risks:",
+      ...lines(risks.remainingRisks, 12),
       "Relevant changed files:",
       ...lines(
         (result?.files ?? []).map((file) => file.path),
@@ -668,14 +803,23 @@ export function buildTaskContextPackage(input: {
     "Mission context injected by Nebula (not user-authored)",
     `Mission: ${input.mission.title}`,
     `Mission objective: ${bounded(input.mission.objective, 2_000)}`,
+    `Current Plan: v${input.mission.currentPlanVersion ?? 1}`,
     `Task: ${input.task.title}`,
     `Task objective: ${bounded(input.task.objective, 2_000)}`,
+    `Task specification: current Plan-v${input.task.replan?.planVersion ?? input.mission.currentPlanVersion ?? 1} execution intent`,
     "Acceptance criteria:",
     ...lines(input.task.acceptanceCriteria ?? [], 20),
+    "",
+    "Structured coordination protocol:",
+    "If repository evidence invalidates the current Plan and work must stop for a bounded replan, include this exact JSON shape in the final assistant response. Replace the placeholder strings with bounded evidence; do not rename keys, change type/kind, or wrap it in an alternative XML protocol.",
+    '{"type":"nebula_coordination_request","kind":"replan_request","reason":"Why the current Plan cannot execute without guessing","scope":"mission_subgraph","trigger":"assumption_invalidated","evidence":[{"kind":"repository_fact","summary":"Short evidence summary","expected":"The contract or artifact the Plan assumed","observed":"What the repository actually contains","source":"Repository-relative paths or other bounded canonical evidence"}]}',
+    "A replan request requires a non-empty reason, trigger, and at least one evidence item. Do not edit outside Write scope while waiting for replanning.",
     "",
     ...prerequisiteSections,
     "Resource context:",
     ...lines(resourceContext, 20),
+    "",
+    "The current Task objective, acceptance criteria, and prerequisite handoffs are authoritative for execution. Earlier Plan specifications are historical evidence only.",
     "",
     "This bounded package contains durable Mission, handoff, review, file, assumption, risk, and resource evidence only. It excludes provider transcripts, hidden reasoning, credentials, and unbounded diffs.",
   ].join("\n");

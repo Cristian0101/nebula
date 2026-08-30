@@ -50,6 +50,18 @@ it("resumes with B after restart when A is already durably applied", () => {
   expect(secondRecovery.some((task) => task.taskId === "task-a")).toBe(false);
 });
 
+it("does not reapply Integration artifacts invalidated by a newer Mission Plan", () => {
+  const tasks = [
+    { taskId: "task-a", order: 0, status: "invalidated", appliedCommit: null },
+    { taskId: "task-b", order: 1, status: "correction_required", appliedCommit: "old-b" },
+    { taskId: "task-c", order: 2, status: "pending", appliedCommit: null },
+  ] as never;
+
+  expect(orderedRemainingIntegrationTasks({ tasks }).map((task) => task.taskId)).toEqual([
+    "task-c",
+  ]);
+});
+
 it("extracts only explicit non-sensitive Integration risk-resolution trailers", () => {
   expect(
     integrationResolvedRisksFromCommitMessage(
@@ -65,7 +77,7 @@ it("extracts only explicit non-sensitive Integration risk-resolution trailers", 
 });
 
 it.layer(layer)("deterministic Task Integration artifacts", (it) => {
-  it.effect("materializes the approved tree once without checking it out", () =>
+  it.effect("materializes a long-ID approved tree once without checking it out", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -92,9 +104,13 @@ it.layer(layer)("deterministic Task Integration artifacts", (it) => {
       yield* run(["update-ref", checkpointRef, approvedCommit]);
       yield* run(["switch", "--detach", baseCommit]);
 
+      const artifactId = Array.from(
+        { length: 12 },
+        (_, index) => `task-artifact:mission-replan-${index}`,
+      ).join(":");
       const input = {
         sourceRepository: cwd,
-        artifactId: "artifact-a",
+        artifactId,
         checkpointRef,
         baseCommit,
         taskTitle: "Approved Task",
@@ -115,7 +131,7 @@ it.layer(layer)("deterministic Task Integration artifacts", (it) => {
       expect((yield* run(["rev-parse", `${first.commit}^`])).stdout.trim()).toBe(baseCommit);
       expect((yield* run(["rev-parse", "HEAD"])).stdout.trim()).toBe(baseCommit);
       expect(
-        (yield* run(["rev-parse", taskIntegrationArtifactRef("artifact-a")])).stdout.trim(),
+        (yield* run(["rev-parse", taskIntegrationArtifactRef(artifactId)])).stdout.trim(),
       ).toBe(first.commit);
       const message = (yield* run(["show", "-s", "--format=%B", first.commit])).stdout;
       expect(message).toContain("Nebula-Task-Result: task-result-a");
