@@ -5,7 +5,7 @@ description: Launch and test T3 Code Mobile on an iOS Simulator or Android Emula
 
 # Test T3 Mobile
 
-Run one focused, end-to-end mobile verification pass against disposable T3 state. Use the sibling [`test-t3-app`](../test-t3-app/SKILL.md) skill as the detailed reference for pairing-token semantics and SQLite fixtures.
+Follow [root AGENTS.md](../../../AGENTS.md) for authority, secrets, and lifecycle. When mobile verification is authorized, run one focused pass against task-owned state. Use the sibling [`test-t3-app`](../test-t3-app/SKILL.md) skill as the detailed reference for pairing-token semantics and SQLite fixtures.
 
 Command examples use POSIX shell syntax. On Windows, use PowerShell equivalents: set variables with `$env:NAME = "value"`, use an explicit temporary directory from `[System.IO.Path]::GetTempPath()`, and run multiline examples on one line or with PowerShell backticks. Use `$env:ANDROID_HOME\platform-tools\adb.exe` when `adb` is not already on `PATH`.
 
@@ -149,7 +149,7 @@ Do not enter pairing hosts or tokens through simulator keyboard automation. Xcod
 
 Verify the expected seeded projects appear before exercising the affected flow.
 
-Pairing credentials are secret, short-lived, and single-use. Create a different credential for every simulator, emulator, physical device, or browser. If an attempt fails, issue a new credential rather than retrying the old one. Do not expose tokens in screenshots, commits, or final responses.
+Pairing credentials are secret, short-lived, and single-use. Create a different credential for every simulator, emulator, physical device, or browser. If an attempt fails, issue a new credential rather than retrying the old one. Keep tokens out of logs, screenshots, commits, public artifacts, and ordinary final reports. Only the root policy's explicit private user-handoff exception permits surfacing a required value.
 
 ## Drive and observe the affected flow
 
@@ -165,14 +165,14 @@ Android does not use serve-sim. Use a browser-compatible Android mirror when the
 
 ## Verify and clean up
 
-Exercise only the affected flow on one representative device unless the change specifically concerns platform, OS version, or screen size. Before finishing:
+Exercise only the affected flow on one representative device unless the change specifically concerns platform, OS version, or screen size. Keep the environment and client available for requested review or continued iteration, following the web skill lifecycle. Capture evidence after pairing has left the credential screen. When the overall testing loop is finished:
 
 1. Confirm the app connected to the intended disposable environment instead of merely rendering an empty disconnected state.
 2. Capture the relevant final state.
 3. Remove the disposable environment from T3 Code Dev.
 4. Remove any `adb reverse` rule created for this test with `adb -s <emulator-serial> reverse --remove tcp:<metro-port>`.
 5. Stop only the serve-sim, Metro, backend, emulator, and log processes started by this test.
-6. Remove only base directories and temporary Git repositories deliberately created for this test. Preserve them when they contain useful reproduction evidence.
+6. Remove only proven disposable base directories and temporary Git repositories owned by this test after checking resolved paths and process use. Preserve useful reproduction evidence or uncertain state.
 
 Keep local verification focused. Do not turn this workflow into a full repository test run.
 

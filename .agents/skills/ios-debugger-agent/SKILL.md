@@ -5,7 +5,7 @@ description: Build, launch, inspect, and drive iOS apps with the repository-conf
 
 # iOS Debugger Agent
 
-Use the repository-configured `xcodebuildmcp` tools instead of requiring a globally installed Codex plugin. Prefer MCP tools over raw `xcodebuild`, `xcrun`, or `simctl` when the client exposes them.
+Follow [root AGENTS.md](../../../AGENTS.md) for authorization, secrets, and environment retention. Use the repository-configured `xcodebuildmcp` tools instead of requiring a globally installed Codex plugin. Prefer MCP tools over raw `xcodebuild`, `xcrun`, or `simctl` when the client exposes them.
 
 ## Confirm availability
 
@@ -57,7 +57,7 @@ Use `gesture` or scoped swipe actions when needed. If a gesture is unreliable, r
 
 ## Clean up
 
-Stop only log captures, debugger sessions, apps, or simulators started for the current test. Leave pre-existing simulators and unrelated sessions alone.
+When the overall verification/review loop ends, stop only log captures, debugger sessions, apps, or simulators started for this test. Retain the client for requested review or iteration. Leave pre-existing simulators and unrelated sessions alone; exclude pairing/secret screens from captures.
 
 ## Upstream
 
