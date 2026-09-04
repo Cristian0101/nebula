@@ -192,7 +192,6 @@ function pickFromPoint(clientX: number, clientY: number): Element | null {
   for (const candidate of document.elementsFromPoint(clientX, clientY)) {
     if (!(candidate instanceof Element)) continue;
     if (isAnnotationNode(candidate)) continue;
-    if (candidate === document.documentElement || candidate === document.body) continue;
     return candidate;
   }
   return null;
@@ -427,6 +426,8 @@ function startAnnotation(): void {
   toolbar.className =
     "pointer-events-auto fixed top-2.5 left-1/2 flex -translate-x-1/2 gap-0.5 rounded-lg border border-border bg-popover/95 p-1 text-popover-foreground shadow-lg backdrop-blur-xl";
   toolbar.style.zIndex = String(CHROME_LAYER_Z_INDEX);
+  // Shadow-root styles cannot rely on document-level @property defaults.
+  toolbar.style.translate = "-50% 0";
   root.appendChild(toolbar);
 
   const editor = document.createElement("div");

@@ -5,6 +5,19 @@
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));
 
+/* Empty Terminal Workspace slots fade away while surviving pane slots morph
+   into their new bounds. The root stays stationary so the desktop shell never
+   flashes during a discrete add/remove operation. */
+html[data-terminal-workspace-layout-transition="true"]::view-transition-old(root),
+html[data-terminal-workspace-layout-transition="true"]::view-transition-new(root) {
+  animation: none;
+}
+
+html[data-terminal-workspace-layout-transition="true"]::view-transition-group(*) {
+  animation-duration: 180ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
 /* On mobile, morph the expanded hero composer into the compact docked
    composer while it moves; the rest of the app remains visually stationary. */
 html[data-mobile-composer-route-transition="true"]::view-transition-old(root),

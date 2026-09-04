@@ -119,6 +119,51 @@ describe("uiStateStore pure functions", () => {
     expect(panes.find((pane) => pane.id === invalid.id)?.externalServer).toBeNull();
   });
 
+  it("sanitizes workspace modes, resizable ratios, and role-based dock defaults", () => {
+    const state = createDefaultTerminalWorkspaceProjectState({
+      projectId: "project-one",
+      workspacePath: "/repo",
+      now: "2026-08-26T12:00:00.000Z",
+    });
+    const preview = createTerminalWorkspacePane({
+      id: "preview",
+      type: "preview",
+      title: "Preview",
+      workspacePath: "/repo",
+    });
+    const { dock: _legacyDock, ...legacyPreview } = preview;
+    const parsed = parsePersistedState({
+      terminalWorkspacesByProjectId: {
+        "project-one": {
+          ...state,
+          workspaces: [
+            {
+              ...state.workspaces[0]!,
+              mode: "build_preview",
+              previewPaneId: preview.id,
+              workbenchColumnRatios: [10, 20, 70],
+              workbenchCanvasHeight: 99_999,
+              buildPreviewRatio: 99,
+              buildPreviewRailRatio: 2,
+              panes: [legacyPreview],
+            },
+          ],
+        },
+      },
+    });
+    const workspace = parsed.terminalWorkspacesByProjectId["project-one"]!.workspaces[0]!;
+
+    expect(workspace.mode).toBe("build_preview");
+    expect(workspace.previewPaneId).toBe(preview.id);
+    expect(workspace.workbenchColumnRatios?.reduce((sum, ratio) => sum + ratio, 0)).toBeCloseTo(
+      100,
+    );
+    expect(workspace.buildPreviewRatio).toBe(82);
+    expect(workspace.buildPreviewRailRatio).toBe(28);
+    expect(workspace.workbenchCanvasHeight).toBe(6_000);
+    expect(workspace.panes[0]?.dock?.area).toBe("right");
+  });
+
   it("restores canonical Task bindings and keeps legacy panes general", () => {
     const state = createDefaultTerminalWorkspaceProjectState({
       projectId: "project-one",
@@ -147,6 +192,112 @@ describe("uiStateStore pure functions", () => {
 
     expect(panes.find((pane) => pane.id === "task-shell")?.taskId).toBe("task-one");
     expect(panes.find((pane) => pane.id === "legacy-shell")?.taskId).toBeNull();
+  });
+
+  it("persists linked agent surfaces and cross-Workspace service ownership", () => {
+    const state = createDefaultTerminalWorkspaceProjectState({
+      projectId: "project-one",
+      workspacePath: "/repo",
+      now: "2026-08-26T12:00:00.000Z",
+    });
+    const chat = createTerminalWorkspacePane({
+      id: "agent-chat",
+      type: "provider",
+      title: "Codex",
+      providerInstanceId: "codex",
+      agentSurface: "chat",
+      linkedPaneId: "agent-terminal",
+      workspacePath: "/repo",
+    });
+    const service = createTerminalWorkspacePane({
+      id: "service-logs",
+      type: "logs",
+      title: "Web App Logs",
+      terminalId: "dev-server",
+      terminalThreadId: "workspace-origin-thread",
+      sourceWorkspaceId: "workspace-origin",
+      workspacePath: "/repo",
+    });
+    const parsed = parsePersistedState({
+      terminalWorkspacesByProjectId: {
+        "project-one": {
+          ...state,
+          workspaces: [{ ...state.workspaces[0]!, panes: [chat, service] }],
+        },
+      },
+    });
+    const panes = parsed.terminalWorkspacesByProjectId["project-one"]!.workspaces[0]!.panes;
+
+    expect(panes.find((pane) => pane.id === chat.id)).toMatchObject({
+      agentSurface: "chat",
+      linkedPaneId: "agent-terminal",
+    });
+    expect(panes.find((pane) => pane.id === service.id)).toMatchObject({
+      terminalThreadId: "workspace-origin-thread",
+      sourceWorkspaceId: "workspace-origin",
+    });
+  });
+
+  it("restores recursive splits, active tabs, file targets, and preset identity", () => {
+    const state = createDefaultTerminalWorkspaceProjectState({
+      projectId: "project-one",
+      workspacePath: "/repo",
+      now: "2026-08-26T12:00:00.000Z",
+    });
+    const shell = state.workspaces[0]!.panes[0]!;
+    const file = createTerminalWorkspacePane({
+      id: "file-readme",
+      type: "file",
+      title: "README.md",
+      filePath: "README.md",
+      workspacePath: "/repo",
+    });
+    const parsed = parsePersistedState({
+      terminalWorkspacesByProjectId: {
+        "project-one": {
+          ...state,
+          workspaces: [
+            {
+              ...state.workspaces[0]!,
+              panes: [shell, file],
+              layoutPreset: "main_rail",
+              layoutTree: {
+                id: "root",
+                kind: "split",
+                direction: "horizontal",
+                ratio: 99,
+                first: {
+                  id: "main",
+                  kind: "stack",
+                  paneIds: [shell.id],
+                  activePaneId: shell.id,
+                },
+                second: {
+                  id: "rail",
+                  kind: "stack",
+                  paneIds: [file.id, shell.id, "missing"],
+                  activePaneId: file.id,
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+    const workspace = parsed.terminalWorkspacesByProjectId["project-one"]!.workspaces[0]!;
+
+    expect(workspace.layoutPreset).toBe("main_rail");
+    expect(workspace.layoutTree).toMatchObject({
+      kind: "split",
+      direction: "horizontal",
+      ratio: 85,
+      first: { kind: "stack", paneIds: [shell.id], activePaneId: shell.id },
+      second: { kind: "stack", paneIds: [file.id], activePaneId: file.id },
+    });
+    expect(workspace.panes.find((pane) => pane.id === file.id)).toMatchObject({
+      type: "file",
+      filePath: "README.md",
+    });
   });
 
   it("keeps global and project Terminal Center canvases independent", () => {

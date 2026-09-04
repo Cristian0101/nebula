@@ -12,9 +12,14 @@ import {
 } from "./components/terminalCenter/terminalCenterLogic";
 import {
   TERMINAL_WORKSPACE_LAYOUTS,
+  TERMINAL_WORKSPACE_MODES,
   TERMINAL_WORKSPACE_GRID_PRESETS,
+  TERMINAL_WORKSPACE_LAYOUT_PRESETS,
   TERMINAL_WORKSPACE_PANE_TYPES,
+  normalizeDockPlacement,
   normalizeGridPlacement,
+  normalizeWorkbenchColumnRatios,
+  normalizeWorkspaceLayoutTree,
   reflowWorkspaceGrid,
   type TerminalWorkspace,
   type TerminalWorkspaceFreeformPlacement,
@@ -138,16 +143,27 @@ function sanitizeWorkspacePane(value: unknown): TerminalWorkspacePane | null {
     threadId: typeof pane.threadId === "string" ? pane.threadId : null,
     providerInstanceId:
       typeof pane.providerInstanceId === "string" ? pane.providerInstanceId : null,
+    agentSurface:
+      pane.agentSurface === "chat" || pane.agentSurface === "terminal"
+        ? pane.agentSurface
+        : pane.type === "provider" || pane.type === "thread"
+          ? "chat"
+          : null,
+    linkedPaneId: typeof pane.linkedPaneId === "string" ? pane.linkedPaneId : null,
     terminalId: typeof pane.terminalId === "string" ? pane.terminalId : null,
+    terminalThreadId: typeof pane.terminalThreadId === "string" ? pane.terminalThreadId : null,
+    sourceWorkspaceId: typeof pane.sourceWorkspaceId === "string" ? pane.sourceWorkspaceId : null,
     devServerProfileId:
       typeof pane.devServerProfileId === "string" ? pane.devServerProfileId : null,
     attachedPaneId: typeof pane.attachedPaneId === "string" ? pane.attachedPaneId : null,
     command: typeof pane.command === "string" ? pane.command : null,
     previewUrl: typeof pane.previewUrl === "string" ? pane.previewUrl : null,
+    filePath: typeof pane.filePath === "string" ? pane.filePath : null,
     externalServer,
     workspacePath: pane.workspacePath,
     grid: normalizeGridPlacement(pane.grid),
     freeform: sanitizeFreeformPlacement(pane.freeform),
+    dock: normalizeDockPlacement(pane.dock, pane.type as TerminalWorkspacePane["type"]),
     visible: pane.visible !== false,
     createdAt,
     updatedAt: typeof pane.updatedAt === "string" ? pane.updatedAt : createdAt,
@@ -166,14 +182,11 @@ function sanitizeTerminalWorkspaces(value: unknown): Record<string, TerminalWork
         const workspace = rawWorkspace as Partial<TerminalWorkspace>;
         if (typeof workspace.id !== "string" || workspace.id.length === 0) return [];
         const paneIds = new Set<string>();
-        let visiblePaneCount = 0;
         const panes = (Array.isArray(workspace.panes) ? workspace.panes : []).flatMap((pane) => {
           const sanitized = sanitizeWorkspacePane(pane);
           if (!sanitized || paneIds.has(sanitized.id)) return [];
           paneIds.add(sanitized.id);
-          if (!sanitized.visible) return [sanitized];
-          visiblePaneCount += 1;
-          return [visiblePaneCount <= 16 ? sanitized : { ...sanitized, visible: false }];
+          return [sanitized];
         });
         const createdAt =
           typeof workspace.createdAt === "string" ? workspace.createdAt : new Date(0).toISOString();
@@ -187,11 +200,22 @@ function sanitizeTerminalWorkspaces(value: unknown): Record<string, TerminalWork
           panes.some((pane) => pane.id === workspace.focusedPaneId && pane.visible)
             ? workspace.focusedPaneId
             : null;
+        const previewPaneId =
+          typeof workspace.previewPaneId === "string" &&
+          panes.some(
+            (pane) =>
+              pane.id === workspace.previewPaneId && pane.visible && pane.type === "preview",
+          )
+            ? workspace.previewPaneId
+            : (panes.find((pane) => pane.visible && pane.type === "preview")?.id ?? null);
         const gridPreset = TERMINAL_WORKSPACE_GRID_PRESETS.includes(
           workspace.gridPreset as TerminalWorkspace["gridPreset"],
         )
           ? (workspace.gridPreset as TerminalWorkspace["gridPreset"])
           : "auto";
+        const workbenchColumnRatios = normalizeWorkbenchColumnRatios(
+          workspace.workbenchColumnRatios,
+        );
         const sanitized: TerminalWorkspace = {
           id: workspace.id,
           name:
@@ -208,6 +232,39 @@ function sanitizeTerminalWorkspaces(value: unknown): Record<string, TerminalWork
           panes,
           selectedPaneId,
           focusedPaneId,
+          mode: TERMINAL_WORKSPACE_MODES.includes(
+            workspace.mode as NonNullable<TerminalWorkspace["mode"]>,
+          )
+            ? (workspace.mode as NonNullable<TerminalWorkspace["mode"]>)
+            : previewPaneId
+              ? "build_preview"
+              : "workbench",
+          previewPaneId,
+          workbenchColumnRatios,
+          ...(Number.isFinite(workspace.workbenchCanvasHeight)
+            ? {
+                workbenchCanvasHeight: Math.min(
+                  6_000,
+                  Math.max(520, workspace.workbenchCanvasHeight!),
+                ),
+              }
+            : {}),
+          layoutTree: normalizeWorkspaceLayoutTree(
+            workspace.layoutTree,
+            panes,
+            workbenchColumnRatios,
+          ),
+          layoutPreset: TERMINAL_WORKSPACE_LAYOUT_PRESETS.includes(
+            workspace.layoutPreset as NonNullable<TerminalWorkspace["layoutPreset"]>,
+          )
+            ? (workspace.layoutPreset as NonNullable<TerminalWorkspace["layoutPreset"]>)
+            : "main_rail",
+          buildPreviewRatio: Number.isFinite(workspace.buildPreviewRatio)
+            ? Math.min(82, Math.max(55, workspace.buildPreviewRatio!))
+            : 70,
+          buildPreviewRailRatio: Number.isFinite(workspace.buildPreviewRailRatio)
+            ? Math.min(72, Math.max(28, workspace.buildPreviewRailRatio!))
+            : 50,
           viewport:
             workspace.viewport &&
             Number.isFinite(workspace.viewport.x) &&

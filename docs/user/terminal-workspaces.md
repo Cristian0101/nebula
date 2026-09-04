@@ -18,19 +18,26 @@ Changing or replacing a provider does not change the Task. Interrupt or stop the
 
 ## Add panes
 
-Choose any empty cell or **New Pane**, then select:
+Choose an empty dock column or **New Pane**. Quick Add separates **Agent**, **Tool**, and **Layout** choices so the common path stays short:
 
 - **Shell** for a real interactive terminal rooted in the selected checkout or worktree.
-- **Codex** or **Antigravity** for a canonical provider Thread with live output, tool events, model information, and a composer.
+- **Agent → Chat GUI** for a canonical provider Thread with live output, tool events, model information, attachments, and a composer.
+- **Agent → Terminal** for the selected provider's configured CLI in a normal interactive PTY. Provider availability, custom binary paths, safe instance environment values, and the active repository or Task worktree are reused.
 - **Dev Server** for an approved development process.
 - **Preview** for the live URL of an attached Dev Server.
 - **Tests** for an explicitly approved test or watch command.
 - **Logs** for the stream of an existing approved process.
+- **File** for a searchable, read-only repository file. The chosen relative path is saved with the pane.
 - **Git Status** for the selected checkout's branch and working-tree evidence.
-- **Task Diff** for the canonical base-to-Task-worktree change set when the pane is Task-bound. Unrelated repository checkout changes are excluded.
+- **Diff** for the current checkout's working-tree patch. The pane uses the same syntax-colored, file-grouped diff renderer as Review and keeps horizontal overflow inside its own slot. When the pane is Task-bound, it shows the canonical base-to-Task-worktree change set and excludes unrelated checkout changes.
 - **Existing Thread** to restore or add an existing canonical conversation.
 
-The drawer also lists reachable **Existing Local Servers**. **Attach & Preview** adds an externally owned server pane and its Preview without starting a duplicate process. **Detach** removes both panes and leaves that process untouched.
+Agent providers come from the same dynamic provider registry used everywhere else in Nebula. A provider that is disabled, missing, or still configuring remains visible with its truthful status instead of producing a dead pane. Use the pane header's **Pane** menu to turn the current slot into Chat, Terminal, Preview, Logs, Diff, Git, or Tests without changing its dock position. Chat and Terminal retain the canonical agent identity and switch between linked companion views without collapsing the pane or losing either history. Provider terminals advertise Nebula's 256-color, true-color-capable surface so Codex, Antigravity, and other CLIs keep their native palettes.
+
+The workspace drawer groups servers into two ownership classes:
+
+- **Project Services** are managed Dev Servers already running in any named Workspace for this Project. **Add Preview Here** and **Add Server + Logs** reuse the original terminal owner and URL without launching a second process. **Focus in…** returns to the owning Workspace.
+- **Other Local Servers** are external processes. **Attach & Preview** adds an externally owned server pane and its Preview. **Detach** removes both panes and leaves that process untouched.
 
 Closing a pane and terminating its underlying process are separate actions. Hiding never silently ends useful work.
 
@@ -40,14 +47,22 @@ Terminal Workspace restores pane layout and Task attachments after reload. Canon
 
 Provider and PTY processes are not promised to survive every Nebula application or machine restart. When exact process resumption is unavailable, the Task, worktree, changed files, terminal history, and review state remain preserved, while the process or agent session is shown as stopped, exited, missing, or interrupted. Recovery never resets a Task worktree.
 
-## Arrange panes
+## Arrange and split panes
 
-- **Grid** offers Auto, 1×1, 2×1, 2×2, 3×2, 3×3, and 4×3 densities. Auto expands only as far as the saved pane geometry needs. Drag a pane header to an empty cell, or drag the lower-right handle to snap its span to the current grid. The header size control remains a keyboard-accessible alternative.
-- **Freeform** preserves independent window positions and sizes. Drag headers to move panes; the resize control provides a keyboard-accessible alternative.
-- **Split View** lays visible panes deterministically. Choose **Split Right** or **Split Down** in the footer.
+- **Workbench** is a recursive split canvas. Shared gutters and subtle edge handles redistribute the space that is already on screen; middle cells expose both sides of an axis, and available corners resize both axes at once. The selected pane on the bottom edge gets a distinct blue floor grip below it. Drag that grip down to extend the scrollable Workbench instead of taking height from agents above it; their pixel heights stay fixed while the bottom pane gains new room. A focused floor grip accepts Arrow Down or Arrow Up in 120-pixel steps. Drag the dedicated pane grip over another pane or the full-canvas dock zones to choose **Left**, **Right**, **Top**, **Bottom**, or **Tab**; every drop creates a nested split or adds the pane to that tab stack instead of overlapping it.
+- **Preview** gives the running app nearly the entire window. A slim rail returns to Workbench or Build + Preview, while the bottom Agent and Logs tray stays collapsed until requested.
+- **Build + Preview** keeps a dominant live Preview beside a narrower rail containing the active Agent and Dev Logs. Both the main gutter and the Agent/Logs gutter are draggable.
 - **Focus** temporarily isolates the selected pane. **Maximize** fills the work area without rewriting its saved geometry. Escape or Restore returns to the exact prior Workspace.
 
-Changing layout modes does not erase the saved Grid or Freeform geometry. If persisted geometry is invalid after an upgrade, Nebula deterministically reflows visible panes and keeps overflow panes hidden instead of overlapping or losing them.
+The always-visible **Layout** menu groups 20 searchable presets into Essentials, Focus, Build, Review, and Dense layouts. The same choices are available under Quick Add's **Layout** section. Presets range from Solo, side-by-side, stacked, and Main + rail through Preview + chat, Diff + preview, Test triage, 3×3, 4×3, and 4×4. A preset replaces only the visual composition: every visible pane remains reachable, and no provider, terminal, server, or canonical Task is closed or duplicated. Empty preset slots keep **Add pane** centered and reveal a subtle remove control in the upper-right corner on hover or keyboard focus. Removing a slot never closes a pane or process; neighboring slots expand into the freed space, while choosing **Add pane** fills the exact slot that was selected.
+
+The recursive split tree, every gutter ratio, extended Workbench height, active tab, selected pane, preset identity, and empty preset slot persist per named Workspace. There is no fixed visible-pane cap in Workbench. Legacy Grid, Freeform, and Split View state is normalized into the recursive layout without overlapping or losing pane membership.
+
+## Design Mode
+
+Open a healthy Preview and choose **Design Mode**. Nebula pins Design Mode to the Preview pane and URL currently on screen; it never launches or attaches a replacement server. Element capture starts immediately. The live app stays on the left while the inspector on the right identifies **Editing this Preview** and guides the capture. Every page surface is selectable, including the document background. Pick a surface to collect its screenshot, source-mapped component and file line when available, HTML context, and authored styles. Add an implementation note, choose a running Chat agent, and choose **Send capture** to deliver the evidence and image as a normal agent turn scoped to that exact Preview. If only a provider Terminal exists, the target menu can open its canonical Chat companion and select it automatically. Exit returns to the mode that was open before Design Mode.
+
+Design Mode never invents a source location when the Preview runtime cannot resolve one. A terminal process is never treated as a durable Chat Thread; Nebula creates or restores the real Chat companion before sending a handoff.
 
 ## Keyboard workflow
 
@@ -57,7 +72,10 @@ The Workspace avoids existing high-value bindings and supports:
 - Shift-Command-T: New Shell
 - Shift-Command-C: New Codex pane
 - Shift-Command-A: New Antigravity pane
+- Command-Backslash: Split Right with a new Shell
+- Shift-Command-Backslash: Split Down with a new Shell
+- Option-Command-T: Select the next tab in the active stack
 - Command-Enter: Focus the selected pane
-- Escape: Return from Focus or Preview Stage
+- Escape: Return from Focus, Preview, or Build + Preview
 
-Empty cells and all pane controls are keyboard focusable. Dragging always has button-based placement and resize alternatives.
+Empty slots and all pane controls are keyboard focusable. Header actions and the Quick Add Layout menu provide button-based alternatives to dragging and resizing.

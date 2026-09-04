@@ -320,6 +320,14 @@ function installTestDom() {
 }
 
 describe("PreviewView navigation", () => {
+  it("fills non-flex preview hosts such as Terminal Workspace panes", () => {
+    const markup = renderToStaticMarkup(
+      <PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />,
+    );
+
+    expect(markup).toContain('class="flex h-full min-h-0 flex-1 flex-col bg-background"');
+  });
+
   beforeEach(() => {
     mocks.navigate.mockClear();
     mocks.rememberPreviewUrl.mockClear();
@@ -526,6 +534,11 @@ describe("PreviewView navigation", () => {
       createdAt: "2026-07-27T00:00:00.000Z",
     };
     const onSendAnnotation = vi.fn();
+    const onAnnotationCaptured = vi.fn();
+    const annotationThreadRef = {
+      environmentId: TEST_THREAD_REF.environmentId,
+      threadId: ThreadId.make("agent-thread"),
+    } as const;
     mocks.pickElement.mockResolvedValue({ annotation, submission: "send" });
 
     renderToStaticMarkup(
@@ -533,13 +546,48 @@ describe("PreviewView navigation", () => {
         threadRef={TEST_THREAD_REF}
         tabId="tab-1"
         visible
+        annotationThreadRef={annotationThreadRef}
+        onAnnotationCaptured={onAnnotationCaptured}
         onSendAnnotation={onSendAnnotation}
       />,
     );
     mocks.toggleAnnotation?.();
 
     await vi.waitFor(() => expect(onSendAnnotation).toHaveBeenCalledWith(annotation, null));
-    expect(mocks.addPreviewAnnotation).toHaveBeenCalledWith(TEST_THREAD_REF, annotation);
+    expect(onAnnotationCaptured).toHaveBeenCalledWith(annotation);
+    expect(mocks.addPreviewAnnotation).toHaveBeenCalledWith(annotationThreadRef, annotation);
+  });
+
+  it("can keep an owning Design Mode capture out of the composer draft", async () => {
+    const annotation = {
+      id: "annotation-scoped",
+      pageUrl: "https://example.com/dashboard",
+      pageTitle: "Dashboard",
+      comment: "Tighten this spacing",
+      elements: [],
+      regions: [],
+      strokes: [],
+      styleChanges: [],
+      screenshot: null,
+      createdAt: "2026-07-27T00:00:00.000Z",
+    };
+    const onAnnotationCaptured = vi.fn();
+    mocks.pickElement.mockResolvedValue({ annotation, submission: "attach" });
+
+    renderToStaticMarkup(
+      <PreviewView
+        threadRef={TEST_THREAD_REF}
+        tabId="tab-1"
+        visible
+        persistAnnotationToDraft={false}
+        onAnnotationCaptured={onAnnotationCaptured}
+      />,
+    );
+    mocks.toggleAnnotation?.();
+
+    await vi.waitFor(() => expect(onAnnotationCaptured).toHaveBeenCalledWith(annotation));
+    expect(mocks.addPreviewAnnotation).not.toHaveBeenCalled();
+    expect(mocks.addImage).not.toHaveBeenCalled();
   });
 
   it("still sends when screenshot attachment conversion fails", async () => {

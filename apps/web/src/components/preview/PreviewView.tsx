@@ -63,6 +63,8 @@ import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 
 interface Props {
   threadRef: ScopedThreadRef;
+  /** Optional composer target for Design Mode handoff from shared Preview surfaces. */
+  annotationThreadRef?: ScopedThreadRef;
   tabId?: string | null;
   configuredUrls?: ReadonlyArray<string> | undefined;
   visible: boolean;
@@ -70,6 +72,11 @@ interface Props {
     annotation: PreviewAnnotationPayload,
     image: ComposerImageAttachment | null,
   ) => void;
+  onAnnotationCaptured?: (annotation: PreviewAnnotationPayload) => void;
+  /** Increment to start the native element picker from an owning Design Mode toolbar. */
+  pickRequestNonce?: number;
+  /** Keep captures local to an owning workflow instead of also staging them in a composer. */
+  persistAnnotationToDraft?: boolean;
 }
 
 const localApi = typeof window === "undefined" ? null : ensureLocalApi();
@@ -80,15 +87,20 @@ const localApi = typeof window === "undefined" ? null : ensureLocalApi();
  */
 export function PreviewView({
   threadRef,
+  annotationThreadRef,
   tabId: requestedTabId,
   configuredUrls,
   visible,
   onSendAnnotation,
+  onAnnotationCaptured,
+  pickRequestNonce,
+  persistAnnotationToDraft = true,
 }: Props) {
   const [focusUrlNonce, setFocusUrlNonce] = useState<number | undefined>(undefined);
   const [pickActive, setPickActive] = useState(false);
   const activeRecordingTabIds = useActiveBrowserRecordingTabIds();
   const pickActiveRef = useRef(false);
+  const handledPickRequestRef = useRef(pickRequestNonce ?? 0);
   const isMountedRef = useRef(true);
   // Kept in sync so the title effect can depend on the stable thread key
   // instead of the thread object, which is recreated on every update.
@@ -559,7 +571,9 @@ export function PreviewView({
         const result = await previewBridge.pickElement(runtimeTabId);
         if (!result) return;
         const { annotation, submission } = result;
-        addPreviewAnnotation(threadRef, annotation);
+        const composerThreadRef = annotationThreadRef ?? threadRef;
+        if (persistAnnotationToDraft) addPreviewAnnotation(composerThreadRef, annotation);
+        onAnnotationCaptured?.(annotation);
         let screenshotFile: File | null = null;
         try {
           screenshotFile = await previewAnnotationScreenshotFile(annotation);
@@ -579,8 +593,8 @@ export function PreviewView({
                 file: screenshotFile,
               } satisfies ComposerImageAttachment)
             : null;
-        if (image) {
-          addImage(threadRef, image);
+        if (image && persistAnnotationToDraft) {
+          addImage(composerThreadRef, image);
         }
         if (submission === "send") {
           onSendAnnotation?.(annotation, image);
@@ -608,7 +622,29 @@ export function PreviewView({
         }
       }
     })();
-  }, [addImage, addPreviewAnnotation, onSendAnnotation, runtimeTabId, threadRef]);
+  }, [
+    addImage,
+    addPreviewAnnotation,
+    annotationThreadRef,
+    onAnnotationCaptured,
+    onSendAnnotation,
+    persistAnnotationToDraft,
+    runtimeTabId,
+    threadRef,
+  ]);
+
+  useEffect(() => {
+    if (
+      !previewBridge ||
+      !runtimeTabId ||
+      !pickRequestNonce ||
+      handledPickRequestRef.current === pickRequestNonce
+    ) {
+      return;
+    }
+    handledPickRequestRef.current = pickRequestNonce;
+    handlePickElement();
+  }, [handlePickElement, pickRequestNonce, runtimeTabId]);
 
   // If the active tab changes mid-pick (close, thread switch, hot restart),
   // tell main to tear down the in-flight session AND reset our local toggle
@@ -653,7 +689,7 @@ export function PreviewView({
 
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col bg-background"
+      className="flex h-full min-h-0 flex-1 flex-col bg-background"
       data-thread-key={scopedThreadKey(threadRef)}
     >
       <PreviewChromeRow

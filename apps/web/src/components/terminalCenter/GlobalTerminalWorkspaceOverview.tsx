@@ -5,7 +5,9 @@ import {
   BotIcon,
   BoxesIcon,
   EyeIcon,
+  FileCode2Icon,
   FileClockIcon,
+  FileDiffIcon,
   FlaskConicalIcon,
   GitBranchIcon,
   PlusIcon,
@@ -14,6 +16,7 @@ import {
 import { useMemo } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
+import { randomUUID } from "../../lib/utils";
 import { useThreadShells } from "../../state/entities";
 import { useKnownTerminalSessions } from "../../state/terminalSessions";
 import { useUiStateStore } from "../../uiStateStore";
@@ -40,6 +43,8 @@ const paneIcons: Record<TerminalWorkspacePaneType, typeof TerminalSquareIcon> = 
   tests: FlaskConicalIcon,
   logs: FileClockIcon,
   git: GitBranchIcon,
+  diff: FileDiffIcon,
+  file: FileCode2Icon,
   thread: BotIcon,
 };
 
@@ -236,7 +241,7 @@ export function GlobalTerminalWorkspaceOverview() {
       const grid = firstAvailableGridPlacement(workspace.panes);
       if (!grid) return;
       const pane = createTerminalWorkspacePane({
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         type: "thread",
         title: thread.title,
         workspacePath: project.workspaceRoot,
