@@ -59,13 +59,15 @@ Opening a Project now shows **Project Home** instead of immediately creating a C
 
 ## 5. Launch a provider session
 
-From the project menu, open **Terminal Center**. The Default Terminal Workspace starts with a live Shell already rooted in the Project. Choose an empty Grid cell or **New Pane** to add Codex, Antigravity, another Shell, an approved Dev Server, Preview, Tests, Logs, Git Status, or an Existing Thread.
+From the project menu, open **Terminal Center**. The Default Terminal Workspace starts with a live Shell already rooted in the Project. Choose an empty Workbench slot or **New Pane** to add a provider Chat or Terminal, Shell, approved Dev Server, Preview, Tests, Logs, repository File, Diff, Git Status, or an Existing Thread.
 
 A provider pane is the canonical Thread. It streams real output and accepts the next turn without creating a duplicate chat surface. A shared checkout is convenient but can collide with other writers; an isolated Task worktree remains the safe default for parallel implementation.
 
-Terminal Workspaces support a 4-by-4 Grid, persistent Freeform geometry, deterministic Split View, and Focus. Hide removes only the pane reference; the Thread and useful processes remain intact and the Hidden panes menu restores them explicitly. Named Workspaces and the last-used state persist across navigation and restart.
+Terminal Workspaces provide a recursively split, resizable **Workbench**, a nearly full-screen **Preview**, a resizable **Build + Preview** mode, and Focus. Apply a one-click layout preset, split any pane in either direction, or stack panes as tabs. Hide removes only the pane reference; the Thread and useful processes remain intact and the Hidden panes menu restores them explicitly. Named Workspaces and the split tree, gutter ratios, active tabs, and last-used mode persist across navigation and restart.
 
 Choose **New Pane → Dev Server** for the first run. Nebula suggests supported Project scripts, shows the command and working directory, and waits for **Approve & Start** before executing. A verified URL can open in a Preview pane or the large Preview Stage beside a live agent and server logs.
+
+In desktop Preview, choose **Design Mode** to pick a live element, review its screenshot and source-mapped context, add an implementation note, and send the capture directly to a Chat agent in the Workspace.
 
 Antigravity model choices come from the installed `agy models` command. When discovery is unavailable, use Auto or an explicit custom model ID; Nebula does not claim a custom ID is valid until the CLI accepts it.
 

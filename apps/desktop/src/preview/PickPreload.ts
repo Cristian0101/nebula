@@ -192,7 +192,6 @@ function pickFromPoint(clientX: number, clientY: number): Element | null {
   for (const candidate of document.elementsFromPoint(clientX, clientY)) {
     if (!(candidate instanceof Element)) continue;
     if (isAnnotationNode(candidate)) continue;
-    if (candidate === document.documentElement || candidate === document.body) continue;
     return candidate;
   }
   return null;
