@@ -5,7 +5,7 @@ description: Launch, retain, and test the T3 Code web app in isolated developmen
 
 # Test T3 App
 
-Use this skill for the web client. For iOS Simulator, Android Emulator, or physical-device testing against an isolated T3 backend, use the sibling [`test-t3-mobile`](../test-t3-mobile/SKILL.md) skill.
+Follow [root AGENTS.md](../../../AGENTS.md) for authority, secrets, and state safety. Use this skill for authorized web-client verification. For iOS Simulator, Android Emulator, or physical-device testing against an isolated T3 backend, use the sibling [`test-t3-mobile`](../test-t3-mobile/SKILL.md) skill.
 
 ## Start an isolated web environment
 
@@ -50,13 +50,13 @@ Treat the overall testing or implementation loop—not an assistant turn or one 
 4. Wait for the pairing exchange and redirect to finish before navigating elsewhere.
 5. Continue in the same browser context so its stored bearer session remains available.
 
-Keep pairing URLs out of screenshots, committed files, and durable logs. When the user asked for a shared environment, the deliverable IS the full pairing URL — paste it in your reply, token and all; a bare origin is useless to them. A pairing token is short-lived and single-use; opening the URL in another browser or opening it twice can consume it, so never open a URL you handed to the user.
+Pairing/bootstrap material is sensitive. Consume credentials only in the authorized private client flow. Surface the full URL only for an explicitly requested handoff that requires it, through the minimum necessary private channel. Never include it in logs, screenshots, commits, PR descriptions, public artifacts, or ordinary final reports. Redact captured startup output before retaining diagnostics; avoid recording the pairing screen. Tokens are single-use: do not open a URL reserved for the user.
 
 ## Recover a consumed or expired pairing token
 
 Run `node apps/server/src/bin.ts pair` from the repository root. It discovers the running dev server (worktree `.t3` first, same precedence as the dev runner) and prints a fresh `Pair URL` against the server's current web origin, including a `--share` tailnet origin. Pass `--base-dir <base-dir>` only when the server was started with `--home-dir`, using the identical path.
 
-Tokens from `pair` carry standard client scopes. The startup pairing URL carries admin scopes; if the user needs Settings → Connections management (`access:write`), restart the server and hand over the new startup URL instead.
+Tokens from `pair` carry standard client scopes. The startup pairing URL carries admin scopes. If a requested handoff needs Settings → Connections management (`access:write`), arrange a fresh startup credential only for a task-owned server whose restart is safe for the current review/iteration loop. Do not restart a shared environment merely to mint a credential; report the admin-access boundary instead.
 
 ## Inspect or seed SQLite state
 
@@ -84,7 +84,7 @@ If completion is uncertain, keep the environment alive and mention that it is re
 ## Troubleshoot predictably
 
 - If the browser shows an unauthenticated pairing screen, issue a new token instead of retrying the consumed URL.
-- If the pairing URL is no longer visible, create a replacement token with both `--dev-url` and `--base-url`.
+- If the pairing URL is no longer visible, use the `pair` recovery command above against the same base directory.
 - If the replacement token is rejected, verify that the CLI and server use the identical absolute base directory and web URL.
 - If the UI shows unexpected data, verify that every command uses the identical explicit base directory before editing anything.
 - If ports move because another instance is running, trust the current dev-runner output rather than assuming ports `13773` and `5733`.

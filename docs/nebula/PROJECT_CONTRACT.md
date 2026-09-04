@@ -1,6 +1,6 @@
 # Nebula project contract
 
-Future coding agents must read this contract before substantial Nebula work. These rules protect the inherited T3 Code foundation and keep Nebula's differentiation focused on coordination.
+Read the relevant portions of this contract for substantial Nebula architecture work. [Root AGENTS.md](../../AGENTS.md) owns repository-wide authority and safety; this contract supplies domain detail. Current implementation establishes behavior, and historical foundation language does not grant or withhold task authority.
 
 ## 1. Fork-first rule
 
@@ -72,7 +72,7 @@ For every future autonomous or agentic action ask:
 
 > How does the user undo this?
 
-If recovery is unclear, the architecture is incomplete. Capture baselines before writable work, preserve reviewable commits, and make cleanup explicit.
+Define recovery where possible. Consequential irreversible actions need explicit authority and a clear recovery/retention decision. Capture baselines before writable work, preserve reviewable commits, and make cleanup explicit.
 
 ## 8. No parallel competing systems
 
@@ -94,7 +94,7 @@ Protect by default:
 - OS credential stores; and
 - production databases.
 
-Never print secret values. Never silently escalate permissions. A Git worktree is not an OS security sandbox. Provider permission modes and RPC scopes remain enforced boundaries.
+Protect secret values under the [root pairing and secret policy](../../AGENTS.md#secrets-and-external-authority), including its narrow private, user-requested pairing handoff exception. Never silently escalate permissions. A Git worktree is not an OS security sandbox; configuration can remain shared through symlinks. Provider permission modes, authenticated transport, and per-method RPC scopes remain enforced boundaries.
 
 ## 11. Branch discipline
 
@@ -110,7 +110,7 @@ chore/*
 upstream-sync/YYYY-MM-DD
 ```
 
-Future Nebula runtime-generated task branches are conceptually:
+Nebula runtime-generated Task branches are conceptually:
 
 ```text
 nebula/<mission-short-id>/<task-short-id>
@@ -120,11 +120,11 @@ Do not identify runtime tasks by provider because providers can be reassigned. B
 
 ## 12. Main protection
 
-Do not directly modify or merge to `main` without the normal review and verification workflow. Future integration automation must target a dedicated integration branch by default, present evidence, and preserve a human-controlled path to `main`.
+Do not directly modify or merge to `main` without the normal review and verification workflow. Integration targets a dedicated integration branch, presents evidence, and preserves a human-controlled path to `main`. Readiness is not merge, release, deployment, or paid-execution authority.
 
-## Required pre-implementation questions
+## Proportional design questions
 
-Before adding a Nebula capability, record concise answers to:
+For substantial capability or boundary changes, use these questions to guide design and record durable decisions where useful. Routine edits do not require a separate planning artifact:
 
 - Which current contract and service own the closest behavior?
 - Is the change REUSE, EXTEND, COMPOSE, NEW NEBULA MODULE, or DEFER?

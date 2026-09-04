@@ -1,21 +1,23 @@
 # Upstream tracking
 
-## Upstream project
+## Recorded upstream baseline
 
-| Field                        | Value                                      |
-| ---------------------------- | ------------------------------------------ |
-| Upstream project             | T3 Code                                    |
-| Upstream repository          | https://github.com/pingdotgg/t3code        |
-| Upstream license             | MIT                                        |
-| Upstream branch              | `main`                                     |
-| Initial Nebula baseline SHA  | `592c5983c14d248aa3cfddb8e6c7372f12cd1ab6` |
-| Baseline date                | 2026-08-21 EDT                             |
-| Current tracked upstream SHA | `592c5983c14d248aa3cfddb8e6c7372f12cd1ab6` |
-| Last sync date               | 2026-08-21 EDT                             |
+This table records the foundation tracking metadata from 2026-08-21; it is not a live sync or release-readiness claim. Verify Git ancestry and remote configuration before an authorized sync.
+
+| Field                         | Value                                      |
+| ----------------------------- | ------------------------------------------ |
+| Upstream project              | T3 Code                                    |
+| Upstream repository           | https://github.com/pingdotgg/t3code        |
+| Upstream license              | MIT                                        |
+| Upstream branch               | `main`                                     |
+| Initial Nebula baseline SHA   | `592c5983c14d248aa3cfddb8e6c7372f12cd1ab6` |
+| Baseline date                 | 2026-08-21 EDT                             |
+| Recorded tracked upstream SHA | `592c5983c14d248aa3cfddb8e6c7372f12cd1ab6` |
+| Recorded sync date            | 2026-08-21 EDT                             |
 
 ## Fork strategy
 
-Nebula is a public native fork of T3 Code. `origin` is the Nebula repository; `upstream` is T3 Code and has a disabled push URL in local checkouts. Nebula preserves upstream history and extends the existing harness rather than replacing it.
+Nebula is a public native fork of T3 Code. `origin` is the Nebula repository; `upstream` denotes T3 Code; verify that its push URL is disabled in the current checkout. Nebula preserves upstream history and extends the existing harness rather than replacing it.
 
 ## Attribution policy
 
@@ -23,7 +25,7 @@ Nebula retains T3 Code's MIT license and its original copyright notice. Nebula d
 
 ## Upstream sync strategy
 
-Do not routinely rebase published `main`. Sync upstream through a dedicated review branch:
+This procedure applies only to an explicitly requested upstream sync; it is not an agent startup requirement. Follow [AGENTS.md](AGENTS.md), inspect dirty/untracked work and remote ancestry first, and isolate rather than overwrite existing work. Do not routinely rebase published `main`. Sync upstream through a dedicated review branch:
 
 ```text
 main
@@ -53,21 +55,23 @@ git merge upstream/main
 
 Never push to `upstream`, and do not merge upstream directly into a feature branch.
 
-## Known divergences
+## Historical foundation divergence
 
-The initial divergence is documentation only:
+At the initial baseline, the divergence was documentation only:
 
 - Nebula README, contribution, security, changelog, and upstream-tracking documentation.
 - Eight architecture decision records under `docs/adr/`.
 - An additional Kaizora Labs copyright notice while preserving T3 Code's notice.
 
-No Nebula product functionality, provider adapters, data model, Git behavior, or client runtime behavior is added in this foundation change.
+That foundation change added no product functionality. Subsequent Nebula work implements Tasks, ownership, Missions, review, quality gates, integration, and provider/client extensions; consult [current contracts](docs/nebula/README.md) and implementation rather than this historical inventory.
 
-## Known merge conflicts
+## Historical merge-conflict record
 
-None known. No upstream sync merge has been attempted.
+No conflicts or attempted sync were recorded at the foundation baseline. This is not evidence about current mergeability.
 
-## Extension points
+## Extension strategy reference
+
+This foundation-era strategy table explains attachment intent, not current capability status. [EXTENSION_CONTRACT.md](docs/nebula/EXTENSION_CONTRACT.md) and verified implementation own current attachment decisions.
 
 | Area                         | Upstream primitive                                                                        | Nebula strategy                                                                                        | Classification          |
 | ---------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------- |

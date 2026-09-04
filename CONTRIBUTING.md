@@ -1,23 +1,23 @@
 # Contributing to Nebula
 
-Nebula is in its repository-foundation phase. Changes should preserve T3 Code compatibility while adding only the orchestration capabilities Nebula needs.
+Nebula is a local-first orchestration system derived from T3 Code. Follow [AGENTS.md](AGENTS.md) for repository-wide safety and authority, and [current Nebula contracts](docs/nebula/README.md) for implemented boundaries.
 
 ## Before you start
 
 - Read [UPSTREAM.md](./UPSTREAM.md) and the relevant ADRs in `docs/adr/`.
 - Keep provider execution provider-neutral: provider-specific behavior belongs at the existing adapter boundary.
 - Do not add a parallel provider runtime, Git layer, event bus, or desktop shell when T3 Code already offers the primitive.
-- Never commit secrets, credentials, local databases, or generated artifacts.
+- Never commit secrets, credentials, local databases, caches, or build output. Intentionally tracked generated source/assets belong with their authoritative generator inputs.
 
 ## Development workflow
 
-1. Update `main` from `origin` with a fast-forward pull.
-2. Create a focused branch.
-3. Make one coherent change.
-4. Run the relevant upstream-compatible validation.
-5. Inspect the diff and open a focused pull request. Do not push directly to `main`.
+1. Inspect branch, HEAD, status, untracked files, and worktrees; preserve unrelated changes. Fetch when useful; do not pull unconditionally.
+2. Use a focused branch and safe isolation for writable work.
+3. Make one coherent change within the requested scope.
+4. Run targeted checks; broaden only for affected boundaries or explicit integration/release validation.
+5. Inspect the diff. Agents open a PR only when the task authorizes it; PR authority does not grant merge authority. Do not push directly to `main`.
 
-Use Node 24 and the repository's Vite+ workflow (`vp i`, then the relevant `vp` commands). Do not switch package managers or upgrade dependencies incidentally.
+Use the Node version declared in `package.json` and the repository's Vite+ workflow (`vp i`, then the relevant `vp` commands). Do not switch package managers or upgrade dependencies incidentally.
 
 ## Branch naming
 
@@ -33,7 +33,7 @@ chore/<description>
 upstream-sync/YYYY-MM-DD
 ```
 
-Future Nebula-generated task branches are reserved for:
+Nebula runtime Task branches use provider-neutral identities, conceptually:
 
 ```text
 nebula/<mission-short-id>/<task-short-id>
@@ -43,11 +43,11 @@ Provider names do not belong in runtime task branch identities.
 
 ## Architecture discipline
 
-- Every concurrent writable task will eventually require its own Git worktree and explicit ownership.
+- Writable Nebula Builder Tasks use their own Git worktree and explicit ownership. Worktrees do not isolate shared configuration or credentials; see [the configuration boundary](docs/internals/worktree-configuration.md).
 - Roles are permissions, not personas. Keep read-only, builder, reviewer, and integrator responsibilities distinct.
 - Prefer structured contracts and persisted, traceable state to hidden coordination in prompts.
 - Add or update an ADR when a change establishes a durable architectural decision.
-- Keep future Nebula code isolated and namespaced; avoid broad upstream renames or reorganizations.
+- Extend canonical Nebula boundaries; avoid incidental upstream renames or reorganizations.
 
 ## Testing expectations
 
