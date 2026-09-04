@@ -1,6 +1,10 @@
 # SQLite fixtures
 
-Load this reference only when inspecting or seeding local T3 state directly.
+Load this reference only when inspecting or seeding local Nebula/T3 state directly. [Root AGENTS.md](../../../../AGENTS.md) controls state safety.
+
+Use a fresh task-owned base directory. Before any mutation, verify its resolved path, ownership, disposability, and process use. Never clear an existing database or its journals just to make a recipe run. Do not write to live/business state.
+
+When realistic data is needed, open the source read-only and use SQLite `VACUUM INTO` to a new, nonexistent destination in that owned directory. Preserve the source and prior snapshots. Never copy a live database file without a consistent SQLite snapshot, and do not copy credentials or auth state unless the authorized test requires them.
 
 ## Select the correct database
 

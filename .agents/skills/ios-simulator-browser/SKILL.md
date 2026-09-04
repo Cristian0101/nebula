@@ -5,7 +5,7 @@ description: Stream an explicit iOS Simulator through pinned serve-sim into the 
 
 # iOS Simulator Browser
 
-Use serve-sim as the shared visual feed for an iOS Simulator. Use `ios-debugger-agent` and XcodeBuildMCP semantic UI tools to drive the app; do not treat browser-canvas coordinates as a substitute for missing app accessibility.
+Follow [root AGENTS.md](../../../AGENTS.md) for authorized computer use, secrets, and lifecycle. Use serve-sim as the shared visual feed for an iOS Simulator. Use `ios-debugger-agent` and XcodeBuildMCP semantic UI tools to drive the app; do not treat browser-canvas coordinates as a substitute for missing app accessibility.
 
 ## Confirm availability
 
@@ -19,7 +19,7 @@ Keep serve-sim on its default `127.0.0.1` binding. Do not expose its preview to 
 
 1. Obtain the exact simulator UDID from the iOS build or launch workflow.
 2. Check whether an existing serve-sim stream for that UDID belongs to another task. Reuse it only when explicitly shared; never kill another task's stream.
-3. Otherwise, clear only a stale stream for that UDID and start the pinned version with scoped cleanup:
+3. Otherwise, start the pinned version with scoped cleanup only after confirming no other task owns a stream for that UDID. Clear a stale stream only when it is proven to be owned by this task:
 
    ```bash
    SIMULATOR_ID=<simulator-udid>
@@ -27,7 +27,6 @@ Keep serve-sim on its default `127.0.0.1` binding. Do not expose its preview to 
      npx --yes serve-sim@0.1.45 --kill "$SIMULATOR_ID" >/dev/null 2>&1 || true
    }
    trap cleanup_serve_sim EXIT INT TERM HUP
-   cleanup_serve_sim
    npx --yes serve-sim@0.1.45 "$SIMULATOR_ID"
    ```
 
@@ -44,7 +43,7 @@ If the in-app browser explicitly reports that previews are unavailable, do not i
 
 ## Finish
 
-Stop the long-running terminal and wait for its cleanup trap to finish. If it disappeared without cleanup, run `npx --yes serve-sim@0.1.45 --kill <simulator-udid>` for that exact simulator. Never run an unscoped `--kill`.
+Keep the stream alive for requested review/iteration. Do not stream pairing or credential screens. When the overall testing loop ends, stop the long-running terminal and wait for its cleanup trap to finish. If it disappeared without cleanup, run `npx --yes serve-sim@0.1.45 --kill <simulator-udid>` for that exact simulator. Never run an unscoped `--kill`.
 
 ## Upstream
 

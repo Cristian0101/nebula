@@ -1,33 +1,21 @@
-<!--
-⚠️ READ BEFORE OPENING ⚠️
+## Problem and change
 
-We are not actively accepting contributions right now.
+<!-- Explain the concrete problem and resulting behavior. Keep scope coherent. -->
 
-You can still open a PR, but please do so knowing there is a high chance
-we may close it without merging it, or never review it.
+## Validation
 
-- Small, focused PRs are strongly preferred. Bug fixes are most likely to be merged.
-- New features will most likely just annoy us.
-- 1,000+ line PRs with a bunch of new features will probably get you banned from the repo.
--->
+<!-- List checks actually run, their results, and any limits or blockers. -->
 
-## What Changed
+## UI evidence
 
-<!-- Describe the change clearly and keep scope tight. -->
+<!-- If applicable, attach before/after images or a short video for motion/timing.
+     Exclude secrets and pairing material. Do not commit PR-only evidence. -->
 
-## Why
+## Scope
 
-<!-- Explain the problem being solved and why this approach is the right one. -->
+<!-- Identify material risks, compatibility, or migration effects where relevant.
+     A PR does not authorize deployment, publication, or merging into main. -->
 
-## UI Changes
+## Agent attribution
 
-<!-- If this PR changes UI, include clear before/after screenshots.
-     If the change involves motion or interaction, include a short video.
-     Delete this section if not applicable. -->
-
-## Checklist
-
-- [ ] This PR is small and focused
-- [ ] I explained what changed and why
-- [ ] I included before/after screenshots for any UI changes
-- [ ] I included a video for animation/interaction changes
+<!-- For agent-assisted work, name the model and harness. -->
