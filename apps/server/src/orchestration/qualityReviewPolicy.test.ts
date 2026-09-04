@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect";
 
 import { decideOrchestrationCommand } from "./decider.ts";
 import { projectEvent } from "./projector.ts";
+import { selectReviewerModel } from "./Layers/MissionRunReactor.ts";
 
 const now = "2026-08-22T20:00:00.000Z";
 const projectId = ProjectId.make("quality-project");
@@ -228,6 +229,35 @@ const readModel = (input?: {
 });
 
 it.layer(NodeServices.layer)("Task quality and review policy", (it) => {
+  it.effect("preserves selected reviewer options when instantiating independent review", () =>
+    Effect.gen(function* () {
+      const configured = { ...reviewer, options: [{ id: "reasoningEffort", value: "high" }] };
+      const selection = selectReviewerModel(
+        [{ instance: { instanceId: reviewer.instanceId, driverKind: "codex" }, model: "default" }],
+        [configured],
+        false,
+      );
+      expect(selection).not.toBeNull();
+      const requested = yield* decideOrchestrationCommand({
+        readModel: readModel({ passed: true }),
+        command: {
+          type: "task.independent-review.request",
+          commandId: CommandId.make("configured-review"),
+          taskId,
+          snapshotId,
+          reviewId: TaskReviewId.make("configured-review"),
+          reviewerModelSelection: selection!,
+          createdAt: now,
+        },
+      });
+      const event = "type" in requested ? requested : requested[0];
+      expect(event).toMatchObject({
+        type: "task.independent-review.requested",
+        payload: { review: { reviewerModelSelection: configured } },
+      });
+    }),
+  );
+
   it.effect("runs only Task-scoped gates for Task snapshots", () =>
     Effect.gen(function* () {
       const requested = yield* decideOrchestrationCommand({

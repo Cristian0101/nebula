@@ -99,6 +99,36 @@ const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "integration.updated",
 ]);
 
+export function selectReviewerModel(
+  ready: ReadonlyArray<{
+    instance: { instanceId: ModelSelection["instanceId"]; driverKind: string };
+    model: string;
+  }>,
+  configuredSelections: ReadonlyArray<ModelSelection>,
+  preferDifferentProvider: boolean,
+  builderDriverKind?: string,
+) {
+  const configuredReady = configuredSelections.flatMap((selection) => {
+    const candidate = ready.find(({ instance }) => instance.instanceId === selection.instanceId);
+    return candidate ? [{ ...candidate, selection }] : [];
+  });
+  const candidates =
+    configuredSelections.length > 0
+      ? configuredReady
+      : ready.map((candidate) => ({
+          ...candidate,
+          selection: ModelSelection.make({
+            instanceId: candidate.instance.instanceId,
+            model: candidate.model,
+          }),
+        }));
+  const selected = preferDifferentProvider
+    ? (candidates.find((candidate) => candidate.instance.driverKind !== builderDriverKind) ??
+      candidates[0])
+    : candidates[0];
+  return selected?.selection ?? null;
+}
+
 export const shouldReconcileMissionRunEventType = (eventType: OrchestrationEvent["type"]) =>
   RELEVANT_EVENTS.has(eventType);
 
@@ -754,6 +784,7 @@ const make = Effect.gen(function* () {
   const reviewerSelection = Effect.fn("MissionRunReactor.reviewerSelection")(function* (
     task: OrchestrationTask,
     excludedInstanceIds: ReadonlySet<string> = new Set(),
+    configuredSelections: ReadonlyArray<ModelSelection> = [],
   ) {
     const builder = task.modelSelection
       ? yield* providers.getInstance(task.modelSelection.instanceId)
@@ -777,14 +808,12 @@ const make = Effect.gen(function* () {
         ready.push({ instance, model: snapshot.models[0]?.slug ?? "auto" });
       }
     }
-    const selected =
-      task.preferDifferentReviewerProvider === true
-        ? (ready.find((candidate) => candidate.instance.driverKind !== builder?.driverKind) ??
-          ready[0])
-        : ready[0];
-    return selected
-      ? ModelSelection.make({ instanceId: selected.instance.instanceId, model: selected.model })
-      : null;
+    return selectReviewerModel(
+      ready,
+      configuredSelections,
+      task.preferDifferentReviewerProvider === true,
+      builder?.driverKind,
+    );
   });
 
   const updateRun = Effect.fn("MissionRunReactor.updateRun")(function* (input: {
@@ -2072,6 +2101,7 @@ const make = Effect.gen(function* () {
           const selection = yield* reviewerSelection(
             task,
             new Set(failedReviews.map((candidate) => candidate.reviewerModelSelection.instanceId)),
+            run.swarmPolicy?.reviewerModelSelections ?? [],
           );
           if (!selection)
             return {
