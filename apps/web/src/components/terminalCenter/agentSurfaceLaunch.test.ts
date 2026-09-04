@@ -14,6 +14,7 @@ function harness(workspacePath: string, failOpen = false) {
   const openTerminal = vi.fn(async () => (failOpen ? { failed: true } : {}));
   const writeTerminal = vi.fn(async () => ({}));
   const reportError = vi.fn();
+  const removeWorkspacePane = vi.fn((workspace) => workspace);
   const values = {
     entry: { instanceId: "codex", displayName: "Codex" },
     task: null,
@@ -29,7 +30,9 @@ function harness(workspacePath: string, failOpen = false) {
       return { ...pane, id: "terminal" };
     },
     hostThreadId: "terminal-host",
-    updateActiveWorkspace: () => {},
+    updateActiveWorkspace: (update: (workspace: object) => object) => update({}),
+    removeWorkspacePane,
+    activateWorkspaceLayoutPane: (workspace: object) => workspace,
     linkAgentPaneViews: () => {},
     openTerminal,
     writeTerminal,
@@ -40,6 +43,7 @@ function harness(workspacePath: string, failOpen = false) {
     openTerminal,
     writeTerminal,
     reportError,
+    removeWorkspacePane,
     panes,
     run: () => new AsyncFunction(...Object.keys(values), callback)(...Object.values(values)),
   };
@@ -61,7 +65,8 @@ describe("Chat to Terminal production launch", () => {
   });
   it("never writes an agent command when the worktree cannot be opened", async () => {
     const h = harness("/missing", true);
-    await h.run();
+    expect(await h.run()).toBeNull();
+    expect(h.removeWorkspacePane).toHaveBeenCalledWith({}, "terminal");
     expect(h.writeTerminal).not.toHaveBeenCalled();
     expect(h.reportError).toHaveBeenCalled();
   });
@@ -120,3 +125,48 @@ it.each(["terminal", "chat"])(
     ]);
   },
 );
+
+it("publishes an added pane before returning it to a surface launcher", () => {
+  const body = source
+    .split("const addPane = useCallback(")[1]!
+    .split("    ) => {")[1]!
+    .split("\n    },\n    [")[0]!;
+  let state = { workspaces: [{ id: "workspace", panes: [] as object[], gridPreset: "auto" }] };
+  const deferredTransitions: Array<() => void> = [];
+  const values = {
+    input: { type: "shell", workspacePath: "/chat-worktree" },
+    activeWorkspace: state.workspaces[0],
+    useUiStateStore: { getState: () => ({ terminalWorkspacesByProjectId: { project: state } }) },
+    project: { id: "project", workspaceRoot: "/source" },
+    taskById: new Map(),
+    TaskId: { make: (id: string) => id },
+    reportError: vi.fn(),
+    firstAvailableGridPlacement: () => null,
+    terminalWorkspaceGridDimensions: () => ({ columns: 4, rows: 4 }),
+    addAt: null,
+    createTerminalWorkspacePane: (pane: object) => pane,
+    randomUUID: () => "terminal",
+    runTerminalWorkspaceLayoutTransition: (update: () => void) => deferredTransitions.push(update),
+    persistProjectState: (next: typeof state) => {
+      state = next;
+    },
+    updateWorkspace: (
+      current: typeof state,
+      id: string,
+      update: (workspace: object) => object,
+    ) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === id ? update(workspace) : workspace,
+      ),
+    }),
+    movePaneInWorkspaceLayout: (workspace: object) => workspace,
+    quickAddTargetStackId: null,
+    setAddPaneOpen: vi.fn(),
+    setAddAt: vi.fn(),
+    setQuickAddTargetStackId: vi.fn(),
+  };
+  const pane = new Function(...Object.keys(values), body)(...Object.values(values));
+  expect(state.workspaces[0]?.panes).toContainEqual(pane);
+  expect(pane).toMatchObject({ id: "terminal", workspacePath: "/chat-worktree" });
+});

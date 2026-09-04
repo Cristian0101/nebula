@@ -2057,23 +2057,22 @@ export function ProjectTerminalWorkspace({
         workspacePath: boundTask?.workspace?.path ?? input.workspacePath ?? project.workspaceRoot,
         grid: placement ?? { column: 1, row: 1, columnSpan: 1, rowSpan: 1 },
       });
-      runTerminalWorkspaceLayoutTransition(() => {
-        persistProjectState(
-          updateWorkspace(currentState, currentWorkspace.id, (workspace) => {
-            const withPane = {
-              ...workspace,
-              panes: [...workspace.panes, pane],
-              selectedPaneId: pane.id,
-              updatedAt: new Date().toISOString(),
-            };
-            return movePaneInWorkspaceLayout(withPane, pane.id, {
-              targetPaneId: null,
-              targetStackId: quickAddTargetStackId,
-              placement: "tab",
-            });
-          }),
-        );
-      });
+      // Launchers consume the new pane immediately to link surfaces before opening the PTY.
+      persistProjectState(
+        updateWorkspace(currentState, currentWorkspace.id, (workspace) => {
+          const withPane = {
+            ...workspace,
+            panes: [...workspace.panes, pane],
+            selectedPaneId: pane.id,
+            updatedAt: new Date().toISOString(),
+          };
+          return movePaneInWorkspaceLayout(withPane, pane.id, {
+            targetPaneId: null,
+            targetStackId: quickAddTargetStackId,
+            placement: "tab",
+          });
+        }),
+      );
       setAddPaneOpen(false);
       setAddAt(null);
       setQuickAddTargetStackId(null);
@@ -2423,11 +2422,15 @@ export function ProjectTerminalWorkspace({
         },
       });
       if (commandFailure(opened)) {
+        updateActiveWorkspace((workspace) => {
+          const restored = removeWorkspacePane(workspace, pane.id);
+          return linkedPaneId ? activateWorkspaceLayoutPane(restored, linkedPaneId) : restored;
+        });
         reportError(
           `Could not open ${entry.displayName} Terminal`,
           `Could not open workspace ${workspacePath}. Restore the directory and retry; no agent command was started.`,
         );
-        return pane;
+        return null;
       }
       const written = await writeTerminal({
         environmentId: project.environmentId,
