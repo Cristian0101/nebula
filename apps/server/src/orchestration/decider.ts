@@ -1691,6 +1691,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                 command.independentReviewRequired ??
                 project.reviewPolicy?.requireIndependentReview ??
                 true,
+              reviewerModelSelections: command.reviewerModelSelections ?? [],
               preapprovedOverlapPaths: command.preapprovedOverlapPaths ?? [],
               autoCompleteMission: command.autoCompleteMission ?? false,
               qualityPolicy: project.qualityPolicy ?? null,

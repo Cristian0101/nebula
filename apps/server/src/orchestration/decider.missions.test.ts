@@ -607,6 +607,13 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
         autoIntegration: true,
         stopOnConflict: true,
         independentReviewRequired: true,
+        reviewerModelSelections: [
+          {
+            instanceId: "codex" as never,
+            model: "gpt-5.6",
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
+        ],
         createdAt: now,
       });
       expect(model.missionRuns).toEqual([
@@ -628,6 +635,13 @@ it.layer(NodeServices.layer)("Mission decider", (it) => {
             autoIntegration: true,
             stopOnConflict: true,
             independentReviewRequired: true,
+            reviewerModelSelections: [
+              {
+                instanceId: "codex",
+                model: "gpt-5.6",
+                options: [{ id: "reasoningEffort", value: "high" }],
+              },
+            ],
             autoCompleteMission: false,
             frozenAt: now,
           }),
