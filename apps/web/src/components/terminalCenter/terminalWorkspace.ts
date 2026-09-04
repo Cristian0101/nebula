@@ -794,7 +794,22 @@ export function activateAgentSurfaceView(
         : null;
   if (!target) return workspace;
   const restored = target.visible ? workspace : restoreWorkspacePane(workspace, target.id, now);
-  return activateWorkspaceLayoutPane(restored, target.id);
+  const matchesSurface =
+    surface === "terminal"
+      ? target.type === "shell"
+      : target.type === "provider" || target.type === "thread";
+  const formatted = matchesSurface
+    ? restored
+    : setWorkspacePaneFormat(
+        restored,
+        target.id,
+        {
+          type: surface === "terminal" ? "shell" : "provider",
+          title: surface === "terminal" ? "Terminal" : "Chat",
+        },
+        now,
+      );
+  return activateWorkspaceLayoutPane(formatted, target.id);
 }
 
 /**

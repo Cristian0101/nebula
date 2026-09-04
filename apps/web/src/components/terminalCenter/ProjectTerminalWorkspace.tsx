@@ -1102,15 +1102,15 @@ function PaneHeader({
           </div>
           {configurablePaneFormats.map(([type, label, FormatIcon]) => {
             const surface = type === "provider" ? "chat" : type === "shell" ? "terminal" : null;
-            const active = surface ? pane.agentSurface === surface : pane.type === type;
+            const active = pane.type === type || (type === "provider" && pane.type === "thread");
             const canUseAgentSurface = !surface || hasAgentIdentity;
             return (
               <MenuItem
                 key={type}
                 disabled={!canUseAgentSurface}
                 onClick={() => {
-                  if (surface && onSwitchAgentSurface) onSwitchAgentSurface(surface);
-                  else onChangePaneFormat?.(type);
+                  if (onChangePaneFormat) onChangePaneFormat(type);
+                  else if (surface) onSwitchAgentSurface?.(surface);
                 }}
               >
                 <FormatIcon />
@@ -4308,11 +4308,10 @@ export function ProjectTerminalWorkspace({
           value={designCapture?.comment ?? ""}
           disabled={!designCapture}
           placeholder="Add a note for the agent…"
-          onChange={(event) =>
-            setDesignCapture((current) =>
-              current ? { ...current, comment: event.currentTarget.value } : current,
-            )
-          }
+          onChange={(event) => {
+            const comment = event.currentTarget.value;
+            setDesignCapture((current) => (current ? { ...current, comment } : current));
+          }}
           className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-[11px] outline-none focus:border-primary disabled:opacity-50"
         />
         <Button
@@ -4342,7 +4341,7 @@ export function ProjectTerminalWorkspace({
   if (activeMode !== "workbench")
     return (
       <SidebarInset className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground">
-        <WorkspacePageHeader className="border-b border-border bg-background">
+        <WorkspacePageHeader className="h-auto flex-wrap border-b border-border bg-background py-2">
           <Button
             size="xs"
             variant="ghost"
@@ -4470,14 +4469,14 @@ export function ProjectTerminalWorkspace({
               <div className="flex min-h-0 min-w-0 flex-1 bg-muted/10">
                 <div className="flex min-h-0 min-w-0 flex-1 flex-col p-2">
                   <div className="min-h-0 flex-1">{stagePreview}</div>
-                  <div className="mt-2 flex h-10 shrink-0 items-center gap-2 rounded-lg border border-border bg-card px-2">
+                  <div className="mt-2 flex min-h-10 shrink-0 flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2 py-1">
                     <Button
                       size="micro"
                       onClick={() => setDesignPickRequestNonce((nonce) => nonce + 1)}
                     >
                       <MousePointer2Icon /> Capture element
                     </Button>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="hidden text-[10px] text-muted-foreground 2xl:inline">
                       Screenshot, source mapping, HTML, styles, and annotations travel together.
                     </span>
                     <Button
@@ -4565,7 +4564,7 @@ export function ProjectTerminalWorkspace({
 
   return (
     <SidebarInset className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground">
-      <WorkspacePageHeader className="border-b border-border bg-background">
+      <WorkspacePageHeader className="h-auto flex-wrap border-b border-border bg-background py-2">
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{displayName} Terminal Workspace</h1>
           <p className="truncate text-[11px] text-muted-foreground">

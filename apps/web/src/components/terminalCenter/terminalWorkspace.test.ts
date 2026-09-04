@@ -248,6 +248,17 @@ describe("Terminal Workspace composition", () => {
         ?.linkedPaneId,
     ).toBeNull();
 
+    const preview = setWorkspacePaneFormat(linked, terminal.id, { type: "preview" }, now);
+    const terminalRestored = activateAgentSurfaceView(preview, chat.id, "terminal", now);
+    expect(terminalRestored.panes).toHaveLength(2);
+    expect(terminalRestored.panes.find((pane) => pane.id === terminal.id)).toMatchObject({
+      type: "shell",
+      workspacePath: terminal.workspacePath,
+      terminalId: terminal.terminalId,
+      linkedPaneId: chat.id,
+    });
+    expect(terminalRestored.selectedPaneId).toBe(terminal.id);
+
     const chatSelected = activateAgentSurfaceView(linked, terminal.id, "chat", now);
     expect(chatSelected.selectedPaneId).toBe(chat.id);
     expect(chatSelected.layoutTree).toMatchObject({

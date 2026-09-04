@@ -170,3 +170,45 @@ it("publishes an added pane before returning it to a surface launcher", () => {
   expect(state.workspaces[0]?.panes).toContainEqual(pane);
   expect(pane).toMatchObject({ id: "terminal", workspacePath: "/chat-worktree" });
 });
+
+it("keeps Design capture text after React releases the change event", () => {
+  const handler = source
+    .split('aria-label="Design capture note"')[1]!
+    .split("onChange={(event) =>")[1]!
+    .split("className=")[0]!
+    .trim()
+    .slice(0, -1);
+  type Capture = { comment: string; id: string } | null;
+  let deferred: ((current: Capture) => Capture) | undefined;
+  const onChange = new Function("setDesignCapture", `return (event) => ${handler}`)(
+    (update: (current: Capture) => Capture) => {
+      deferred = update;
+    },
+  );
+  const event = { currentTarget: { value: "Scoped fixture note" } as { value: string } | null };
+  onChange(event);
+  event.currentTarget = null;
+  expect(deferred?.({ id: "capture", comment: "" })).toEqual({
+    id: "capture",
+    comment: "Scoped fixture note",
+  });
+  expect(deferred?.(null)).toBeNull();
+});
+
+it("routes agent menu choices through format restoration before surface reuse", () => {
+  const body = source
+    .split("{configurablePaneFormats.map")[1]!
+    .split("onClick={() => {")[1]!
+    .split("}} ")[0]!
+    .split("}}\n")[0]!;
+  const onChangePaneFormat = vi.fn();
+  const onSwitchAgentSurface = vi.fn();
+  new Function("onChangePaneFormat", "onSwitchAgentSurface", "surface", "type", body)(
+    onChangePaneFormat,
+    onSwitchAgentSurface,
+    "terminal",
+    "shell",
+  );
+  expect(onChangePaneFormat).toHaveBeenCalledWith("shell");
+  expect(onSwitchAgentSurface).not.toHaveBeenCalled();
+});
