@@ -26,8 +26,8 @@ Nebula is a local-first coding-agent orchestration system derived from T3 Code. 
 - Never delete user or test state because a generic setup recipe says to. Establish ownership, disposability, current process use, and destructive authority first.
 - Do not blanket-delete `.t3`, SQLite databases/journals, userdata, or worktree state. Prefer a fresh task-owned fixture directory.
 - Never run tests against live/business state or open it read-write. For snapshots and fixtures use the [SQLite reference](.agents/skills/test-t3-app/references/sqlite-fixtures.md); preserve read-only sources and existing snapshots.
-- Worktrees isolate tracked files, not security or configuration. Determine whether configuration is copied, symlinked, shared, generated, or externally managed before editing it.
-- Current `t3.json` setup symlinks `.env` and `infra/relay/.env` to the source project. Do not edit through these aliases assuming isolation. See the [shared-configuration boundary](docs/internals/worktree-configuration.md).
+- Worktrees isolate tracked files but are not security sandboxes. Determine whether configuration is copied, symlinked, shared, generated, or externally managed before editing it.
+- Current `t3.json` setup creates independent `.env` and `infra/relay/.env` copies when destinations are missing, preserves existing regular files, and refuses existing aliases. Previously imported setup actions and older worktrees may still use shared symlinks; update the stored action and inspect existing configuration before assuming isolation. See the [worktree configuration boundary](docs/internals/worktree-configuration.md).
 - Never reset, discard, force checkout, destructively clean, or rewrite history as an automatic setup step. Do not run an unconditional pull or push directly to `main`.
 - Use focused branches/worktrees when isolation or authorized delivery needs them. Runtime Builder Task worktree requirements do not require a Task/worktree for every read-only investigation.
 
