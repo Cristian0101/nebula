@@ -4,6 +4,25 @@ Your coding agents. One engineering team.
 
 Nebula is an open-source, local-first orchestration layer for multi-agent software development, built on [T3 Code](https://github.com/pingdotgg/t3code). It keeps provider credentials in provider-owned CLIs and uses Git as the durable execution and recovery boundary.
 
+## Why multi-agent coordination matters
+
+Running several coding agents creates coordination work: deciding who owns each change, carrying context between dependent tasks, reviewing the result, and recovering when execution stops. Nebula makes those boundaries explicit so individual developers and small teams can supervise parallel work from one local workspace.
+
+Open source makes the coordination policy inspectable and adaptable. Developers can examine how work is scheduled, how changes are reviewed, and where human approval is required.
+
+## What Nebula adds to T3 Code
+
+T3 Code provides the execution harness that Nebula extends. Nebula's contribution is the coordination layer over those existing provider, Thread, Git, and persistence primitives:
+
+| Developer need | Nebula contribution | Guide |
+| --- | --- | --- |
+| Divide work without losing ownership | Tasks, isolated worktrees, and declared path ownership | [Project contract](docs/nebula/PROJECT_CONTRACT.md) |
+| Coordinate dependent changes | Missions, dependency scheduling, and shared-resource leases | [Shared Resources](docs/user/shared-resources.md) |
+| Supervise a team of agents | Human-approved plans, bounded recovery, and independent review | [Architect plans](docs/user/architect-plans.md) |
+| Inspect the combined result | Integration in a separate worktree with final validation | [Architecture](docs/nebula/ARCHITECTURE.md) |
+
+See the [upstream policy](UPSTREAM.md) for attribution and intentional divergence.
+
 ## Alpha capabilities
 
 - **Terminal Center** launches and arranges canonical provider Threads in Grid, Provider Columns, Status Lanes, Radial, Compact, or persisted Freeform layouts.
@@ -32,19 +51,31 @@ Nebula coordinates. Providers execute. Git records the result.
 Nebula currently targets contributors and early local Alpha users:
 
 ```bash
-# Node 24 and Vite+ are required by the current upstream baseline.
+# Node ^24.13.1 and Vite+ are required by package.json.
+git clone https://github.com/Cristian0101/nebula.git
+cd nebula
 vp i
 vp run dev
 ```
 
 The server prints a pairing URL. Open the complete URL, add a disposable or local Git repository, check provider readiness in **Settings → Providers**, then open **Terminal Center** or **Command Deck**. See the [five-minute quick start](./docs/user/quick-start.md) and the evidence-based [Alpha acceptance checklist](./docs/release/ALPHA_ACCEPTANCE.md).
 
+## Development and validation
+
+Nebula is an early-stage project maintained by [Cristian Sanchez Aguilera](https://github.com/Cristian0101). Public implementation and maintenance records include:
+
+- [Alpha certification fixes and verification (#20)](https://github.com/Cristian0101/nebula/pull/20): records a four-Task, three-wave Codex + Antigravity Mission, independent review, remediation, recovery, and Integration Ready.
+- [Supervised planning and live-team workflow (#23)](https://github.com/Cristian0101/nebula/pull/23): documents Team Plan, checkpoints, War Room, and recovery behavior.
+- [Reviewer configuration repair (#31)](https://github.com/Cristian0101/nebula/pull/31): preserves configured reviewer models and options.
+
+The [Alpha acceptance record](docs/release/ALPHA_ACCEPTANCE.md) describes historical candidate verification. It is not a claim that every later commit or provider combination has been independently certified. Nebula currently targets developers running from source; the Alpha packaging record does not establish a signed, notarized public binary release.
+
 ## Current Alpha limitations
 
 - Provider subprocesses cannot always survive a server process restart; Nebula must report and recover the interrupted state.
 - Provider routing and remediation are bounded heuristics, not unattended autonomy.
 - Integration conflicts and unsafe overlap require a human.
-- A complete cross-provider live Mission and full crash matrix remain release gates until recorded as PASS in the checklist.
+- Cross-provider and recovery evidence is scoped to the candidate and provider versions in the [Alpha acceptance record](docs/release/ALPHA_ACCEPTANCE.md); new release candidates require fresh verification.
 - The production vector icon may still change.
 
 ## Architecture and contributing
