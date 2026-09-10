@@ -1056,6 +1056,8 @@ function PaneHeader({
         : "Terminal"
       : paneFormatLabel[pane.type];
   const hasAgentIdentity = Boolean(pane.providerInstanceId || pane.threadId);
+  const canOpenAttachmentChat =
+    pane.agentSurface === "terminal" && hasAgentIdentity && Boolean(onChangePaneFormat);
   return (
     <div
       className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border/70 bg-muted/20 px-1.5"
@@ -1125,6 +1127,18 @@ function PaneHeader({
           </MenuItem>
         </MenuPopup>
       </Menu>
+      {canOpenAttachmentChat ? (
+        <Button
+          size="micro"
+          variant="outline"
+          aria-label={`Open ${pane.title} Chat to attach a screenshot`}
+          title="Open the linked Chat composer to attach screenshots or other files"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={() => onChangePaneFormat?.("provider")}
+        >
+          <MessageSquareIcon /> Attach image
+        </Button>
+      ) : null}
       {providerLabel ? (
         <Menu>
           <MenuTrigger
@@ -1459,6 +1473,9 @@ const PreviewSurface = memo(function PreviewSurface({
   refreshKey,
   state,
   onReload,
+  onStart,
+  startLabel,
+  startDetail,
   onRestart,
   pickRequestNonce,
   onAnnotationCaptured,
@@ -1472,6 +1489,9 @@ const PreviewSurface = memo(function PreviewSurface({
   readonly refreshKey: number;
   readonly state: "idle" | "connecting" | "ready" | "stopped" | "blocked";
   readonly onReload: () => void;
+  readonly onStart?: (() => void) | undefined;
+  readonly startLabel?: string | undefined;
+  readonly startDetail?: string | undefined;
   readonly onRestart?: (() => void) | undefined;
   readonly pickRequestNonce?: number;
   readonly onAnnotationCaptured?: (annotation: PreviewAnnotationPayload) => void;
@@ -1492,8 +1512,18 @@ const PreviewSurface = memo(function PreviewSurface({
           <AppWindowIcon className="mx-auto size-7 text-muted-foreground" />
           <p className="mt-3 text-sm font-medium">No running development server</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Start or attach a Dev Server to load this Preview.
+            Start an approved Dev Server or attach an existing local server to load this Preview.
           </p>
+          {startDetail ? (
+            <p className="mt-3 max-w-md break-all font-mono text-[10px] text-primary">
+              {startDetail}
+            </p>
+          ) : null}
+          {onStart ? (
+            <Button size="xs" className="mt-4" onClick={onStart}>
+              <PlayIcon /> {startLabel ?? "Start Dev Server"}
+            </Button>
+          ) : null}
         </div>
       </div>
     );
@@ -1543,6 +1573,10 @@ const PreviewSurface = memo(function PreviewSurface({
               {state !== "blocked" && onRestart ? (
                 <Button size="xs" onClick={onRestart}>
                   <RotateCcwIcon /> Restart Server
+                </Button>
+              ) : state !== "blocked" && onStart ? (
+                <Button size="xs" onClick={onStart}>
+                  <PlayIcon /> {startLabel ?? "Start Dev Server"}
                 </Button>
               ) : null}
             </div>
@@ -2545,7 +2579,14 @@ export function ProjectTerminalWorkspace({
       }
       const lifecycleResult = await openTerminal({
         environmentId: project.environmentId,
-        input: { threadId: hostThreadId, terminalId, cwd, cols: 120, rows: 30 },
+        input: {
+          threadId: hostThreadId,
+          terminalId,
+          cwd,
+          ...(workspacePath !== project.workspaceRoot ? { worktreePath: workspacePath } : {}),
+          cols: 120,
+          rows: 30,
+        },
       });
       if (commandFailure(lifecycleResult)) {
         reportError(
@@ -2959,6 +3000,7 @@ export function ProjectTerminalWorkspace({
           threadId: hostThreadId,
           terminalId: pane.terminalId,
           cwd: pane.workspacePath,
+          ...(pane.taskId ? { worktreePath: pane.workspacePath } : {}),
           cols: 120,
           rows: 30,
         },
@@ -3216,6 +3258,32 @@ export function ProjectTerminalWorkspace({
       : stageUrl
         ? "stopped"
         : "idle";
+  const stageStartAction = stageProfile
+    ? () => {
+        if (stageDevPane && !stageDevPane.externalServer) {
+          void startProfile(
+            stageProfile,
+            false,
+            stageDevPane.terminalId ?? undefined,
+            stageDevPane.workspacePath,
+          );
+          return;
+        }
+        void addApprovedDevServer(stageProfile);
+      }
+    : suggestions[0]
+      ? () => void approveSuggestion(suggestions[0]!)
+      : undefined;
+  const stageStartLabel = stageProfile
+    ? `Start ${stageProfile.name}`
+    : suggestions[0]
+      ? `Approve & Start ${suggestions[0].name}`
+      : undefined;
+  const stageStartDetail = stageProfile
+    ? `${stageProfile.command} · ${stageProfile.workingDirectory}`
+    : suggestions[0]
+      ? `${suggestions[0].command} · ${suggestions[0].workingDirectory}`
+      : undefined;
   const providerPanes = visiblePanes.filter(
     (pane) =>
       (pane.type === "provider" || pane.type === "thread") &&
@@ -3358,6 +3426,7 @@ export function ProjectTerminalWorkspace({
           hostThreadId={pane.terminalThreadId ?? hostThreadId}
           terminalId={pane.terminalId ?? `shell-${pane.id}`}
           cwd={pane.workspacePath}
+          {...(pane.taskId ? { worktreePath: pane.workspacePath } : {})}
           title={pane.title}
           autoFocus={active}
           sizeEpoch={pane.grid.rowSpan + pane.grid.columnSpan}
@@ -3447,6 +3516,23 @@ export function ProjectTerminalWorkspace({
                   : "idle"
           }
           onReload={reloadPreview}
+          onStart={
+            attachedProfile && attachedDevPane && !attachedDevPane.externalServer
+              ? () =>
+                  void startProfile(
+                    attachedProfile,
+                    false,
+                    attachedDevPane.terminalId ?? undefined,
+                    attachedDevPane.workspacePath,
+                  )
+              : undefined
+          }
+          startLabel={attachedProfile ? `Start ${attachedProfile.name}` : undefined}
+          startDetail={
+            attachedProfile
+              ? `${attachedProfile.command} · ${attachedProfile.workingDirectory}`
+              : undefined
+          }
           onRestart={
             attachedProfile && attachedDevPane && !attachedDevPane.externalServer
               ? () => {
@@ -3470,6 +3556,7 @@ export function ProjectTerminalWorkspace({
           hostThreadId={pane.terminalThreadId ?? hostThreadId}
           terminalId={pane.terminalId ?? "logs"}
           cwd={pane.workspacePath}
+          {...(pane.taskId ? { worktreePath: pane.workspacePath } : {})}
           title={pane.title}
           autoFocus={false}
           sizeEpoch={pane.grid.rowSpan + pane.grid.columnSpan}
@@ -3507,6 +3594,7 @@ export function ProjectTerminalWorkspace({
               hostThreadId={pane.terminalThreadId ?? hostThreadId}
               terminalId={pane.terminalId ?? `tests-${pane.id}`}
               cwd={pane.workspacePath}
+              {...(pane.taskId ? { worktreePath: pane.workspacePath } : {})}
               title="Tests"
               autoFocus={active}
               sizeEpoch={pane.grid.rowSpan + pane.grid.columnSpan}
@@ -3698,6 +3786,7 @@ export function ProjectTerminalWorkspace({
               hostThreadId={pane.terminalThreadId ?? hostThreadId}
               terminalId={pane.terminalId ?? `dev-${pane.id}`}
               cwd={pane.workspacePath}
+              {...(pane.taskId ? { worktreePath: pane.workspacePath } : {})}
               title={pane.title}
               statusLabel={status}
               autoFocus={false}
@@ -4093,6 +4182,9 @@ export function ProjectTerminalWorkspace({
             }
           : {})}
         onReload={reloadPreview}
+        onStart={stageStartAction}
+        startLabel={stageStartLabel}
+        startDetail={stageStartDetail}
         onRestart={
           stageProfile && stageDevPane && !stageDevPane.externalServer
             ? () => {
@@ -4178,6 +4270,14 @@ export function ProjectTerminalWorkspace({
               (stageProfile ? devServerTerminalId(stageProfile.id) : "logs")
             }
             cwd={stageDevPane?.workspacePath ?? stagePane?.workspacePath ?? project.workspaceRoot}
+            {...((stageDevPane?.taskId ?? stagePane?.taskId)
+              ? {
+                  worktreePath:
+                    stageDevPane?.workspacePath ??
+                    stagePane?.workspacePath ??
+                    project.workspaceRoot,
+                }
+              : {})}
             title="Dev Logs"
             statusLabel={stageServer ? "Running" : stageProcessRunning ? "Starting" : "Stopped"}
             autoFocus={false}
