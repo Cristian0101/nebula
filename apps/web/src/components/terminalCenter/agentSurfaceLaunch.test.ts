@@ -72,6 +72,48 @@ describe("Chat to Terminal production launch", () => {
   });
 });
 
+it("opens a task Dev Server with its canonical worktree metadata", async () => {
+  const callback = source
+    .split("const startProfile = useCallback(")[1]!
+    .split("    ) => {")[1]!
+    .split("\n    },\n    [")[0]!;
+  const openTerminal = vi.fn(async () => ({}));
+  const writeTerminal = vi.fn(async () => ({}));
+  const values = {
+    profile: { command: "pnpm run dev", workingDirectory: "." },
+    restart: false,
+    terminalId: "dev-server",
+    workspacePath: "/task-worktree",
+    resolveDevServerCwd: (root: string) => root,
+    reportError: vi.fn(),
+    sessions: [],
+    hostThreadId: "workspace-host",
+    project: { environmentId: "environment", workspaceRoot: "/source" },
+    writeTerminal,
+    commandFailure: () => false,
+    openTerminal,
+  };
+
+  await new AsyncFunction(...Object.keys(values), callback)(...Object.values(values));
+
+  expect(openTerminal).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: expect.objectContaining({ cwd: "/task-worktree", worktreePath: "/task-worktree" }),
+    }),
+  );
+  expect(writeTerminal).toHaveBeenCalledWith(
+    expect.objectContaining({ input: expect.objectContaining({ data: "pnpm run dev\r" }) }),
+  );
+});
+
+it("keeps image attachments and detected Preview launch discoverable in the workspace", () => {
+  expect(source).toContain("Attach image");
+  expect(source).toContain('onClick={() => onChangePaneFormat?.("provider")}');
+  expect(source).toContain("Approve & Start ${suggestions[0].name}");
+  expect(source).toContain("onStart={stageStartAction}");
+  expect(source).toContain("() => void approveSuggestion(suggestions[0]!)");
+});
+
 it.each(["terminal", "chat"])(
   "switching to %s passes each canonical workspace to launch",
   async (surface) => {
