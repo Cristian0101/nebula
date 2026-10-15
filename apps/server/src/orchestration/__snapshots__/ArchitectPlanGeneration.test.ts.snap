@@ -1,0 +1,8 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Architect context security > builds a bounded redacted canonical context for provider-backed replanning 1`] = `
+{
+  "fingerprint": "fbebd842e375a073c6d4d51cd1cc1a19c2147cb69b34a79e84b166560ee2d10f",
+  "text": "{"mission":{"id":"mission","objective":"Deliver the registry-backed service.","currentPlanVersion":1,"planVersions":[],"dependencies":[],"contracts":[]},"sourceTaskId":"service","trigger":"assumption_invalidated","requestedScope":"mission_subgraph","reason":"Registry is missing token=[REDACTED]","evidence":[{"kind":"repository_fact","summary":"The required registry is absent.","expected":"src/registry.ts","observed":"No tracked registry exists. Authorization: Bearer [REDACTED]","source":"git tree password=[REDACTED]"}],"canonicalImpact":{"affectedTaskIds":["service"],"unaffectedTaskIds":["frontend"]},"tasks":[{"id":"frontend","title":"Frontend","objective":"Preserve the frontend.","status":"completed","modelSelection":{"instanceId":"codex","model":"test"},"acceptanceCriteria":["Frontend remains complete"],"ownership":[],"requiredResourceIds":[],"replan":null,"handoff":null,"artifactCommit":null,"currentReview":null,"historicalReviewCount":0},{"id":"service","title":"Service","objective":"Use src/registry.ts.","status":"draft","modelSelection":{"instanceId":"codex","model":"test"},"acceptanceCriteria":["Service uses Registry"],"ownership":[],"requiredResourceIds":[],"replan":null,"handoff":null,"artifactCommit":null,"currentReview":null,"historicalReviewCount":0}],"resources":[],"resourceLeases":[],"currentIntegration":null}",
+}
+`;

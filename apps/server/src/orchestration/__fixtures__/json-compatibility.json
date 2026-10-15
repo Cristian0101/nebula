@@ -1,0 +1,58 @@
+[
+  {
+    "bytes": "{\"commitSha\":\"0123456789abcdef\",\"tree\":[\"README.md\",\"src/\",\"src/main.ts\"],\"paths\":[\"README.md\",\"src/main.ts\"],\"resources\":[{\"id\":\"r\",\"name\":\"Manifest\",\"enabled\":true,\"patterns\":[\"package.json\"],\"description\":null}]}",
+    "sha256": "33d7c2143515de2e2e0ef64fb33e2414304260bdd7969636ddbfdd3ccb0a5ce9"
+  },
+  {
+    "bytes": "[{\"id\":\"r\",\"name\":\"Manifest\",\"enabled\":true,\"patterns\":[\"package.json\"],\"description\":null}]",
+    "sha256": "762e81c015fa60034113d5d101b4da09dffae7b245743d92c85590d8ea9c2287"
+  },
+  {
+    "bytes": "{\"qualityPolicy\":{\"gates\":[{\"id\":\"test\",\"command\":\"vp test\",\"enabled\":true,\"required\":true}]},\"reviewPolicy\":null}",
+    "sha256": "1d2128812b8aa92eb517ce579f17527b37abc9590b419e73f3b3e84c914354ff"
+  },
+  {
+    "bytes": "{\"reviewPolicy\":null,\"qualityPolicy\":{\"gates\":[{\"required\":true,\"enabled\":true,\"command\":\"vp test\",\"id\":\"test\"}]}}",
+    "sha256": "095b2b220631191f8d79d63b6a8bb764deeb137b409cf2faf17d39082fecb3f3"
+  },
+  {
+    "bytes": "{}",
+    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  },
+  {
+    "bytes": "{}",
+    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  },
+  {
+    "bytes": "{\"optional\":null}",
+    "sha256": "f66ec4e197d912a196b9eb28968da156ab0d83c729c6d029d978e4b1b9d6bc26"
+  },
+  {
+    "bytes": "{\"optional\":false}",
+    "sha256": "a35a753025cb7fe0a63b08a731b911304f0dab47f3b23c15e886f18442d6e12e"
+  },
+  {
+    "bytes": "{\"optional\":\"\"}",
+    "sha256": "d94791975d0777cdbac5b7933714a0d125487f40497a14133763cf01fc005a18"
+  },
+  {
+    "bytes": "[null,null,null,0,0,false,\"é\\n😀\"]",
+    "sha256": "781b35de82006cbfdc43724107044d50fc2305a5de1fb4ebe14247973f5cefc5"
+  },
+  {
+    "bytes": "[\"b\",\"a\"]",
+    "sha256": "02d8bc3008a9bb0dcc4b86d7fd3428ced792355c733c19756bec5a56dc61b2c5"
+  },
+  {
+    "bytes": "[\"a\",\"b\"]",
+    "sha256": "0473ef2dc0d324ab659d3580c1134e9d812035905c4781fdd6d529b0c6860e13"
+  },
+  {
+    "bytes": "{\"2\":\"two\",\"10\":\"ten\",\"z\":1,\"a\":2,\"nested\":{\"b\":null}}",
+    "sha256": "a5653bc35834f82f9bfa6ee25e217ba09a79322b88bb6acfb3d79e2781dd8953"
+  },
+  {
+    "bytes": "{\"generatedAt\":\"2026-08-23T12:10:00.000Z\",\"elapsedMilliseconds\":600000,\"finalValidation\":\"ready\",\"remainingRisks\":[],\"finalGateResults\":[]}",
+    "sha256": "2f7af08283b9c29684b2cb0a75491ca0dc7a5d9b7bcc7e099bb577bd148c7950"
+  }
+]

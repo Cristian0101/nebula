@@ -1,3 +1,5 @@
+import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 import type {
   Mission,
   MissionRun,
@@ -676,7 +678,14 @@ export function buildMissionFinalReport(input: {
     followUps: [...new Set(input.tasks.flatMap((task) => task.result?.followUps ?? []))],
     elapsedMilliseconds: Math.max(
       0,
-      new Date(input.generatedAt).getTime() - new Date(input.run.startedAt).getTime(),
+      DateTime.make(input.generatedAt).pipe(
+        Option.map(DateTime.toEpochMillis),
+        Option.getOrElse(() => Number.NaN),
+      ) -
+        DateTime.make(input.run.startedAt).pipe(
+          Option.map(DateTime.toEpochMillis),
+          Option.getOrElse(() => Number.NaN),
+        ),
     ),
     generatedAt: input.generatedAt,
   };

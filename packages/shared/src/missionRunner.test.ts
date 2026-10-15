@@ -696,6 +696,24 @@ describe("supervised Mission scheduler", () => {
 });
 
 describe("Swarm Alpha evidence", () => {
+  it.each([
+    ["2026-08-23T12:10:00.123Z", 600_123],
+    ["2026-08-23T08:10:00.000-04:00", 600_000],
+    ["2026-08-23T11:59:59.999Z", 0],
+    [now, 0],
+    ["invalid", Number.NaN],
+  ])("preserves Mission report elapsed time for %s", (generatedAt, expected) => {
+    const report = buildMissionFinalReport({
+      mission,
+      run,
+      tasks: [],
+      integrationBranch: null,
+      finalValidation: "not_requested",
+      generatedAt,
+    });
+    expect(report.elapsedMilliseconds).toBe(expected);
+  });
+
   const completed = (id: string, path: string, provider = "codex") => ({
     ...task(id, "completed"),
     result: {
@@ -818,6 +836,7 @@ describe("Swarm Alpha evidence", () => {
     expect(report.historicalRisks).toEqual(["Final follow-up risk"]);
     expect(report.resolvedRisks).toEqual([]);
     expect(report.remainingRisks).toEqual(["Final follow-up risk"]);
+    expect(report).toMatchSnapshot();
   });
 
   it("reports replans and provider replacements as distinct adaptive Mission metrics", () => {

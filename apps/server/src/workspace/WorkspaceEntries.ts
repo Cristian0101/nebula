@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 
 import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -247,6 +248,7 @@ export const make = Effect.gen(function* () {
   const discoverProjects: WorkspaceEntries["Service"]["discoverProjects"] = Effect.fn(
     "WorkspaceEntries.discoverProjects",
   )(function* (input) {
+    const clock = yield* Clock.Clock;
     return yield* Effect.promise(async () => {
       const ignoredDirectoryNames = new Set([
         ".cache",
@@ -271,7 +273,7 @@ export const make = Effect.gen(function* () {
       const queue: Array<{ path: string; depth: number }> = [];
       const queued = new Set<string>();
       const found = new Map<string, ProjectDiscoveryResult["entries"][number]>();
-      const startedAt = Date.now();
+      const startedAt = clock.currentTimeMillisUnsafe();
       const scanLimit = 5_000;
       let scannedDirectories = 0;
       let truncated = false;
@@ -293,7 +295,10 @@ export const make = Effect.gen(function* () {
       }
 
       while (queue.length > 0 && found.size < input.limit) {
-        if (scannedDirectories >= scanLimit || Date.now() - startedAt > 2_000) {
+        if (
+          scannedDirectories >= scanLimit ||
+          clock.currentTimeMillisUnsafe() - startedAt > 2_000
+        ) {
           truncated = true;
           break;
         }

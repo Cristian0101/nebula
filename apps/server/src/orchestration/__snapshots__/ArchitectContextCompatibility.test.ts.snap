@@ -1,0 +1,26 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Architect collection compatibility > retains individual/total byte budgets and binary exclusion 1`] = `
+{
+  "bytes": 262144,
+  "fingerprint": "887a6fb46e547f79eaa9f02f76203e33845d10a9f6d51c838a4a5a5b3ccc88f2",
+  "included": [
+    "a",
+    "b",
+    "c",
+    "d",
+  ],
+}
+`;
+
+exports[`Architect collection compatibility > retains ordering, protected exclusions, depth and symlink behavior 1`] = `
+[
+  "a/",
+  "a/b/",
+  "a/b/c/",
+  "a/b/c/d/",
+  "README.md",
+  "z/",
+  "z/file.txt",
+]
+`;

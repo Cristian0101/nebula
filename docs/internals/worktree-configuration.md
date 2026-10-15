@@ -43,4 +43,4 @@ Setup previously ran `ln -sf $T3CODE_PROJECT_ROOT/.env .env` and the equivalent 
 
 ## Focused verification
 
-Run `node --test scripts/setup-worktree-config.test.mjs`. Tests use only temporary synthetic configuration and cover independent copies, edits in both directions, multiple worktrees, existing destinations, missing sources, repeated setup, reseeding, permissions, linked parents, and paths containing spaces and shell-special characters. No application server or real configuration is needed.
+Run `vp test run scripts/setup-worktree-config.test.mjs` (also included in `vp run test`). Tests use only temporary synthetic configuration and cover independent copies, edits in both directions, multiple worktrees, existing destinations, missing sources, repeated setup, reseeding, permissions, linked parents, and paths containing spaces and shell-special characters. No application server or real configuration is needed.

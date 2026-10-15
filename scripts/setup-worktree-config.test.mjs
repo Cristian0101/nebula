@@ -1,5 +1,5 @@
 import * as NodeAssert from "node:assert/strict";
-import * as NodeTest from "node:test";
+import * as Vitest from "vite-plus/test";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -10,7 +10,7 @@ import { setupWorktreeConfig } from "./setup-worktree-config.mjs";
 const paths = [".env", "infra/relay/.env"];
 async function fixture(t) {
   const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "Nebula Test ' $;&[]-"));
-  t.after(() => NodeFSP.rm(root, { recursive: true, force: true }));
+  t.onTestFinished(() => NodeFSP.rm(root, { recursive: true, force: true }));
   const sourceRoot = NodePath.join(root, "source repo");
   const destinationRoot = NodePath.join(root, "worktree one");
   for (const dir of [sourceRoot, destinationRoot])
@@ -26,7 +26,7 @@ async function seed(root) {
 }
 
 for (const relative of paths) {
-  NodeTest.test(
+  Vitest.test(
     `${relative}: independent copies, repeated setup, two worktrees, deletion and reseeding`,
     async (t) => {
       const f = await fixture(t);
@@ -63,7 +63,7 @@ for (const relative of paths) {
     },
   );
 
-  NodeTest.test(`${relative}: preserve existing regular file and its permissions`, async (t) => {
+  Vitest.test(`${relative}: preserve existing regular file and its permissions`, async (t) => {
     const f = await fixture(t);
     await seed(f.sourceRoot);
     const target = NodePath.join(f.destinationRoot, relative);
@@ -75,7 +75,7 @@ for (const relative of paths) {
   });
 
   for (const kind of ["symlink", "dangling symlink", "hardlink", "directory"]) {
-    NodeTest.test(`${relative}: refuse existing ${kind} without changing it`, async (t) => {
+    Vitest.test(`${relative}: refuse existing ${kind} without changing it`, async (t) => {
       const f = await fixture(t);
       await seed(f.sourceRoot);
       const source = NodePath.join(f.sourceRoot, relative);
@@ -90,7 +90,7 @@ for (const relative of paths) {
     });
   }
 
-  NodeTest.test(
+  Vitest.test(
     `${relative}: copy never broadens POSIX permissions`,
     {
       // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone Node test checks filesystem permission semantics.
@@ -112,7 +112,7 @@ for (const relative of paths) {
   );
 }
 
-NodeTest.test("missing optional sources skip without creating links or parents", async (t) => {
+Vitest.test("missing optional sources skip without creating links or parents", async (t) => {
   const f = await fixture(t);
   await NodeFSP.rm(NodePath.join(f.destinationRoot, "infra"), { recursive: true });
   await setupWorktreeConfig(f);
@@ -121,7 +121,7 @@ NodeTest.test("missing optional sources skip without creating links or parents",
   NodeAssert.equal(f.messages.length, 4);
 });
 
-NodeTest.test("linked relay parent is refused without touching source", async (t) => {
+Vitest.test("linked relay parent is refused without touching source", async (t) => {
   const f = await fixture(t);
   await seed(f.sourceRoot);
   await NodeFSP.rm(NodePath.join(f.destinationRoot, "infra"), { recursive: true });
@@ -137,7 +137,7 @@ NodeTest.test("linked relay parent is refused without touching source", async (t
   );
 });
 
-NodeTest.test(
+Vitest.test(
   "partial setup resumes safely after a relay conflict is resolved manually",
   async (t) => {
     const f = await fixture(t);
@@ -159,7 +159,7 @@ NodeTest.test(
   },
 );
 
-NodeTest.test("source symlinks are dereferenced into independent files", async (t) => {
+Vitest.test("source symlinks are dereferenced into independent files", async (t) => {
   const f = await fixture(t);
   const real = NodePath.join(f.root, "external-fixture");
   await NodeFSP.writeFile(real, "TEST_VALUE=external\n");
@@ -169,7 +169,7 @@ NodeTest.test("source symlinks are dereferenced into independent files", async (
   NodeAssert.equal(await NodeFSP.readFile(real, "utf8"), "TEST_VALUE=external\n");
 });
 
-NodeTest.test(
+Vitest.test(
   "CLI uses environment paths literally, reports conflicts and missing root without secrets",
   async (t) => {
     const f = await fixture(t);
@@ -196,7 +196,7 @@ NodeTest.test(
   },
 );
 
-NodeTest.test(
+Vitest.test(
   "same checkout is rejected and setup command keeps installation and cache warming",
   async (t) => {
     const f = await fixture(t);
@@ -214,7 +214,7 @@ NodeTest.test(
   },
 );
 
-NodeTest.test(
+Vitest.test(
   "interruption before publication exposes no partial destination and rerun recovers",
   async (t) => {
     const f = await fixture(t);
@@ -256,7 +256,7 @@ NodeTest.test(
   },
 );
 
-NodeTest.test("concurrent destination creation never overwrites user configuration", async (t) => {
+Vitest.test("concurrent destination creation never overwrites user configuration", async (t) => {
   const f = await fixture(t);
   await seed(f.sourceRoot);
   const helper = new URL("./setup-worktree-config.mjs", import.meta.url).href;
@@ -293,7 +293,7 @@ NodeTest.test("concurrent destination creation never overwrites user configurati
   }
 });
 
-NodeTest.test(
+Vitest.test(
   "full setup command preserves shell-special paths with fixture install and cache steps",
   async (t) => {
     if (NodeChildProcess.spawnSync("bash", ["--version"]).error) return t.skip("bash unavailable");

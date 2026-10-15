@@ -4,6 +4,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { FileFinder } from "@ff-labs/fff-node";
 import { it, afterEach, describe, expect } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Clock from "effect/Clock";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -96,6 +97,35 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
   });
 
   describe("project discovery", () => {
+    for (const elapsed of [2_000, 2_001]) {
+      it.effect(`preserves the strict discovery deadline at ${elapsed}ms`, () =>
+        Effect.gen(function* () {
+          const root = yield* makeTempDir({ prefix: "nebula-b0-discovery-clock-" });
+          yield* writeTextFile(root, "project/go.mod", "module fixture");
+          const service = yield* WorkspaceEntries.WorkspaceEntries;
+          const baseClock = yield* Clock.Clock;
+          let reads = 0;
+          const now = () => (reads++ === 0 ? 100 : 100 + elapsed);
+          const clock: Clock.Clock = {
+            currentTimeMillisUnsafe: now,
+            currentTimeMillis: Effect.sync(now),
+            currentTimeNanosUnsafe: () => baseClock.currentTimeNanosUnsafe(),
+            currentTimeNanos: baseClock.currentTimeNanos,
+            monotonicTimeNanosUnsafe: () => baseClock.monotonicTimeNanosUnsafe(),
+            monotonicTimeNanos: baseClock.monotonicTimeNanos,
+            sleep: (duration) => baseClock.sleep(duration),
+          };
+          const result = yield* service
+            .discoverProjects({ roots: [root], maxDepth: 2, limit: 20 })
+            .pipe(Effect.provideService(Clock.Clock, clock));
+          expect(result.entries.map((entry) => entry.title)).toEqual(
+            elapsed === 2_000 ? ["project"] : [],
+          );
+          expect(result.truncated).toBe(elapsed > 2_000);
+        }),
+      );
+    }
+
     it.effect("finds bounded Project roots and skips dependency caches", () =>
       Effect.gen(function* () {
         const root = yield* makeTempDir({ prefix: "t3code-project-discovery-" });

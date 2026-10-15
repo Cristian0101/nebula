@@ -11,6 +11,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import type * as PlatformError from "effect/PlatformError";
 import { computeMissionPlan, validateMissionGraph } from "@t3tools/shared/missionGraph";
 import { canRetryIntegrationOperation, projectTaskRisks } from "@t3tools/shared/missionRunner";
@@ -108,6 +109,9 @@ function requireMissionTaskReady(input: {
         }),
       );
 }
+
+// Preserve the existing JSON bytes; struct encoding could reorder or omit persisted fields.
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -853,8 +857,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         const supplied = command.plan.validation;
         if (
           !supplied ||
-          JSON.stringify({ ...validation, validatedAt: null }) !==
-            JSON.stringify({ ...supplied, validatedAt: null })
+          (yield* encodeJson({ ...validation, validatedAt: null }).pipe(Effect.orDie)) !==
+            (yield* encodeJson({ ...supplied, validatedAt: null }).pipe(Effect.orDie))
         ) {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
@@ -1769,9 +1773,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command.completedAt === run.completedAt &&
         command.decision == null &&
         command.finalReport != null &&
-        JSON.stringify(command.currentReadyTaskIds) === JSON.stringify(run.currentReadyTaskIds) &&
-        JSON.stringify(command.scheduledTaskIds) === JSON.stringify(run.scheduledTaskIds) &&
-        JSON.stringify(command.attention) === JSON.stringify(run.attention) &&
+        (yield* encodeJson(command.currentReadyTaskIds).pipe(Effect.orDie)) ===
+          (yield* encodeJson(run.currentReadyTaskIds).pipe(Effect.orDie)) &&
+        (yield* encodeJson(command.scheduledTaskIds).pipe(Effect.orDie)) ===
+          (yield* encodeJson(run.scheduledTaskIds).pipe(Effect.orDie)) &&
+        (yield* encodeJson(command.attention).pipe(Effect.orDie)) ===
+          (yield* encodeJson(run.attention).pipe(Effect.orDie)) &&
         command.attentionReason === run.attentionReason &&
         command.failureReason === run.failureReason &&
         (command.integrationBatchId === undefined ||
