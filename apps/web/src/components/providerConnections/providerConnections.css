@@ -79,3 +79,23 @@
     grid-column: 1 / -1;
   }
 }
+.connections-card-list-status {
+  display: none;
+}
+@media (min-width: 1920px) {
+  .connections-list .connections-card-status,
+  .connections-list .connections-card-action,
+  .connections-list .connections-card-meta {
+    display: none;
+  }
+  .connections-list .connections-card-list-status {
+    display: block;
+  }
+  .connections-list .connections-card > div {
+    padding: 8px 12px;
+  }
+  .connections-list .connections-provider-mark {
+    width: 28px;
+    height: 28px;
+  }
+}

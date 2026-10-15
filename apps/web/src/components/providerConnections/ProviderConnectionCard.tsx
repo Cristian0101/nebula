@@ -126,7 +126,7 @@ export function ProviderConnectionCard({
       <div className="flex flex-wrap items-center gap-2 p-4">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left focus-visible:outline-2 focus-visible:outline-ring"
+          className="flex min-w-32 flex-1 items-center gap-3 rounded-md text-left focus-visible:outline-2 focus-visible:outline-ring"
           data-connection-instance={provider.instanceId}
           onClick={onDetails}
           aria-label={`${name} details, ${status.label}`}
@@ -134,15 +134,24 @@ export function ProviderConnectionCard({
           <ProviderInstanceIcon
             driverKind={provider.driver}
             displayName={name}
-            className="size-9 rounded-lg border bg-muted"
+            className="connections-provider-mark size-9 rounded-lg border bg-muted"
           />
           <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold">{name}</span>
-            <span className="block truncate text-[11px] text-muted-foreground">
+            <span className="connections-provider-name block truncate text-sm font-semibold">
+              {name}
+            </span>
+            <span
+              className={`block truncate text-[11px] text-muted-foreground ${compact ? "" : "connections-card-meta"}`}
+            >
               {compact
                 ? status.label
                 : `${provider.version ? `v${provider.version} · ` : ""}${provider.instanceId}`}
             </span>
+            {!compact ? (
+              <span className="connections-card-list-status text-[11px] text-muted-foreground">
+                {status.label}
+              </span>
+            ) : null}
           </span>
           {compact ? (
             <ChevronRightIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
@@ -150,14 +159,19 @@ export function ProviderConnectionCard({
         </button>
         {!compact ? (
           <span
-            className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] ${CONNECTION_TONES[status.tone]}`}
+            className={`connections-card-status inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] ${CONNECTION_TONES[status.tone]}`}
           >
             <StatusIcon aria-hidden className="size-3" />
             {status.label}
           </span>
         ) : null}
         {status.actionLabel && !compact ? (
-          <Button variant="outline" size="xs" onClick={onAction}>
+          <Button
+            className="connections-card-action max-md:w-full"
+            variant="outline"
+            size="xs"
+            onClick={onAction}
+          >
             {status.actionLabel === "Sign in"
               ? signInCopy(provider.driver).label
               : status.actionLabel}
