@@ -1,4 +1,7 @@
+import * as Schema from "effect/Schema";
 import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
+const isProviderInstanceId = Schema.is(ProviderInstanceId);
+
 export interface ProviderConnectionsSearch {
   connections?: "all" | ProviderInstanceId;
   connectionsEnv?: EnvironmentId;
@@ -9,9 +12,10 @@ const identifier = (value: unknown): value is string =>
 export function parseProviderConnectionsSearch(
   search: Record<string, unknown>,
 ): ProviderConnectionsSearch {
-  if (!identifier(search.connections)) return {};
+  if (search.connections !== "all" && !isProviderInstanceId(search.connections)) return {};
   return {
-    connections: search.connections === "all" ? "all" : ProviderInstanceId.make(search.connections),
+    connections:
+      search.connections === "all" ? "all" : ProviderInstanceId.make(String(search.connections)),
     ...(identifier(search.connectionsEnv)
       ? { connectionsEnv: EnvironmentId.make(search.connectionsEnv) }
       : {}),
