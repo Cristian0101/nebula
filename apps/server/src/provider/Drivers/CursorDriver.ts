@@ -1,3 +1,5 @@
+import { makeCursorAuthenticationFlow } from "../providerAuthenticationFlows.ts";
+import { makeProviderAuthentication } from "../providerAuthentication.ts";
 /**
  * CursorDriver — `ProviderDriver` for the Cursor Agent (`cursor-agent`) runtime.
  *
@@ -173,6 +175,18 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         ),
       );
 
+      const { cwd } = yield* ServerConfig;
+      const authenticationFlow = yield* makeCursorAuthenticationFlow(
+        effectiveConfig.binaryPath,
+        processEnv,
+        cwd,
+      );
+      const authentication = yield* makeProviderAuthentication({
+        enabled,
+        flow: authenticationFlow,
+        refresh: snapshot.refresh,
+      });
+
       return {
         instanceId,
         driverKind: DRIVER_KIND,
@@ -181,6 +195,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
+        authentication,
         adapter,
         textGeneration,
       } satisfies ProviderInstance;

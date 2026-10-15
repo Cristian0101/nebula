@@ -4,6 +4,8 @@ Nebula providers extend the inherited ProviderDriver SPI. Authentication, creden
 
 See [Provider readiness and execution context](../user/provider-readiness.md) for the per-instance readiness facts, billing uncertainty, verification freshness, and Chat/Terminal identity shown in the existing UI.
 
+See [Official provider authentication](../user/provider-authentication.md) for E2 capabilities, volatile lifecycle, account-management authorization and the E3 consumer contract. Real-account testing follows the separately authorized [dogfood procedure](../operations/provider-authentication-dogfood.md).
+
 ## Antigravity CLI — implemented
 
 Antigravity is the supported Google first-party terminal provider for individual Google accounts. Nebula invokes the official `agy` headless interface:

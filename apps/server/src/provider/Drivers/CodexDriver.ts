@@ -1,3 +1,5 @@
+import { makeCodexAuthenticationFlow } from "../providerAuthenticationFlows.ts";
+import { makeProviderAuthentication } from "../providerAuthentication.ts";
 /**
  * CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
  *
@@ -198,6 +200,18 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         ),
       );
 
+      const { cwd } = yield* ServerConfig;
+      const authenticationFlow = yield* makeCodexAuthenticationFlow(
+        effectiveConfig,
+        processEnv,
+        cwd,
+      );
+      const authentication = yield* makeProviderAuthentication({
+        enabled,
+        flow: authenticationFlow,
+        refresh: snapshot.refresh,
+      });
+
       return {
         instanceId,
         driverKind: DRIVER_KIND,
@@ -206,6 +220,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
+        authentication,
         adapter,
         textGeneration,
       } satisfies ProviderInstance;
