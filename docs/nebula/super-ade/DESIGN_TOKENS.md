@@ -28,13 +28,13 @@ The current canonical palette is navy + **Solar Coral** (`DESIGN_SYSTEM.md`). Th
 
 ### 2.2 Recommended migration: additive theme, new default
 
-| Step                                                                                                               | Behavior                                                             |
-| ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| Add built-in theme `nebula-ion` (label **"Nebula Ion"**) with the values in [section 3](#3-nebula-ion-role-values) | Additive; no existing theme changes                                  |
-| Change the fresh-client default in `useTheme.ts` (`DEFAULT_THEME_SNAPSHOT.theme`) from `nebula` to `nebula-ion`    | Users with **no stored preference** see the new look                 |
-| Keep `nebula` (coral) as a selectable built-in, relabelled **"Nebula Solar"** in the picker only                   | Users who **explicitly chose** `nebula` keep exactly what they chose |
-| Add `nebula-ion` to `RESERVED_THEME_IDS`                                                                           | Prevents a custom theme from claiming the id                         |
-| Update `DESIGN_SYSTEM.md` palette section only after approval                                                      | Single canonical source again                                        |
+| Step                                                                                                                                                 | Behavior                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Add built-in theme `nebula-ion` (label **"Nebula Ion"**) with the values in [section 3](#3-nebula-ion-role-values)                                   | Additive; no existing theme changes                                                                         |
+| Change the fresh-client default in `useTheme.ts` (`DEFAULT_THEME_SNAPSHOT.theme`) from `nebula` to `nebula-ion`, **only in D1 after F1 is approved** | Users with **no stored preference** see the new look. No other milestone, including E3, changes the default |
+| Keep `nebula` (coral) as a selectable built-in, relabelled **"Nebula Solar"** in the picker only                                                     | Users who **explicitly chose** `nebula` keep exactly what they chose                                        |
+| Add `nebula-ion` to `RESERVED_THEME_IDS`                                                                                                             | Prevents a custom theme from claiming the id                                                                |
+| Update `DESIGN_SYSTEM.md` palette section only after approval                                                                                        | Single canonical source again                                                                               |
 
 Why not edit `nebula` in place: a stored `t3code:theme = "nebula"` is indistinguishable from an explicit choice, and the brief forbids breaking user-selected themes.
 
@@ -57,7 +57,7 @@ One region gets at most one solid-violet control. The mockup's "Connect provider
 
 ### 2.4 Status color semantics
 
-Status families are independent from brand hues. Two existing collisions must be resolved:
+Status families are independent from brand hues. Provider readiness maps E1's three fact values to `success` (verified), `error` (blocked) and `iconMuted` (unknown); advisories and sign-in progress use `warning`, `update` and `info` ([states §1](INTERACTION_STATES.md#1-provider-readiness-and-authentication)). Stale readiness is never warning-toned. Two existing collisions must be resolved:
 
 | Existing usage                                                                                            | Problem under the new palette                   | Resolution                                                                                           |
 | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
@@ -200,18 +200,19 @@ Glows render only on focus or active state, never at idle across many elements.
 
 Keep the existing platform stacks (`--font-sans`, `--font-mono` in `index.css`) and the Appearance overrides. Geist remains the preferred family once self-hosted assets exist; no network font dependency.
 
-| Token               | Size / line                | Weight | Tracking | Use                                                           |
-| ------------------- | -------------------------- | ------ | -------- | ------------------------------------------------------------- |
-| `type-display`      | 32 / 40 (36 / 44 at ≥1920) | 600    | -0.02em  | Empty-state hero only ("Build without limits.")               |
-| `type-title-lg`     | 20 / 28                    | 600    | -0.01em  | Project title, dialog titles                                  |
-| `type-title`        | 16 / 22                    | 600    | -0.005em | Section and panel titles ("Open a surface", "Project notes")  |
-| `type-body`         | 14 / 20                    | 400    | 0        | Default reading text, sidebar rows, transcript                |
-| `type-body-compact` | 13 / 18                    | 400    | 0        | Dense lists, table cells, tool rail labels                    |
-| `type-label`        | 13 / 18                    | 500    | 0        | Buttons, tabs, chips, form labels                             |
-| `type-meta`         | 12 / 16                    | 400    | 0        | Secondary lines, timestamps, captions (minimum readable size) |
-| `type-micro`        | 11 / 14                    | 500    | 0.01em   | Badges, `kbd`, counters only. Never sentences                 |
-| `type-mono`         | 12.5 / 18                  | 400    | 0        | Branches, SHAs, paths, model slugs, commands                  |
-| `type-code`         | user `--font-size-code`    | 400    | 0        | Code, terminal, diffs (respect user setting)                  |
+| Token               | Size / line                | Weight | Tracking | Use                                                              |
+| ------------------- | -------------------------- | ------ | -------- | ---------------------------------------------------------------- |
+| `type-display`      | 32 / 40 (36 / 44 at ≥1920) | 600    | -0.02em  | Empty-state hero only ("Build without limits.")                  |
+| `type-title-lg`     | 20 / 28                    | 600    | -0.01em  | Project title, dialog titles                                     |
+| `type-title`        | 16 / 22                    | 600    | -0.005em | Section and panel titles ("Open a surface", "Project notes")     |
+| `type-body`         | 14 / 20                    | 400    | 0        | Default reading text, sidebar rows, transcript                   |
+| `type-body-compact` | 13 / 18                    | 400    | 0        | Dense lists, table cells, tool rail labels                       |
+| `type-label`        | 13 / 18                    | 500    | 0        | Buttons, tabs, chips, form labels                                |
+| `type-meta`         | 12 / 16                    | 400    | 0        | Secondary lines, timestamps, captions (minimum readable size)    |
+| `type-micro`        | 11 / 14                    | 500    | 0.01em   | Badges, `kbd`, counters only. Never sentences                    |
+| `type-mono`         | 12.5 / 18                  | 400    | 0        | Branches, SHAs, paths, model slugs, commands                     |
+| `type-mono-display` | 22 / 28                    | 600    | 0.08em   | Device codes in a sign-in ceremony only (D0.2). Tabular numerals |
+| `type-code`         | user `--font-size-code`    | 400    | 0        | Code, terminal, diffs (respect user setting)                     |
 
 Rules: sentence case everywhere (no ALL-CAPS labels in the product shell; the North Star poster's tracked caps are marketing-only). Numerals in counters and timestamps use `font-variant-numeric: tabular-nums`. Truncate paths from the start (`StartTruncatedPath` exists), titles from the end.
 
@@ -284,19 +285,21 @@ Rules:
 
 Most shell dimensions already exist and are persisted. **Reuse them; do not introduce a parallel width system.**
 
-| Dimension              | Value                                                                                             | Status         | Source                                                |
-| ---------------------- | ------------------------------------------------------------------------------------------------- | -------------- | ----------------------------------------------------- |
-| Sidebar width          | 256px default, 208px min, main content keeps ≥640px; offcanvas collapse; double-click rail resets | Existing       | `threadSidebarWidth.ts` (`chat_thread_sidebar_width`) |
-| Top toolbar height     | 52px                                                                                              | Existing       | `--workspace-topbar-height` (WCO overrides handled)   |
-| Right context panel    | Persisted per thread; preview shell default 540px, min 360px, max 70% viewport                    | Existing       | `PreviewPanelShell.tsx`, `rightPanelStore.ts`         |
-| Right panel as sheet   | `w-[min(42vw,28rem)] min-w-80`, applies ≤980px                                                    | Existing       | `rightPanelLayout.ts`                                 |
-| Terminal floor         | 280px default, 180px min, 75% max                                                                 | Existing       | `ThreadTerminalDrawer.tsx`                            |
-| Page container         | `readable` 896 / `wide` 1024 / `expanded` 1152px                                                  | Existing       | `WorkspacePageContainer.tsx`                          |
-| `--content-max-width`  | 1152px (= `expanded`)                                                                             | Proposed alias | Project Home column                                   |
-| `--composer-max-width` | 768px (`48rem`)                                                                                   | Existing       | Composer and `chat-composer-context-strip`            |
-| `--tool-tile-min`      | 148px                                                                                             | Proposed       | Tool tile grid column minimum (container query)       |
-| Row height             | 32px (`h-8`), 28px `sm`                                                                           | Existing       | `SidebarMenuButton` sizes                             |
-| Control height         | 32px default (`sm:h-8`), 28px `sm`, 36px `lg`                                                     | Existing       | `button.tsx` sizes                                    |
+| Dimension                        | Value                                                                                             | Status          | Source                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------- | --------------- | ----------------------------------------------------- |
+| Sidebar width                    | 256px default, 208px min, main content keeps ≥640px; offcanvas collapse; double-click rail resets | Existing        | `threadSidebarWidth.ts` (`chat_thread_sidebar_width`) |
+| Top toolbar height               | 52px                                                                                              | Existing        | `--workspace-topbar-height` (WCO overrides handled)   |
+| Right context panel              | Persisted per thread; preview shell default 540px, min 360px, max 70% viewport                    | Existing        | `PreviewPanelShell.tsx`, `rightPanelStore.ts`         |
+| Right panel as sheet             | `w-[min(42vw,28rem)] min-w-80`, applies ≤980px                                                    | Existing        | `rightPanelLayout.ts`                                 |
+| Terminal floor                   | 280px default, 180px min, 75% max                                                                 | Existing        | `ThreadTerminalDrawer.tsx`                            |
+| Page container                   | `readable` 896 / `wide` 1024 / `expanded` 1152px                                                  | Existing        | `WorkspacePageContainer.tsx`                          |
+| `--content-max-width`            | 1152px (= `expanded`)                                                                             | Proposed alias  | Project Home column                                   |
+| `--composer-max-width`           | 768px (`48rem`)                                                                                   | Existing        | Composer and `chat-composer-context-strip`            |
+| `--tool-tile-min`                | 148px                                                                                             | Proposed        | Tool tile grid column minimum (container query)       |
+| `--connections-sheet-width`      | 600px, capped at `calc(100vw - 48px)`; 560px at 768–1279px                                        | Proposed (D0.2) | Provider Connections sheet                            |
+| `--connections-sheet-width-wide` | 1000px (list 400px · detail 600px) at ≥1920px                                                     | Proposed (D0.2) | Provider Connections two-pane sheet                   |
+| Row height                       | 32px (`h-8`), 28px `sm`                                                                           | Existing        | `SidebarMenuButton` sizes                             |
+| Control height                   | 32px default (`sm:h-8`), 28px `sm`, 36px `lg`                                                     | Existing        | `button.tsx` sizes                                    |
 
 ## 10. Breakpoints
 

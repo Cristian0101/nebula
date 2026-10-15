@@ -2,20 +2,20 @@
 
 **Status:** Proposed. Use this checklist for every Super ADE implementation step (D1–D9 in the [contract](SUPER_ADE_DESIGN_CONTRACT.md#16-engineering-implementation-handoff)). Check only the sections a change touches, and record in the PR which ones were checked and in which client (web or desktop).
 
-Screenshots used as evidence must redact account emails (enable the existing redaction setting) and must never include pairing URLs, tokens or device codes.
+Screenshots used as evidence must redact account emails (enable the existing redaction setting) and must never include pairing URLs, tokens, login URLs or device codes. Provider Connections evidence uses synthetic provider state only; real-account sign-in follows its own approved dogfood procedure.
 
 ## 1. Environments to check
 
-| Item                                                       | Required for                                                   |
-| ---------------------------------------------------------- | -------------------------------------------------------------- |
-| Web client (`vp run dev`, isolated `--home-dir`)           | Every UI step                                                  |
-| Desktop client                                             | Preview, window chrome, traffic-light inset, `setTheme` bridge |
-| Widths 375 / 768 / 980 / 1280 / 1920 / 2560 px             | Layout steps                                                   |
-| `nebula-ion` dark and light                                | Every UI step                                                  |
-| `nebula` (Solar), one other built-in, and one custom theme | Token steps (D1) and any new surface                           |
-| OS reduced motion on, plus the `.no-transitions` class     | Any animated change                                            |
-| Keyboard only (no pointer)                                 | Every interactive change                                       |
-| Screen reader smoke pass (VoiceOver)                       | New components                                                 |
+| Item                                                        | Required for                                                   |
+| ----------------------------------------------------------- | -------------------------------------------------------------- |
+| Web client (`vp run dev`, isolated `--home-dir`)            | Every UI step                                                  |
+| Desktop client                                              | Preview, window chrome, traffic-light inset, `setTheme` bridge |
+| Widths 375 / 390 / 768 / 980 / 1280 / 1440 / 1920 / 2560 px | Layout steps (390, 1280, 1440 and 2560 are required for E3)    |
+| `nebula-ion` dark and light                                 | Every UI step                                                  |
+| `nebula` (Solar), one other built-in, and one custom theme  | Token steps (D1) and any new surface                           |
+| OS reduced motion on, plus the `.no-transitions` class      | Any animated change                                            |
+| Keyboard only (no pointer)                                  | Every interactive change                                       |
+| Screen reader smoke pass (VoiceOver)                        | New components                                                 |
 
 ## 2. Tokens and theme (D1)
 
@@ -35,8 +35,8 @@ Screenshots used as evidence must redact account emails (enable the existing red
 - [ ] The search hint shows the **resolved** palette shortcut, not a hard-coded `⌘K`.
 - [ ] The active project sub-list shows only destinations that exist. Notes is hidden until available.
 - [ ] `aria-current="page"` is on the current destination.
-- [ ] `ProviderReadinessSummary` counts only enabled instances on the current environment, and never says "ready" for `auth.status: "unknown"`.
-- [ ] `ConnectProvidersCta` appears only while an enabled provider is not ready. Dismissal persists per environment.
+- [ ] `ProviderReadinessSummary` counts only enabled instances on the current environment, says "ready" only for E1 `runtime: verified`, and never counts stale instances as needing attention.
+- [ ] `ConnectProvidersCta` appears only while an enabled primary provider needs attention for a fixable reason, never for stale or unverified ones. Dismissal persists per environment.
 - [ ] No plan, seats, star-count or decorative "connected" widgets.
 
 ## 4. Execution context
@@ -49,15 +49,45 @@ Screenshots used as evidence must redact account emails (enable the existing red
 - [ ] Terminal panes show "Shell" or "{Provider} CLI · Separate session, not linked to this chat".
 - [ ] Remote previews and terminals show the environment name.
 
-## 5. Provider Connections
+## 5. Provider Connections (E3)
 
-- [ ] The five observed fixtures render the expected headline and ladder ([states §1.5](INTERACTION_STATES.md#15-observed-states-from-the-running-client-accounts-redacted)).
-- [ ] Billing route shows "Not reported" for unmapped values. API and cloud routes use attention tone with explanatory text.
-- [ ] The Claude subscription label reads "reported by Claude CLI", and the detail shows the F4 note.
-- [ ] Sign-in shows the mechanism and the command. Nothing auto-runs. "Check again" calls `server.refreshProviders` for that instance only.
-- [ ] Limited-permission clients see facts but no actions.
-- [ ] Emails respect the redaction setting in rows, detail and tooltips.
-- [ ] Focus starts on the first attention row and returns to the launcher on close.
+Reference: [blueprint §2](SCREEN_BLUEPRINTS.md#2-provider-connections), [states §1](INTERACTION_STATES.md#1-provider-readiness-and-authentication), [visual reference](reference/provider-connections.html), [E3 acceptance checklist](SUPER_ADE_DESIGN_CONTRACT.md#165-e3-acceptance-checklist).
+
+**Data truthfulness**
+
+- [ ] Each synthetic fixture in [states §1.8](INTERACTION_STATES.md#18-synthetic-fixtures) renders its expected group, label and primary action, in the card and in the detail.
+- [ ] Facts show `verified` / `blocked` / `unknown` with icon and fact-specific text. No fifth level, no blank value.
+- [ ] Stale (over five minutes) reads "Verification expired · checked {relative}" in muted tone and is not counted as Needs attention.
+- [ ] Billing always says "reported". API billing uses the warning outline chip. Plan labels appear only in the detail. Entitlement reads "Not verified".
+- [ ] After a successful sign-in, model availability, entitlement and runtime show their own live values; nothing turns green before the fresh snapshot.
+
+**Ceremonies**
+
+- [ ] Codex browser: host name only beside "Open ChatGPT sign-in"; countdown; Cancel; device code offered as the alternative and as primary on a remote host.
+- [ ] Codex device code: masked `••••-••••` until "Show code"; Copy confirmation names the host; cleared on expiry.
+- [ ] Cursor: the configured executable is shown; host name only; Cancel stops the attempt.
+- [ ] Claude: numbered terminal steps; executable and `CLAUDE_CONFIG_DIR` from the instance; fixed `auth login`; "Check sign-in status"; "Stop tracking"; F4 caveat; no Nebula terminal button.
+- [ ] All twenty recovery states in [states §1.5](INTERACTION_STATES.md#15-recovery-states) are reachable with fixtures and show one primary action.
+
+**Privacy**
+
+- [ ] No full login URL, device code, account email (when redaction is on) or attempt ID in the DOM outside the mounted ceremony, in the URL, in storage, in toasts, in the title or in the sidebar summary.
+- [ ] Reconnect, host switch, permission loss and instance replacement clear ceremony views.
+
+**Layout and appearance**
+
+- [ ] 1440: 600px sheet over a visible shell. 1280: 560px sheet. 390: full screen, 2 × 3 fact grid, sticky ceremony action. 2560: 1000px two-pane sheet.
+- [ ] No horizontal scroll at any required width; nothing stretches beyond 1000px.
+- [ ] Dark and light `nebula-ion`, plus the current default theme and one custom theme, render without literals.
+- [ ] At most one solid violet control visible in the sheet; card actions are outline.
+- [ ] Cards keep their fixed order after a check; the triage strip filters only.
+
+**Interaction**
+
+- [ ] Focus lands on the first attention card's action (or the title), moves into the detail heading, into each ceremony's first action, then "Done"; Back and Esc restore focus correctly.
+- [ ] Esc closes the sheet without cancelling an attempt; reopening resumes it.
+- [ ] Without `access:write`: facts visible, no sign-in controls, `Lock` "Needs Manage access".
+- [ ] Live regions: check results, progress, success, failure, one-minute warning, expiry.
 
 ## 6. Project Home
 
@@ -116,7 +146,7 @@ Screenshots used as evidence must redact account emails (enable the existing red
 - [ ] Every status shows icon + text (or text via `aria-label` for dots).
 - [ ] Tab order follows the visual order. No keyboard traps except intentional dialog traps.
 - [ ] Dialogs and sheets restore focus to the launcher.
-- [ ] Live regions announce: check results, sign-in outcome, save failure, approvals.
+- [ ] Live regions announce: check results, sign-in progress and outcome, sign-in expiry, save failure, approvals.
 - [ ] Text never goes below 12px except `type-micro` badges and kbd (11px).
 - [ ] Touch (`pointer: coarse`) hit areas are ≥44px (existing button behavior preserved).
 
@@ -131,4 +161,5 @@ Screenshots used as evidence must redact account emails (enable the existing red
 
 - [ ] Sentence case. No ALL-CAPS labels.
 - [ ] No claim of connection, readiness, review, coverage or entitlement without a backing field.
+- [ ] Provider copy never implies one-click sign-in, Claude OAuth inside Nebula, included usage, X Subscription coverage or a completed turn.
 - [ ] Error copy names the thing and the next step. No raw stack traces outside "Details".

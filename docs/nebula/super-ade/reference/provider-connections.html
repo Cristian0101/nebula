@@ -1,0 +1,3774 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Nebula Provider Connections</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+    />
+    <style>
+      /* Layout concept: a specification sheet. A sticky control rail, then lettered specimen
+         sections. Each specimen is a true-pixel frame scaled to fit, with a 100% toggle. */
+      :root {
+        --pg-bg: #f3f3f7;
+        --pg-panel: #ffffff;
+        --pg-fg: #16161e;
+        --pg-muted: #5b5d69;
+        --pg-line: #dcdde5;
+        --pg-accent: #6843dd;
+        --pg-chip: #ebeaff;
+        --pg-chip-fg: #3c2a8f;
+        --pg-ok: #007e49;
+        --pg-warn: #a96000;
+        --f-sans: "Geist", -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        --f-mono: "Geist Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --pg-bg: #07080b;
+          --pg-panel: #0f1016;
+          --pg-fg: #ecedf3;
+          --pg-muted: #9a9cab;
+          --pg-line: #23242e;
+          --pg-accent: #a08bff;
+          --pg-chip: #221f3b;
+          --pg-chip-fg: #d5ccff;
+          --pg-ok: #42ce85;
+          --pg-warn: #f2b54a;
+          color-scheme: dark;
+        }
+      }
+      :root[data-theme="dark"] {
+        --pg-bg: #07080b;
+        --pg-panel: #0f1016;
+        --pg-fg: #ecedf3;
+        --pg-muted: #9a9cab;
+        --pg-line: #23242e;
+        --pg-accent: #a08bff;
+        --pg-chip: #221f3b;
+        --pg-chip-fg: #d5ccff;
+        --pg-ok: #42ce85;
+        --pg-warn: #f2b54a;
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--pg-bg);
+        color: var(--pg-fg);
+        font: 15px/1.55 var(--f-sans);
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding-inline: 24px;
+      }
+      @media (max-width: 520px) {
+        .wrap {
+          padding-inline: 16px;
+        }
+      }
+      a {
+        color: var(--pg-accent);
+      }
+      :focus-visible {
+        outline: 2px solid var(--pg-accent);
+        outline-offset: 2px;
+      }
+
+      /* Document header */
+      .doc-head {
+        padding-block: 48px 28px;
+        display: grid;
+        gap: 14px;
+      }
+      .eyebrow {
+        font: 500 12px/1 var(--f-mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--pg-muted);
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(32px, 5vw, 52px);
+        line-height: 1.04;
+        letter-spacing: -0.03em;
+        font-weight: 600;
+        text-wrap: balance;
+      }
+      .lede {
+        margin: 0;
+        max-width: 68ch;
+        color: var(--pg-muted);
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 22px;
+        padding-inline: 8px;
+        border: 1px solid var(--pg-line);
+        border-radius: 6px;
+        font: 500 11.5px/1 var(--f-mono);
+        color: var(--pg-muted);
+        background: var(--pg-panel);
+        white-space: nowrap;
+      }
+      .tag b {
+        font-weight: 600;
+        color: var(--pg-fg);
+      }
+      .tag.e1::before,
+      .tag.e2::before,
+      .tag.e3::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 2px;
+      }
+      .tag.e1::before {
+        background: var(--pg-ok);
+      }
+      .tag.e2::before {
+        background: var(--pg-ok);
+        border-radius: 50%;
+      }
+      .tag.e3::before {
+        background: var(--pg-accent);
+      }
+
+      /* Control rail */
+      .rail {
+        position: sticky;
+        top: env(safe-area-inset-top, 0px);
+        z-index: 10;
+        background: color-mix(in oklch, var(--pg-bg) 88%, transparent);
+        backdrop-filter: blur(10px);
+        border-block: 1px solid var(--pg-line);
+      }
+      .rail .wrap {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding-block: 10px;
+        overflow-x: auto;
+      }
+      .seg {
+        display: inline-flex;
+        padding: 2px;
+        border: 1px solid var(--pg-line);
+        border-radius: 8px;
+        background: var(--pg-panel);
+        flex: none;
+      }
+      .seg button {
+        font: 500 12.5px/1 var(--f-sans);
+        color: var(--pg-muted);
+        background: transparent;
+        border: 0;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      .seg button[aria-pressed="true"] {
+        background: var(--pg-chip);
+        color: var(--pg-chip-fg);
+      }
+      .rail-label {
+        font: 500 11.5px/1 var(--f-mono);
+        color: var(--pg-muted);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        flex: none;
+      }
+      .jump {
+        display: flex;
+        gap: 14px;
+        flex: none;
+      }
+      .jump a {
+        color: var(--pg-muted);
+        text-decoration: none;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      .jump a:hover {
+        color: var(--pg-fg);
+      }
+
+      /* Sections */
+      section.sec {
+        padding-block: 44px 8px;
+        display: grid;
+        gap: 18px;
+        scroll-margin-top: 64px;
+      }
+      .sec-h {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 4px 14px;
+        align-items: baseline;
+      }
+      .sec-k {
+        font: 600 13px/1 var(--f-mono);
+        color: var(--pg-chip-fg);
+        background: var(--pg-chip);
+        border-radius: 7px;
+        width: 28px;
+        height: 28px;
+        display: grid;
+        place-items: center;
+        align-self: start;
+        margin-top: 1px;
+        grid-row: span 2;
+      }
+      h2 {
+        margin: 0;
+        font-size: 26px;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+        font-weight: 600;
+        text-wrap: balance;
+      }
+      .sec-d {
+        margin: 0;
+        color: var(--pg-muted);
+        max-width: 72ch;
+        font-size: 14.5px;
+      }
+      h3 {
+        margin: 18px 0 0;
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      /* Figures */
+      .fig {
+        margin: 0;
+        border: 1px solid var(--pg-line);
+        border-radius: 14px;
+        background: var(--pg-panel);
+        overflow: hidden;
+        min-width: 0;
+      }
+      .fig-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 12px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--pg-line);
+      }
+      .fig-title {
+        font-weight: 600;
+        font-size: 13.5px;
+      }
+      .fig-meta {
+        font: 12px/1.3 var(--f-mono);
+        color: var(--pg-muted);
+      }
+      .fig-bar .sp {
+        flex: 1;
+      }
+      .zoom {
+        font: 500 12px/1 var(--f-sans);
+        color: var(--pg-muted);
+        background: transparent;
+        border: 1px solid var(--pg-line);
+        border-radius: 6px;
+        padding: 5px 8px;
+        cursor: pointer;
+      }
+      .stage {
+        overflow-x: auto;
+        background: repeating-linear-gradient(
+          45deg,
+          transparent 0 10px,
+          color-mix(in oklch, var(--pg-line) 35%, transparent) 10px 11px
+        );
+      }
+      .scaler {
+        position: relative;
+      }
+      .frame-inner {
+        position: absolute;
+        top: 0;
+        left: 0;
+        transform-origin: 0 0;
+        overflow: hidden;
+      }
+      .fig figcaption {
+        padding: 10px 14px 12px;
+        font-size: 13px;
+        color: var(--pg-muted);
+        border-top: 1px solid var(--pg-line);
+      }
+      .grid2 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
+        gap: 16px;
+      }
+      .grid3 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+        gap: 16px;
+      }
+      .phones {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+        gap: 16px;
+      }
+      .note {
+        font-size: 13.5px;
+        color: var(--pg-muted);
+        max-width: 80ch;
+      }
+      .note code,
+      .sec-d code {
+        font: 12.5px var(--f-mono);
+        color: var(--pg-fg);
+      }
+      .tbl-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--pg-line);
+        border-radius: 12px;
+        background: var(--pg-panel);
+      }
+      table.t {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+        min-width: 720px;
+      }
+      table.t th,
+      table.t td {
+        text-align: left;
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--pg-line);
+        vertical-align: top;
+      }
+      table.t th {
+        font: 500 11.5px/1.2 var(--f-mono);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--pg-muted);
+      }
+      table.t tr:last-child td {
+        border-bottom: 0;
+      }
+      table.t code {
+        font: 12px var(--f-mono);
+      }
+      .sw {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border-radius: 4px;
+        vertical-align: -2px;
+        margin-right: 6px;
+        border: 1px solid var(--pg-line);
+      }
+      footer.doc-foot {
+        padding-block: 40px 56px;
+        color: var(--pg-muted);
+        font-size: 13px;
+      }
+
+      /* ============ Nebula Ion specimen (product UI) ============ */
+      .nb {
+        --canvas: #0b0c11;
+        --chrome: #0e0f16;
+        --surface: #12131b;
+        --raised: #181923;
+        --overlay: #1c1e28;
+        --text: #f2f3f8;
+        --muted: #acafbb;
+        --placeholder: #898b97;
+        --icon-muted: #9597a4;
+        --border: #282934;
+        --input: #323442;
+        --focus: #57a8ff;
+        --accent: #7454ea;
+        --accent-fg: #fbfbfe;
+        --accent-hover: #6945df;
+        --accent-surface: #242041;
+        --secondary: #1c1e28;
+        --error: #fa686a;
+        --error-fg: #fdb0b1;
+        --error-surface: #321314;
+        --warning: #f2b54a;
+        --warning-fg: #fbd999;
+        --warning-surface: #302107;
+        --success: #42ce85;
+        --success-fg: #a7eabf;
+        --success-surface: #092617;
+        --info: #45a4f6;
+        --info-fg: #a9d7ff;
+        --info-surface: #0a233b;
+        --code-bg: #0e0f16;
+        --code-fg: #f2f3f8;
+        --sidebar: #0e0f16;
+        --sidebar-muted: #acafbb;
+        --row-hover: #171922;
+        --row-selected: #201d38;
+        --sidebar-border: #21222c;
+        --message-surface: #181924;
+        --overlay-shadow: 0 16px 48px -16px rgb(0 0 0 / 55%);
+        --raised-inset: inset 0 1px 0 0 rgb(255 255 255 / 3%);
+        color-scheme: dark;
+      }
+      .nb[data-mode="light"] {
+        --canvas: #f9fafc;
+        --chrome: #f3f4f9;
+        --surface: #ffffff;
+        --raised: #f6f7fa;
+        --overlay: #ffffff;
+        --text: #151620;
+        --muted: #585a66;
+        --placeholder: #72747f;
+        --icon-muted: #666874;
+        --border: #dcdde5;
+        --input: #c8cad4;
+        --focus: #0072cd;
+        --accent: #6843dd;
+        --accent-fg: #ffffff;
+        --accent-hover: #5d39ca;
+        --accent-surface: #ebeaff;
+        --secondary: #eff0f6;
+        --error: #c22826;
+        --error-fg: #9b1f1d;
+        --error-surface: #ffefee;
+        --warning: #a96000;
+        --warning-fg: #894c06;
+        --warning-surface: #fff4e0;
+        --success: #007e49;
+        --success-fg: #00663a;
+        --success-surface: #e3f8e9;
+        --info: #006cc3;
+        --info-fg: #0059a1;
+        --info-surface: #e2f0ff;
+        --code-bg: #f3f4f9;
+        --code-fg: #151620;
+        --sidebar: #f3f4f9;
+        --sidebar-muted: #585a66;
+        --row-hover: #ebecf2;
+        --row-selected: #e8e7fd;
+        --sidebar-border: #e0e1e7;
+        --message-surface: #efeff9;
+        --overlay-shadow: 0 12px 32px -12px rgb(16 18 32 / 18%);
+        --raised-inset: none;
+        color-scheme: light;
+      }
+      .nb {
+        --scrim: color-mix(in oklch, var(--canvas) 72%, transparent);
+        --hairline: color-mix(in oklch, var(--border) 70%, transparent);
+        --brand-gradient: linear-gradient(135deg, var(--accent), var(--info));
+        --ring: 0 0 0 2px var(--focus), 0 0 0 3px var(--canvas);
+        font: 400 13px/18px var(--f-sans);
+        color: var(--text);
+        background: var(--canvas);
+        font-variant-numeric: tabular-nums;
+        text-align: left;
+      }
+      .nb * {
+        box-sizing: border-box;
+      }
+      .nb .ic {
+        width: 14px;
+        height: 14px;
+        flex: none;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.75;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .nb .ic.l {
+        width: 16px;
+        height: 16px;
+      }
+      .nb .mono {
+        font: 400 12.5px/18px var(--f-mono);
+      }
+      .nb .meta {
+        font-size: 12px;
+        line-height: 16px;
+        color: var(--muted);
+      }
+      .nb .micro {
+        font: 500 11px/14px var(--f-sans);
+        letter-spacing: 0.01em;
+      }
+      .nb .t-ok {
+        color: var(--success);
+      }
+      .nb .t-err {
+        color: var(--error);
+      }
+      .nb .t-warn {
+        color: var(--warning);
+      }
+      .nb .t-info {
+        color: var(--info);
+      }
+      .nb .t-mut {
+        color: var(--icon-muted);
+      }
+
+      /* buttons */
+      .nb .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 28px;
+        padding-inline: 10px;
+        border-radius: 8px;
+        font: 500 13px/18px var(--f-sans);
+        border: 1px solid transparent;
+        white-space: nowrap;
+        color: var(--text);
+        background: transparent;
+      }
+      .nb .btn.md {
+        height: 32px;
+        padding-inline: 12px;
+      }
+      .nb .btn.pri {
+        background: var(--accent);
+        color: var(--accent-fg);
+        box-shadow: inset 0 1px 0 rgb(255 255 255 / 12%);
+      }
+      .nb .btn.pri.hov {
+        background: var(--accent-hover);
+      }
+      .nb .btn.out {
+        background: var(--secondary);
+        border-color: var(--border);
+      }
+      .nb .btn.out.hov {
+        background: var(--raised);
+        border-color: var(--input);
+      }
+      .nb .btn.ghost {
+        color: var(--muted);
+      }
+      .nb .btn.ghost.hov {
+        background: var(--raised);
+        color: var(--text);
+      }
+      .nb .btn.foc {
+        box-shadow: var(--ring);
+      }
+      .nb .btn.prs {
+        transform: scale(0.98);
+        box-shadow: inset 0 1px 2px rgb(0 0 0 / 18%);
+      }
+      .nb .btn.dis {
+        opacity: 0.64;
+      }
+      .nb .btn.icon {
+        width: 28px;
+        padding: 0;
+      }
+      .nb .btn.full {
+        width: 100%;
+      }
+      .nb .link {
+        color: var(--focus);
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 500;
+      }
+      .nb kbd {
+        font: 500 11px/1 var(--f-sans);
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 3px 5px;
+        background: var(--surface);
+      }
+      .nb .spin {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        border: 2px solid color-mix(in oklch, currentColor 30%, transparent);
+        border-top-color: currentColor;
+        flex: none;
+      }
+
+      /* chips and status */
+      .nb .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 20px;
+        padding-inline: 7px;
+        border-radius: 6px;
+        font: 500 11px/14px var(--f-sans);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        background: var(--surface);
+        white-space: nowrap;
+      }
+      .nb .chip .ic {
+        width: 12px;
+        height: 12px;
+      }
+      .nb .chip.warn-o {
+        border-color: color-mix(in oklch, var(--warning) 55%, transparent);
+        color: var(--warning-fg);
+        background: transparent;
+      }
+      .nb .chip.upd {
+        border-color: color-mix(in oklch, var(--info) 45%, transparent);
+        color: var(--info-fg);
+        background: var(--info-surface);
+      }
+      .nb .chip.pri {
+        border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+        color: var(--text);
+        background: var(--accent-surface);
+      }
+      .nb .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font: 500 12.5px/16px var(--f-sans);
+        white-space: nowrap;
+      }
+      .nb .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: none;
+      }
+      .nb .dot.ok {
+        background: var(--success);
+      }
+      .nb .dot.err {
+        background: var(--error);
+      }
+      .nb .dot.warn {
+        background: var(--warning);
+      }
+      .nb .dot.info {
+        background: transparent;
+        box-shadow: inset 0 0 0 2px var(--info);
+      }
+      .nb .dot.mut {
+        background: transparent;
+        box-shadow: inset 0 0 0 1.5px var(--icon-muted);
+      }
+      .nb .status.ok {
+        color: var(--success-fg);
+      }
+      .nb .status.err {
+        color: var(--error-fg);
+      }
+      .nb .status.warn {
+        color: var(--warning-fg);
+      }
+      .nb .status.info {
+        color: var(--info-fg);
+      }
+      .nb .status.mut {
+        color: var(--muted);
+      }
+
+      /* provider mark placeholder */
+      .nb .mark {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        font: 600 12px/1 var(--f-mono);
+        letter-spacing: -0.02em;
+        background: var(--raised);
+        border: 1px solid var(--border);
+        color: var(--text);
+        flex: none;
+        box-shadow: var(--raised-inset);
+      }
+      .nb .mark.s {
+        width: 20px;
+        height: 20px;
+        border-radius: 6px;
+        font-size: 9px;
+      }
+
+      /* sheet */
+      .nb .sheet {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        flex-direction: column;
+        background: var(--overlay);
+        border-left: 1px solid var(--border);
+        border-radius: 14px 0 0 14px;
+        box-shadow: var(--overlay-shadow);
+      }
+      .nb .sheet.full {
+        border-radius: 0;
+        border-left: 0;
+        left: 0;
+      }
+      .nb .sh-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 16px 12px 20px;
+      }
+      .nb .sh-title {
+        font: 600 16px/22px var(--f-sans);
+        letter-spacing: -0.005em;
+        flex: 1;
+      }
+      .nb .scope {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 10px;
+        padding: 0 20px 12px;
+      }
+      .nb .host {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        padding: 0 8px 0 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--secondary);
+        font-weight: 500;
+      }
+      .nb .access {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .nb .triage {
+        display: flex;
+        gap: 4px;
+        padding: 0 20px 14px;
+        border-bottom: 1px solid var(--hairline);
+        overflow: hidden;
+      }
+      .nb .tri {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding-inline: 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        font: 500 12.5px/16px var(--f-sans);
+        color: var(--muted);
+        white-space: nowrap;
+        flex: none;
+      }
+      .nb .tri .n {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .nb .tri.on {
+        background: var(--accent-surface);
+        border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+        color: var(--text);
+      }
+      .nb .sh-body {
+        flex: 1;
+        overflow: hidden;
+        padding: 14px 20px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .nb .grp {
+        font: 500 12px/16px var(--f-sans);
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .nb .sh-foot {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 20px;
+        border-top: 1px solid var(--hairline);
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .nb .sh-foot .sp {
+        flex: 1;
+      }
+
+      /* provider card */
+      .nb .pc {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+        padding: 12px 14px 12px;
+        display: grid;
+        gap: 12px;
+        position: relative;
+      }
+      .nb .pc.attn {
+        box-shadow: inset 2px 0 0 var(--warning);
+      }
+      .nb .pc.attn.e {
+        box-shadow: inset 2px 0 0 var(--error);
+      }
+      .nb .pc.attn.i {
+        box-shadow: inset 2px 0 0 var(--info);
+      }
+      .nb .pc.hov {
+        background: var(--raised);
+      }
+      .nb .pc.sel {
+        background: var(--accent-surface);
+        border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+        box-shadow: inset 2px 0 0 var(--accent);
+      }
+      .nb .pc-h {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr) auto;
+        gap: 2px 12px;
+        align-items: center;
+      }
+      .nb .pc-h .mark {
+        grid-row: span 2;
+        align-self: start;
+      }
+      .nb .pc-name {
+        font: 600 14px/20px var(--f-sans);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .nb .pc-sub {
+        font-size: 12px;
+        line-height: 16px;
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .nb .pc-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        justify-self: end;
+      }
+      .nb .pc-act {
+        justify-self: end;
+      }
+      .nb .pc.foc .pc-h {
+        border-radius: 6px;
+        box-shadow: var(--ring);
+      }
+      .nb .facts {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px 16px;
+        padding-top: 10px;
+        border-top: 1px solid var(--hairline);
+      }
+      .nb .fc {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+      .nb .fc-l {
+        font-size: 11.5px;
+        line-height: 15px;
+        color: var(--muted);
+      }
+      .nb .fc-v {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        font-size: 12.5px;
+        line-height: 17px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .nb .fc-v.u {
+        color: var(--muted);
+      }
+      .nb .fc-v.b {
+        font-weight: 500;
+      }
+      .nb .pc.chk .fc-v,
+      .nb .pc.chk .pc-sub {
+        opacity: 0.55;
+      }
+      .nb .adv {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .nb .row {
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr) auto auto 14px;
+        gap: 10px;
+        align-items: center;
+        height: 40px;
+        padding: 0 10px;
+        border-radius: 8px;
+      }
+      .nb .row + .row {
+        border-top: 1px solid var(--hairline);
+        border-radius: 0;
+      }
+      .nb .row .nm {
+        font-weight: 500;
+      }
+      .nb .skel {
+        border-radius: 6px;
+        background: linear-gradient(
+          90deg,
+          var(--raised),
+          color-mix(in oklch, var(--raised) 60%, var(--border)),
+          var(--raised)
+        );
+      }
+
+      /* detail */
+      .nb .back {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px 10px 12px;
+      }
+      .nb .back .btn {
+        color: var(--muted);
+      }
+      .nb .back .sp {
+        flex: 1;
+      }
+      .nb .id {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr) auto;
+        gap: 2px 12px;
+        align-items: center;
+        padding: 0 20px 14px;
+      }
+      .nb .id .mark {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        font-size: 14px;
+        grid-row: span 2;
+      }
+      .nb .id-name {
+        font: 600 18px/24px var(--f-sans);
+        letter-spacing: -0.01em;
+      }
+      .nb .sec {
+        padding: 14px 20px;
+        border-top: 1px solid var(--hairline);
+        display: grid;
+        gap: 8px;
+      }
+      .nb .sec-t {
+        font: 600 13px/18px var(--f-sans);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .nb .sec-t .sp {
+        flex: 1;
+      }
+      .nb dl.fl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: 180px minmax(0, 1fr);
+        gap: 7px 12px;
+      }
+      .nb dl.fl dt {
+        color: var(--muted);
+        font-size: 12.5px;
+      }
+      .nb dl.fl dd {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12.5px;
+        min-width: 0;
+      }
+      .nb .panel {
+        margin: 0 20px 14px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--raised);
+        box-shadow: var(--raised-inset);
+        padding: 12px 14px;
+        display: grid;
+        gap: 10px;
+      }
+      .nb .panel-h {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .nb .panel-h .tt {
+        font: 600 14px/20px var(--f-sans);
+        flex: 1;
+        min-width: 0;
+      }
+      .nb .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .nb .actions .sp {
+        flex: 1;
+      }
+
+      /* ceremony */
+      .nb .cer {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--raised);
+        box-shadow: var(--raised-inset);
+        display: grid;
+      }
+      .nb .cer-h {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px 10px;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .nb .cer-h .tt {
+        font: 600 14px/20px var(--f-sans);
+        flex: 1;
+        min-width: 0;
+      }
+      .nb .timer {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .nb .timer.w {
+        color: var(--warning-fg);
+      }
+      .nb .cer-b {
+        padding: 12px 14px;
+        display: grid;
+        gap: 12px;
+      }
+      .nb .cer-f {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 10px 14px 12px;
+        border-top: 1px solid var(--hairline);
+      }
+      .nb .cer-f .sp {
+        flex: 1;
+      }
+      .nb ol.steps {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 12px;
+      }
+      .nb ol.steps > li {
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+      }
+      .nb .n {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font: 600 11px/1 var(--f-sans);
+        border: 1px solid var(--input);
+        color: var(--muted);
+      }
+      .nb .n.done {
+        background: var(--success-surface);
+        border-color: color-mix(in oklch, var(--success) 50%, transparent);
+        color: var(--success);
+      }
+      .nb .step-t {
+        font-weight: 500;
+        line-height: 20px;
+      }
+      .nb .step-b {
+        display: grid;
+        gap: 8px;
+        margin-top: 6px;
+      }
+      .nb .hostname {
+        font: 400 12px/16px var(--f-mono);
+        color: var(--muted);
+      }
+      .nb .wait {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--info-fg);
+        font-size: 12.5px;
+      }
+      .nb .kv {
+        display: grid;
+        grid-template-columns: 136px minmax(0, 1fr) auto;
+        gap: 6px 10px;
+        align-items: center;
+      }
+      .nb .kv .k {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .nb .kv .v {
+        font: 400 12.5px/18px var(--f-mono);
+        background: var(--code-bg);
+        color: var(--code-fg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 4px 8px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+      .nb .cer,
+      .nb .panel {
+        container-type: inline-size;
+      }
+      @container (max-width: 440px) {
+        .nb .kv {
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
+        .nb .kv .k {
+          grid-column: 1 / -1;
+          margin-bottom: -2px;
+        }
+      }
+      .nb .cmd {
+        font: 500 12.5px/18px var(--f-mono);
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 2px 6px;
+      }
+      .nb .code {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .nb .code-box {
+        height: 48px;
+        min-width: 184px;
+        padding: 0 16px;
+        display: grid;
+        place-items: center start;
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font: 600 22px/28px var(--f-mono);
+        letter-spacing: 0.08em;
+        color: var(--code-fg);
+      }
+      .nb .code-box.mask {
+        color: var(--muted);
+        letter-spacing: 0.14em;
+      }
+      .nb .warnline {
+        font-size: 12px;
+        color: var(--muted);
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .nb .caveat {
+        display: grid;
+        grid-template-columns: 14px minmax(0, 1fr);
+        gap: 8px;
+        font-size: 12px;
+        line-height: 17px;
+        color: var(--muted);
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+      }
+      .nb .caveat .ic {
+        margin-top: 1px;
+      }
+
+      /* notices */
+      .nb .notice {
+        display: grid;
+        grid-template-columns: 16px minmax(0, 1fr);
+        gap: 4px 10px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--raised);
+      }
+      .nb .notice .ic {
+        width: 16px;
+        height: 16px;
+        margin-top: 2px;
+      }
+      .nb .notice .nt {
+        font: 600 13px/20px var(--f-sans);
+      }
+      .nb .notice .nd {
+        grid-column: 2;
+        font-size: 12.5px;
+        line-height: 18px;
+        color: var(--muted);
+      }
+      .nb .notice .actions {
+        grid-column: 2;
+        margin-top: 6px;
+      }
+      .nb .notice.err {
+        background: var(--error-surface);
+        border-color: color-mix(in oklch, var(--error) 30%, transparent);
+      }
+      .nb .notice.err .nt,
+      .nb .notice.err > .ic {
+        color: var(--error-fg);
+      }
+      .nb .notice.warn {
+        background: var(--warning-surface);
+        border-color: color-mix(in oklch, var(--warning) 30%, transparent);
+      }
+      .nb .notice.warn .nt,
+      .nb .notice.warn > .ic {
+        color: var(--warning-fg);
+      }
+      .nb .notice.info {
+        background: var(--info-surface);
+        border-color: color-mix(in oklch, var(--info) 30%, transparent);
+      }
+      .nb .notice.info .nt,
+      .nb .notice.info > .ic {
+        color: var(--info-fg);
+      }
+      .nb .notice.ok {
+        background: var(--success-surface);
+        border-color: color-mix(in oklch, var(--success) 30%, transparent);
+      }
+      .nb .notice.ok .nt,
+      .nb .notice.ok > .ic {
+        color: var(--success-fg);
+      }
+      .nb .notice.err .nd,
+      .nb .notice.warn .nd,
+      .nb .notice.info .nd,
+      .nb .notice.ok .nd {
+        color: var(--text);
+        opacity: 0.86;
+      }
+      .nb .notice .nt + .nd {
+        margin-top: -2px;
+      }
+
+      /* shell */
+      .nb .shell {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-columns: 256px minmax(0, 1fr);
+      }
+      .nb .sb {
+        background: var(--sidebar);
+        border-right: 1px solid var(--sidebar-border);
+        display: flex;
+        flex-direction: column;
+        padding: 0 8px 10px;
+        gap: 2px;
+        color: var(--text);
+      }
+      .nb .sb-brand {
+        height: 52px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 8px;
+      }
+      .nb .logo {
+        width: 20px;
+        height: 20px;
+        border-radius: 6px;
+        background: var(--brand-gradient);
+      }
+      .nb .sb-brand .d {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .nb .sb-search {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        padding: 0 8px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        color: var(--placeholder);
+        margin-bottom: 6px;
+        background: var(--surface);
+      }
+      .nb .sb-search .sp {
+        flex: 1;
+      }
+      .nb .sb-i {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        padding: 0 8px;
+        border-radius: 8px;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .nb .sb-i .ic {
+        color: var(--icon-muted);
+      }
+      .nb .sb-i.sel {
+        background: var(--row-selected);
+        box-shadow: inset 2px 0 0 var(--accent);
+      }
+      .nb .sb-i.sub {
+        height: 26px;
+        padding-left: 36px;
+        color: var(--sidebar-muted);
+      }
+      .nb .sb-i.sub.cur {
+        color: var(--text);
+        background: var(--row-hover);
+      }
+      .nb .sb-l {
+        font-size: 11.5px;
+        color: var(--sidebar-muted);
+        padding: 12px 8px 4px;
+      }
+      .nb .fav {
+        width: 16px;
+        height: 16px;
+        border-radius: 4px;
+        display: grid;
+        place-items: center;
+        font: 600 9px/1 var(--f-sans);
+        background: var(--raised);
+        border: 1px solid var(--border);
+      }
+      .nb .sb-spacer {
+        flex: 1;
+      }
+      .nb .sum {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        padding: 0 8px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        margin-bottom: 4px;
+      }
+      .nb .sum .stack {
+        display: flex;
+      }
+      .nb .sum .stack .mark {
+        margin-left: -6px;
+        position: relative;
+        box-shadow: 0 0 0 2px var(--surface);
+      }
+      .nb .sum .stack .mark:first-child {
+        margin-left: 0;
+      }
+      .nb .sum .stack .dot {
+        position: absolute;
+        right: -2px;
+        bottom: -2px;
+        width: 7px;
+        height: 7px;
+        box-shadow: 0 0 0 1.5px var(--surface);
+      }
+      .nb .sum .stack .dot.mut {
+        background: var(--surface);
+        box-shadow:
+          inset 0 0 0 1.5px var(--icon-muted),
+          0 0 0 1.5px var(--surface);
+      }
+      .nb .sum .tx {
+        flex: 1;
+        min-width: 0;
+        font-size: 12.5px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .nb .main {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        background: var(--canvas);
+      }
+      .nb .tb {
+        height: 52px;
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--sidebar-border);
+        background: var(--chrome);
+      }
+      .nb .crumb {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .nb .crumb b {
+        color: var(--text);
+        font-weight: 500;
+      }
+      .nb .ctx {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 10px;
+        border-radius: 8px;
+        background: var(--secondary);
+        border: 1px solid var(--border);
+        font: 400 12.5px/1 var(--f-mono);
+        white-space: nowrap;
+      }
+      .nb .tb .sp {
+        flex: 1;
+      }
+      .nb .cta {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        padding: 0 12px;
+        border-radius: 8px;
+        background: var(--brand-gradient);
+        color: #ffffff;
+        font-weight: 600;
+      }
+      .nb .cta small {
+        display: block;
+        font: 500 11px/12px var(--f-sans);
+        opacity: 0.9;
+      }
+      .nb .home {
+        padding: 24px 32px;
+        display: grid;
+        gap: 18px;
+        align-content: start;
+        max-width: 1152px;
+      }
+      .nb .ph {
+        display: grid;
+        grid-template-columns: 40px 1fr auto;
+        gap: 2px 12px;
+        align-items: center;
+      }
+      .nb .ph .pfav {
+        grid-row: span 2;
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        font-weight: 600;
+        background: var(--raised);
+        border: 1px solid var(--border);
+      }
+      .nb .ph .tt {
+        font: 600 20px/28px var(--f-sans);
+        letter-spacing: -0.01em;
+      }
+      .nb .tabs {
+        display: flex;
+        gap: 18px;
+        border-bottom: 1px solid var(--hairline);
+        color: var(--muted);
+        font-weight: 500;
+      }
+      .nb .tabs span {
+        padding-bottom: 9px;
+      }
+      .nb .tabs .on {
+        color: var(--text);
+        box-shadow: inset 0 -2px 0 var(--accent);
+      }
+      .nb .cards2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .nb .hcard {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+        padding: 12px 14px;
+        display: grid;
+        gap: 8px;
+        align-content: start;
+      }
+      .nb .hcard .tt {
+        font: 600 13px/18px var(--f-sans);
+      }
+      .nb .li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        border-top: 1px solid var(--hairline);
+        font-size: 12.5px;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .nb .li .sp {
+        flex: 1;
+      }
+      .nb .composer {
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        background: var(--message-surface);
+        padding: 14px 16px 10px;
+        display: grid;
+        gap: 18px;
+        max-width: 768px;
+      }
+      .nb .composer .ph-t {
+        color: var(--placeholder);
+      }
+      .nb .composer .bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .nb .composer .bar .sp {
+        flex: 1;
+      }
+      .nb .send {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--accent-fg);
+        display: grid;
+        place-items: center;
+      }
+      .nb .scrim {
+        position: absolute;
+        inset: 0;
+        background: var(--scrim);
+      }
+
+      /* panes for ultrawide */
+      .nb .panes {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 400px minmax(0, 1fr);
+        min-height: 0;
+      }
+      .nb .pane-l {
+        border-right: 1px solid var(--hairline);
+        padding: 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        overflow: hidden;
+      }
+      .nb .pane-r {
+        overflow: hidden;
+      }
+      .nb .cpt {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr) auto;
+        gap: 2px 10px;
+        align-items: center;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+      }
+      .nb .cpt .mark {
+        width: 28px;
+        height: 28px;
+        grid-row: span 2;
+        font-size: 11px;
+      }
+      .nb .cpt .l2 {
+        grid-column: 2 / 4;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      /* specimen panels outside frames */
+      .spec {
+        border-radius: 12px;
+        padding: 16px;
+        min-width: 0;
+      }
+      .spec-cap {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        align-items: center;
+        margin: 0 0 10px;
+      }
+      .spec-cap .k {
+        font: 600 12px/1 var(--f-mono);
+        color: var(--muted);
+      }
+      .spec-cap .t {
+        font: 600 13.5px/18px var(--f-sans);
+        color: var(--text);
+      }
+      .spec-cap .src {
+        font: 400 11.5px/14px var(--f-mono);
+        color: var(--muted);
+      }
+      .spec .stack-v {
+        display: grid;
+        gap: 10px;
+      }
+      .spec .stack-v > *,
+      .swatchrow > * {
+        min-width: 0;
+        max-width: 100%;
+      }
+      .spec .triage {
+        flex-wrap: wrap;
+      }
+      .swatchrow {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 14px;
+        align-items: center;
+      }
+      .lbl {
+        font: 400 11.5px/14px var(--f-mono);
+        color: var(--muted);
+        display: block;
+        margin-bottom: 6px;
+      }
+      @media (max-width: 520px) {
+        .nb .kv {
+          grid-template-columns: 1fr auto;
+        }
+        .nb .kv .k {
+          grid-column: 1 / -1;
+        }
+        .nb dl.fl {
+          grid-template-columns: 1fr;
+          gap: 2px;
+        }
+        .nb dl.fl dd {
+          margin-bottom: 6px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          scroll-behavior: auto !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="wrap doc-head">
+      <span class="eyebrow">Nebula Super ADE · Design D0.2 · E3 target</span>
+      <h1>Provider Connections</h1>
+      <p class="lede">
+        High-fidelity reference for the E3 Provider Connections sheet. Every frame renders at its
+        true pixel size in the proposed <code>nebula-ion</code> palette and scales to fit. Data is
+        synthetic: no real account, login link, device code or pairing value appears anywhere. Where
+        this page differs from the design documents, the documents win.
+      </p>
+      <div class="legend" aria-label="Legend">
+        <span class="tag e1"><b>Delivered</b> E1 readiness · PR #37 merged</span>
+        <span class="tag e2"><b>Delivered</b> E2 authentication · PR #40 at 4b2a955</span>
+        <span class="tag e3"><b>Proposed</b> E3 presentation</span>
+      </div>
+    </header>
+
+    <nav class="rail" aria-label="Reference controls">
+      <div class="wrap">
+        <span class="rail-label">Frames</span>
+        <div class="seg" role="group" aria-label="Frame appearance">
+          <button type="button" id="mode-dark" data-mode="dark" aria-pressed="true">Dark</button>
+          <button type="button" id="mode-light" data-mode="light" aria-pressed="false">
+            Light
+          </button>
+        </div>
+        <div class="jump">
+          <a href="#overview">A · Overview</a>
+          <a href="#detail">B · Detail</a>
+          <a href="#signin">C · Sign-in</a>
+          <a href="#recovery">D · Recovery</a>
+          <a href="#states">Interaction states</a>
+          <a href="#responsive">Responsive</a>
+          <a href="#appearance">Dark and light</a>
+          <a href="#matrix">State matrix</a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="wrap">
+      <section class="sec" id="overview">
+        <div class="sec-h">
+          <span class="sec-k">A</span>
+          <h2>Overview, over the current project</h2>
+          <p class="sec-d">
+            Desktop 1440 × 900. The sheet (600px) opens from the sidebar summary, the toolbar CTA,
+            the composer, banners, the model picker or the palette. The project route stays mounted
+            behind the scrim. Cards keep a fixed order; the triage strip filters.
+          </p>
+        </div>
+        <div id="f-overview"></div>
+      </section>
+
+      <section class="sec" id="detail">
+        <div class="sec-h">
+          <span class="sec-k">B</span>
+          <h2>Provider detail</h2>
+          <p class="sec-d">
+            Pushed inside the sheet. Next action first, then account and sign-in, the seven E1
+            facts, reported billing and collapsed diagnostics. The detail's next action is the only
+            solid violet control in the sheet.
+          </p>
+        </div>
+        <div class="grid2" id="f-detail"></div>
+      </section>
+
+      <section class="sec" id="signin">
+        <div class="sec-h">
+          <span class="sec-k">C</span>
+          <h2>Official sign-in flows</h2>
+          <p class="sec-d">
+            Each ceremony replaces the detail's status panel. Captions name the E2 state that drives
+            each step. Login links show their host name only; device codes stay masked until
+            revealed.
+          </p>
+        </div>
+        <h3>Codex · managed App Server · browser and device code</h3>
+        <div class="grid3" id="c-codex"></div>
+        <h3>Cursor · configured official CLI · browser handoff</h3>
+        <div class="grid3" id="c-cursor"></div>
+        <h3>Claude · guided terminal, under the person's control</h3>
+        <div class="grid3" id="c-claude"></div>
+      </section>
+
+      <section class="sec" id="recovery">
+        <div class="sec-h">
+          <span class="sec-k">D</span>
+          <h2>Recovery states</h2>
+          <p class="sec-d">
+            The thirteen required states, then seven supporting ones. Each shows its card label and
+            the detail notice with one next action. Source tags name the E1 fact, E2 state or client
+            condition that triggers it.
+          </p>
+        </div>
+        <div class="grid3" id="rec"></div>
+      </section>
+
+      <section class="sec" id="states">
+        <div class="sec-h">
+          <span class="sec-k">S</span>
+          <h2>Interaction states</h2>
+          <p class="sec-d">
+            Controls, cards, facts, billing, triage, countdown, private code and shell entry points
+            in each state an implementation must render.
+          </p>
+        </div>
+        <div class="grid2" id="ix"></div>
+      </section>
+
+      <section class="sec" id="responsive">
+        <div class="sec-h">
+          <span class="sec-k">R</span>
+          <h2>Responsive</h2>
+          <p class="sec-d">
+            1280 laptop uses a 560px sheet. Under 768px the sheet is full screen with a sticky
+            ceremony footer. At 1920px and wider the sheet becomes a 1000px two-pane view and never
+            stretches further.
+          </p>
+        </div>
+        <div id="f-1280"></div>
+        <div class="phones" id="f-390"></div>
+        <div id="f-2560"></div>
+      </section>
+
+      <section class="sec" id="appearance">
+        <div class="sec-h">
+          <span class="sec-k">L</span>
+          <h2>Dark and light</h2>
+          <p class="sec-d">
+            Both appearances come from the same theme roles. These two frames ignore the Frames
+            toggle. <code>nebula-ion</code> is additive; E3 does not change the default theme.
+          </p>
+        </div>
+        <div class="grid2" id="f-modes"></div>
+        <div class="tbl-wrap">
+          <table class="t" id="roles"></table>
+        </div>
+      </section>
+
+      <section class="sec" id="matrix">
+        <div class="sec-h">
+          <span class="sec-k">M</span>
+          <h2>Authentication state matrix</h2>
+          <p class="sec-d">
+            Every E2 lifecycle state and the client-only states, with the label, tone and primary
+            action E3 renders.
+          </p>
+        </div>
+        <div class="tbl-wrap">
+          <table class="t" id="mtx"></table>
+        </div>
+      </section>
+    </main>
+
+    <footer class="wrap doc-foot">
+      Source of truth: <code>docs/nebula/super-ade/</code> (INTERACTION_STATES §1, SCREEN_BLUEPRINTS
+      §2, COMPONENT_SPECIFICATIONS §3, SUPER_ADE_DESIGN_CONTRACT §16.4–16.5). Provider marks are
+      placeholders for <code>ProviderInstanceIcon</code>. Frames use Geist where available; the
+      product keeps its platform font stack until self-hosted assets exist.
+    </footer>
+
+    <script>
+      (function () {
+        "use strict";
+
+        /* ---------- icons (Lucide-style strokes, drawn for this page) ---------- */
+        var I = {
+          check: '<circle cx="12" cy="12" r="9"/><path d="m8.4 12.3 2.4 2.4 4.8-5"/>',
+          x: '<circle cx="12" cy="12" r="9"/><path d="m9.3 9.3 5.4 5.4m0-5.4-5.4 5.4"/>',
+          dash: '<circle cx="12" cy="12" r="9" stroke-dasharray="3.1 2.55"/>',
+          alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.8v5M12 16.2v.01"/>',
+          tri: '<path d="M10.3 4.2 2.9 17.4A2 2 0 0 0 4.6 20.4h14.8a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4M12 16.8v.01"/>',
+          info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.8v.01"/>',
+          lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+          wifiOff:
+            '<path d="M12 19.5h.01M8.6 16a5 5 0 0 1 6.5-.4M5.2 12.5a10 10 0 0 1 4.1-2.3M14.9 10.3a10 10 0 0 1 3.9 2.2M2 8.8a15 15 0 0 1 4.3-2.6M11 5.1a15 15 0 0 1 11 3.7M3 3l18 18"/>',
+          refresh:
+            '<path d="M20 11.5A8 8 0 0 0 6.3 6.3L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 12.5a8 8 0 0 0 13.7 5.2l2.3-2.2"/><path d="M20 20v-4.5h-4.5"/>',
+          ext: '<path d="M14 4h6v6M20 4l-8.5 8.5"/><path d="M18 13.5V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5.5"/>',
+          copy: '<rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/>',
+          eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
+          eyeOff:
+            '<path d="M10.6 5.6A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.5 3.3M6.6 6.6C3.9 8.3 2.5 12 2.5 12S6 18.5 12 18.5a9.3 9.3 0 0 0 5.4-1.7M9.9 9.9a3 3 0 0 0 4.2 4.2M3 3l18 18"/>',
+          right: '<path d="m9.5 6 6 6-6 6"/>',
+          left: '<path d="m14.5 6-6 6 6 6"/>',
+          down: '<path d="m6 9.5 6 6 6-6"/>',
+          close: '<path d="M6.5 6.5l11 11m0-11-11 11"/>',
+          monitor:
+            '<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/>',
+          cloud:
+            '<path d="M7 18.5a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.4 1.8A3.6 3.6 0 0 1 17.4 18.5Z"/>',
+          timer: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 1.5M9.5 3h5"/>',
+          timerOff:
+            '<path d="M9.5 3h5M12 9.5v1.2M19.3 15.7A7.5 7.5 0 0 0 9.9 6.3M6.6 8.3a7.5 7.5 0 0 0 10.5 10.5M3 3l18 18"/>',
+          hourglass:
+            '<path d="M6.5 3h11M6.5 21h11M7.5 3v3.2a4.5 4.5 0 0 0 2 3.7L12 11.5l2.5-1.6a4.5 4.5 0 0 0 2-3.7V3M7.5 21v-3.2a4.5 4.5 0 0 1 2-3.7l2.5-1.6 2.5 1.6a4.5 4.5 0 0 1 2 3.7V21"/>',
+          login:
+            '<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9.5 16.5 14 12 9.5 7.5M14 12H3.5"/>',
+          ban: '<circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>',
+          slash: '<circle cx="12" cy="12" r="9"/><path d="M8.5 15.5l7-7"/>',
+          terminal: '<path d="m5 7.5 4.5 4.5L5 16.5M12 17h7"/>',
+          plug: '<path d="M9 2.5v4M15 2.5v4M6.5 6.5h11v4a5.5 5.5 0 0 1-11 0ZM12 16v5.5"/><path d="m13.5 9-2.5 3.5h3l-2.5 3.5"/>',
+          key: '<circle cx="7.5" cy="15.5" r="4"/><path d="m10.5 12.5 9-9M17 6l2.5 2.5M14.5 8.5 16.5 10.5"/>',
+          card: '<rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3 10h18M7 14.5h3"/>',
+          search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/>',
+          plus: '<path d="M12 5v14M5 12h14"/>',
+          settings:
+            '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>',
+          more: '<circle cx="5.5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18.5" cy="12" r="1"/>',
+          branch:
+            '<circle cx="6.5" cy="5.5" r="2"/><circle cx="6.5" cy="18.5" r="2"/><circle cx="17.5" cy="7.5" r="2"/><path d="M6.5 7.5v9M17.5 9.5a6 6 0 0 1-6 6h-5"/>',
+          swarm:
+            '<circle cx="12" cy="6" r="2.5"/><circle cx="6" cy="17" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="M10.8 8.2 7.3 14.8M13.2 8.2l3.5 6.6M8.5 17h7"/>',
+          arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+          shield: '<path d="M12 3 4.5 6v5.5c0 4.5 3.2 8.2 7.5 9.5 4.3-1.3 7.5-5 7.5-9.5V6Z"/>',
+          chat: '<path d="M20 15a2 2 0 0 1-2 2H8l-4 3.5V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2Z"/>',
+          usage: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+        };
+        function ic(n, c) {
+          return (
+            '<svg class="ic ' +
+            (c || "") +
+            '" viewBox="0 0 24 24" aria-hidden="true">' +
+            (I[n] || "") +
+            "</svg>"
+          );
+        }
+        function esc(s) {
+          return String(s).replace(/[&<>"]/g, function (c) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+          });
+        }
+
+        /* ---------- primitives ---------- */
+        var FACT = {
+          v: ["check", "t-ok", ""],
+          b: ["x", "t-err", "b"],
+          u: ["dash", "t-mut", "u"],
+          w: ["tri", "t-warn", ""],
+        };
+        function factIcon(s) {
+          var f = FACT[s] || FACT.u;
+          return ic(f[0], f[1]);
+        }
+        function btn(label, kind, opts) {
+          opts = opts || {};
+          var cls =
+            "btn " + (kind || "out") + (opts.md ? " md" : "") + (opts.cls ? " " + opts.cls : "");
+          return (
+            '<span class="' +
+            cls +
+            '">' +
+            (opts.lead ? ic(opts.lead) : "") +
+            esc(label) +
+            (opts.trail ? ic(opts.trail) : "") +
+            "</span>"
+          );
+        }
+        var GROUP = {
+          ready: ["ok", "ok"],
+          attnE: ["err", "err"],
+          attnW: ["warn", "warn"],
+          sign: ["info", "info"],
+          unv: ["mut", "mut"],
+          off: ["mut", "mut"],
+        };
+        function status(g, label, lead) {
+          var c = GROUP[g];
+          return (
+            '<span class="status ' +
+            c[1] +
+            '">' +
+            (lead ? ic(lead) : '<span class="dot ' + c[0] + '"></span>') +
+            esc(label) +
+            "</span>"
+          );
+        }
+        function mark(code, s) {
+          return '<span class="mark' + (s ? " s" : "") + '">' + code + "</span>";
+        }
+        function fc(label, state, value, lead) {
+          return (
+            '<div class="fc"><span class="fc-l">' +
+            esc(label) +
+            '</span><span class="fc-v ' +
+            (FACT[state] ? FACT[state][2] : "") +
+            '">' +
+            (lead ? ic(lead, state === "u" ? "t-mut" : "") : factIcon(state)) +
+            "<span>" +
+            esc(value) +
+            "</span></span></div>"
+          );
+        }
+        function lastCheck(text, stale) {
+          return (
+            '<div class="fc"><span class="fc-l">Last check</span><span class="fc-v' +
+            (stale ? " u" : "") +
+            '">' +
+            ic(stale ? "timer" : "refresh", "t-mut") +
+            "<span>" +
+            esc(text) +
+            "</span></span></div>"
+          );
+        }
+
+        /* ---------- synthetic providers ---------- */
+        var P = {
+          codex: {
+            code: "Cx",
+            name: "Codex",
+            sub: "OpenAI · App Server",
+            g: "ready",
+            label: "Ready",
+            facts: [
+              ["Sign-in", "v", "Signed in"],
+              ["Account", "v", "••••@••••"],
+              ["Billing · reported", "v", "Subscription", "card"],
+              ["Model", "v", "gpt-5.5 available"],
+              ["Runtime", "v", "Preflight passed"],
+            ],
+            last: ["1 min ago", false],
+          },
+          cursor: {
+            code: "Cu",
+            name: "Cursor",
+            sub: "Cursor Agent CLI",
+            g: "attnW",
+            label: "Sign-in required",
+            act: "Sign in with Cursor",
+            attn: "",
+            facts: [
+              ["Sign-in", "b", "Signed out"],
+              ["Account", "u", "Not reported"],
+              ["Billing · reported", "u", "Not reported"],
+              ["Model", "u", "Not verified"],
+              ["Runtime", "b", "Blocked"],
+            ],
+            last: ["2 min ago", false],
+          },
+          claude: {
+            code: "Cl",
+            name: "Claude",
+            sub: "Anthropic · Claude Code",
+            g: "unv",
+            label: "Verification expired",
+            act: "Check again",
+            actLead: "refresh",
+            facts: [
+              ["Sign-in", "u", "Not verified"],
+              ["Account", "u", "Not reported"],
+              ["Billing · reported", "u", "Not reported"],
+              ["Model", "u", "Not verified"],
+              ["Runtime", "u", "Not verified"],
+            ],
+            last: ["checked 12 min ago", true],
+          },
+        };
+        function card(p, o) {
+          o = o || {};
+          var host = o.host || "This Mac";
+          var cls =
+            "pc" +
+            (p.g === "attnW"
+              ? " attn"
+              : p.g === "attnE"
+                ? " attn e"
+                : p.g === "sign"
+                  ? " attn i"
+                  : "");
+          if (o.state) cls += " " + o.state;
+          var facts = "";
+          p.facts.forEach(function (f) {
+            facts += fc(f[0], f[1], f[2], f[3]);
+          });
+          facts += lastCheck(p.last[0], p.last[1]);
+          var narrow = !!o.narrow;
+          var act = p.act ? btn(p.act, "out", { lead: p.actLead, cls: narrow ? "full" : "" }) : "";
+          return (
+            '<div class="' +
+            cls +
+            '"' +
+            (narrow ? ' style="gap:12px"' : "") +
+            '><div class="pc-h">' +
+            mark(p.code) +
+            '<span class="pc-name">' +
+            esc(p.name) +
+            (o.instance ? '<span class="chip">' + esc(o.instance) + "</span>" : "") +
+            '</span><span class="pc-right">' +
+            (o.checking ? '<span class="spin t-mut"></span>' : "") +
+            status(p.g, p.label) +
+            ic("right", "t-mut") +
+            '</span><span class="pc-sub"' +
+            (narrow ? ' style="grid-column:2/4"' : "") +
+            ">" +
+            esc(p.sub) +
+            " · on " +
+            ic(o.remote ? "cloud" : "monitor") +
+            esc(host) +
+            "</span>" +
+            (narrow ? "" : '<span class="pc-act">' + act + "</span>") +
+            '</div><div class="facts"' +
+            (narrow ? ' style="grid-template-columns:repeat(2,minmax(0,1fr))"' : "") +
+            ">" +
+            facts +
+            "</div>" +
+            (o.adv ? '<div class="adv">' + o.adv + "</div>" : "") +
+            (narrow && act ? act : "") +
+            "</div>"
+          );
+        }
+        function row(code, name, g, label, action) {
+          return (
+            '<div class="row">' +
+            mark(code, true) +
+            '<span class="nm">' +
+            esc(name) +
+            "</span>" +
+            status(g, label) +
+            '<span class="link" style="color:var(--muted)">' +
+            esc(action) +
+            "</span>" +
+            ic("right", "t-mut") +
+            "</div>"
+          );
+        }
+        function sheetHead(o) {
+          o = o || {};
+          return (
+            '<div class="sh-head">' +
+            (o.narrow ? '<span class="btn ghost icon">' + ic("close", "l") + "</span>" : "") +
+            '<span class="sh-title">Provider connections</span>' +
+            (o.narrow
+              ? '<span class="btn ghost icon">' + ic("more", "l") + "</span>"
+              : btn("Check all", "out", { lead: "refresh" }) +
+                '<span class="btn ghost icon">' +
+                ic("close", "l") +
+                "</span>") +
+            "</div>"
+          );
+        }
+        function scope(o) {
+          o = o || {};
+          return (
+            '<div class="scope"><span class="meta">Execution host</span><span class="host"' +
+            (o.narrow ? ' style="flex:1"' : "") +
+            ">" +
+            (o.disc
+              ? '<span class="dot err"></span>' + ic("cloud") + "devbox"
+              : '<span class="dot ok"></span>' + ic("monitor") + "This Mac") +
+            (o.narrow ? '<span style="flex:1"></span>' : "") +
+            ic("down", "t-mut") +
+            '</span><span class="access">' +
+            (o.readonly
+              ? ic("lock") + "Read-only · sign-in needs Manage access"
+              : ic("shield") + "Manage access") +
+            "</span></div>"
+          );
+        }
+        function triage(sel, o) {
+          o = o || {};
+          var items = [
+            ["all", null, "All", 6],
+            ["ready", "ok", "Ready", 1],
+            ["attn", "warn", "Needs attention", 1],
+            ["unv", "mut", "Not verified", 3],
+          ];
+          var h = '<div class="triage"' + (o.narrow ? ' style="overflow:hidden"' : "") + ">";
+          items.forEach(function (it) {
+            h +=
+              '<span class="tri' +
+              (sel === it[0] ? " on" : "") +
+              '">' +
+              (it[1] ? '<span class="dot ' + it[1] + '"></span>' : "") +
+              esc(it[2]) +
+              ' <span class="n">' +
+              it[3] +
+              "</span></span>";
+          });
+          return h + "</div>";
+        }
+        function others() {
+          return (
+            '<div class="grp" style="margin-top:4px">Other registered providers (3)<span style="flex:1"></span>' +
+            ic("down", "t-mut") +
+            '</div><div style="border:1px solid var(--border);border-radius:10px;background:var(--surface)">' +
+            row("Gk", "Grok", "unv", "Sign-in not verified", "Check again") +
+            row("Ag", "Antigravity", "off", "Disabled", "Enable") +
+            row("Oc", "OpenCode", "unv", "Not verified yet", "Check again") +
+            '</div><span class="link" style="color:var(--muted);padding:2px 2px">' +
+            ic("plus") +
+            "Add a provider</span>"
+          );
+        }
+        function overviewSheet(o) {
+          o = o || {};
+          var cardOpts = { narrow: o.narrow };
+          return (
+            sheetHead(o) +
+            scope(o) +
+            triage("all", o) +
+            '<div class="sh-body">' +
+            '<div class="grp">Primary providers</div>' +
+            card(P.codex, cardOpts) +
+            card(P.cursor, cardOpts) +
+            card(P.claude, cardOpts) +
+            others() +
+            "</div>" +
+            '<div class="sh-foot">' +
+            ic("info", "t-mut") +
+            '<span>Checks never send a paid request.</span><span class="sp"></span><span class="link">Provider Settings' +
+            ic("right") +
+            "</span></div>"
+          );
+        }
+
+        /* ---------- shell ---------- */
+        function summary(kind) {
+          var txt = {
+            attn: '<span class="status warn" style="font-size:12.5px"><span class="dot warn"></span>1 needs attention</span>',
+            ready:
+              '<span class="status ok" style="font-size:12.5px"><span class="dot ok"></span>3 ready</span>',
+          }[kind || "attn"];
+          return (
+            '<div class="sum"><span class="stack">' +
+            ["X", "U", "L"]
+              .map(function (c, i) {
+                var d = kind === "ready" ? "ok" : ["ok", "warn", "mut"][i];
+                return (
+                  '<span class="mark s" style="position:relative">' +
+                  c +
+                  '<span class="dot ' +
+                  d +
+                  '"></span></span>'
+                );
+              })
+              .join("") +
+            '</span><span class="tx">' +
+            txt +
+            "</span>" +
+            ic("right", "t-mut") +
+            "</div>"
+          );
+        }
+        function shell(o) {
+          o = o || {};
+          return (
+            '<div class="shell"><aside class="sb"><div class="sb-brand"><span class="logo"></span><b>Nebula</b><span class="d">Super ADE</span></div>' +
+            '<div class="sb-search">' +
+            ic("search") +
+            '<span class="sp">Search</span><kbd>⌘K</kbd></div>' +
+            '<div class="sb-i">' +
+            ic("plus") +
+            "New thread</div>" +
+            '<div class="sb-i">' +
+            ic("swarm") +
+            "Swarm</div>" +
+            '<div class="sb-i">' +
+            ic("terminal") +
+            "Terminal Center</div>" +
+            '<div class="sb-l">Projects</div>' +
+            '<div class="sb-i sel"><span class="fav">N</span>nebula-osp</div>' +
+            '<div class="sb-i sub cur">Home</div><div class="sb-i sub">Workbench</div><div class="sb-i sub">Tasks</div><div class="sb-i sub">Settings</div>' +
+            '<div class="sb-i"><span class="fav">A</span>atlas-web</div>' +
+            '<div class="sb-l">Threads</div>' +
+            '<div class="sb-i">' +
+            ic("chat") +
+            "Fix sidebar overflow</div>" +
+            '<div class="sb-i">' +
+            ic("chat") +
+            "Tokens pass for Ion</div>" +
+            '<div class="sb-i">' +
+            ic("chat") +
+            "Review notes API plan</div>" +
+            '<div class="sb-spacer"></div>' +
+            summary(o.summary) +
+            '<div class="sb-i">' +
+            ic("settings") +
+            "Settings</div></aside>" +
+            '<div class="main"><div class="tb"><span class="crumb">' +
+            ic("monitor") +
+            "This Mac " +
+            ic("right") +
+            "<b>nebula-osp</b>" +
+            ic("right") +
+            "Home</span>" +
+            '<span class="ctx">' +
+            ic("branch") +
+            'main · Current checkout</span><span class="sp"></span>' +
+            (o.cta === false
+              ? ""
+              : '<span class="cta">' +
+                ic("plug", "l") +
+                "<span>Connect providers<small>Cursor</small></span></span>") +
+            "</div>" +
+            '<div class="home"><div class="ph"><span class="pfav">N</span><span class="tt">nebula-osp</span><span>' +
+            btn("Open in", "out", { trail: "down" }) +
+            '</span><span class="mono" style="color:var(--muted)">~/Code/nebula-osp</span></div>' +
+            '<div class="tabs"><span class="on">Overview</span><span>Tasks</span><span>Files</span><span>Branches</span><span>Settings</span></div>' +
+            '<div class="cards2"><div class="hcard"><span class="tt">Needs you</span>' +
+            '<div class="li">' +
+            ic("plug", "t-warn") +
+            'Connect a provider · Cursor needs sign-in<span class="sp"></span>' +
+            btn("Open", "ghost") +
+            "</div>" +
+            '<div class="li">' +
+            ic("alert", "t-info") +
+            'Awaiting input · Refactor tokens<span class="sp"></span>' +
+            btn("Answer", "ghost") +
+            "</div></div>" +
+            '<div class="hcard"><span class="tt">Resume</span>' +
+            '<div class="li"><span class="dot info"></span>Working · Fix sidebar overflow</div>' +
+            '<div class="li">' +
+            ic("check", "t-ok") +
+            "Done · Tokens pass for Ion</div></div></div>" +
+            '<div class="composer"><span class="ph-t">Ask Nebula to build, fix, or explore anything…</span><div class="bar">' +
+            btn("Chat", "out") +
+            btn("Codex · gpt-5.5", "ghost", { trail: "down" }) +
+            btn("Supervised", "ghost", { lead: "lock", trail: "down" }) +
+            '<span class="sp"></span><span class="send">' +
+            ic("arrowUp") +
+            "</span></div></div></div></div></div>"
+          );
+        }
+
+        /* ---------- frames ---------- */
+        var frames = [];
+        function figure(target, o) {
+          var id = "fr-" + frames.length;
+          var html =
+            '<figure class="fig" aria-labelledby="' +
+            id +
+            '-t"><div class="fig-bar"><span class="fig-title" id="' +
+            id +
+            '-t">' +
+            esc(o.title) +
+            '</span><span class="fig-meta">' +
+            o.w +
+            " × " +
+            o.h +
+            (o.meta ? " · " + esc(o.meta) : "") +
+            '</span><span class="sp"></span>' +
+            (o.tags || "") +
+            '<button type="button" class="zoom" id="' +
+            id +
+            '-z" aria-pressed="false">100%</button></div><div class="stage"><div class="scaler"><div class="nb frame-inner" inert data-w="' +
+            o.w +
+            '" data-h="' +
+            o.h +
+            '"' +
+            (o.fixed
+              ? ' data-fixed="' + o.fixed + '" data-mode="' + o.fixed + '"'
+              : ' data-mode="dark"') +
+            ' style="width:' +
+            o.w +
+            "px;height:" +
+            o.h +
+            'px">' +
+            o.body +
+            "</div></div></div>" +
+            (o.caption ? "<figcaption>" + o.caption + "</figcaption>" : "") +
+            "</figure>";
+          var el = document.getElementById(target);
+          el.insertAdjacentHTML("beforeend", html);
+          frames.push(id);
+        }
+        function tag(kind, text) {
+          return '<span class="tag ' + kind + '">' + text + "</span>";
+        }
+        function specimen(target, o) {
+          var el = document.getElementById(target);
+          el.insertAdjacentHTML(
+            "beforeend",
+            '<div class="nb spec" data-mode="' +
+              (o.fixed || "dark") +
+              '"' +
+              (o.fixed ? ' data-fixed="' + o.fixed + '"' : "") +
+              ' style="border:1px solid var(--border)"><div class="spec-cap">' +
+              (o.k ? '<span class="k">' + esc(o.k) + "</span>" : "") +
+              '<span class="t">' +
+              esc(o.title) +
+              "</span>" +
+              (o.src ? '<span class="src">' + esc(o.src) + "</span>" : "") +
+              "</div>" +
+              o.body +
+              "</div>",
+          );
+        }
+
+        /* A · overview 1440 */
+        figure("f-overview", {
+          title: "Overview · desktop",
+          w: 1440,
+          h: 900,
+          meta: "sheet 600px",
+          tags: tag("e3", "Proposed E3"),
+          body:
+            shell({}) +
+            '<div class="scrim"></div><div class="sheet" style="width:600px">' +
+            overviewSheet({}) +
+            "</div>",
+          caption:
+            "Codex is Ready (fresh E1 runtime verified). Cursor needs attention (E1 authentication blocked) and its card offers the provider sign-in because this client has <code>access:write</code>. Claude's last check is 12 minutes old, so it reads Verification expired in neutral tone and is not counted as Needs attention.",
+        });
+
+        /* ---------- detail ---------- */
+        function backBar() {
+          return (
+            '<div class="back">' +
+            btn("All providers", "ghost", { lead: "left" }) +
+            '<span class="sp"></span><span class="btn ghost icon">' +
+            ic("close", "l") +
+            "</span></div>"
+          );
+        }
+        function idHeader(code, name, sub, st) {
+          return (
+            '<div class="id">' +
+            mark(code) +
+            '<span class="id-name">' +
+            esc(name) +
+            "</span>" +
+            st +
+            '<span class="meta" style="grid-column:2/4">' +
+            sub +
+            "</span></div>"
+          );
+        }
+        function factList(rows) {
+          var h = '<dl class="fl">';
+          rows.forEach(function (r) {
+            h +=
+              "<dt>" +
+              esc(r[0]) +
+              '</dt><dd class="' +
+              (r[1] === "u" ? "t-mut" : "") +
+              '">' +
+              factIcon(r[1]) +
+              '<span style="color:' +
+              (r[1] === "u" ? "var(--muted)" : "var(--text)") +
+              '">' +
+              esc(r[2]) +
+              "</span></dd>";
+          });
+          return h + "</dl>";
+        }
+        var CODEX_FACTS = [
+          ["Driver", "v", "Driver available"],
+          ["Executable", "v", "Installed · v0.160.0"],
+          ["Sign-in", "v", "Signed in"],
+          ["Account identity", "v", "Verified"],
+          ["Subscription entitlement", "u", "Not verified"],
+          ["Selected model", "v", "gpt-5.5 available"],
+          ["Runtime preflight", "v", "Preflight passed"],
+        ];
+        var CURSOR_FACTS = [
+          ["Driver", "v", "Driver available"],
+          ["Executable", "v", "Installed · v2026.09.30"],
+          ["Sign-in", "b", "Signed out"],
+          ["Account identity", "u", "Not reported"],
+          ["Subscription entitlement", "u", "Not verified"],
+          ["Selected model", "u", "Not verified · not signed in"],
+          ["Runtime preflight", "b", "Blocked · Sign in required"],
+        ];
+        function detailCodex() {
+          return (
+            backBar() +
+            idHeader(
+              "Cx",
+              "Codex",
+              'OpenAI · instance <span class="mono">codex</span> · v0.160.0 · on This Mac',
+              status("ready", "Ready"),
+            ) +
+            '<div class="panel"><div class="panel-h">' +
+            ic("check", "t-ok l") +
+            '<span class="tt">Ready. Preflight passed 1 min ago.</span>' +
+            btn("Check again", "out", { lead: "refresh" }) +
+            '</div><span class="meta">A completed turn isn\'t verified. Checks never send a paid request.</span></div>' +
+            '<div class="sec"><div class="sec-t">Account and sign-in</div>' +
+            '<dl class="fl"><dt>Signed in as</dt><dd>••••@•••• · ChatGPT account (reported)</dd><dt>Sign-in method</dt><dd>Official Codex App Server · browser or device code</dd></dl>' +
+            '<div class="actions">' +
+            btn("Sign in again", "out") +
+            "</div></div>" +
+            '<div class="sec"><div class="sec-t">Readiness<span class="sp"></span><span class="meta">checked 1 min ago</span></div>' +
+            factList(CODEX_FACTS) +
+            "</div>" +
+            '<div class="sec"><div class="sec-t">Billing</div><dl class="fl"><dt>Route</dt><dd>' +
+            ic("card", "t-mut") +
+            'Subscription · reported by Codex</dd><dt>Plan label</dt><dd>ChatGPT Pro · reported by Codex</dd></dl><span class="meta">Entitlement and remaining usage aren\'t verified. <span class="link">View usage' +
+            ic("right") +
+            "</span></span></div>" +
+            '<div class="sec"><div class="sec-t">' +
+            ic("right", "t-mut") +
+            'Diagnostics</div></div><div class="sec"><span class="link">Open in Provider Settings' +
+            ic("right") +
+            "</span></div>"
+          );
+        }
+        function detailCursor() {
+          return (
+            backBar() +
+            idHeader(
+              "Cu",
+              "Cursor",
+              'Cursor Agent CLI · instance <span class="mono">cursor</span> · on This Mac',
+              status("attnW", "Sign-in required"),
+            ) +
+            '<div class="panel" style="background:var(--warning-surface);border-color:color-mix(in oklch,var(--warning) 30%,transparent)"><div class="panel-h">' +
+            ic("login", "t-warn l") +
+            '<span class="tt" style="color:var(--warning-fg)">Cursor isn\'t signed in on This Mac</span></div>' +
+            '<span class="meta" style="color:var(--text);opacity:.86">Nebula runs Cursor\'s official login with the configured executable on This Mac and shows you the sign-in link.</span>' +
+            '<div class="kv"><span class="k">Executable</span><span class="v">/usr/local/bin/cursor-agent</span>' +
+            btn("Copy", "ghost", { lead: "copy" }) +
+            '</div><span class="meta">A command named <span class="cmd">agent</span> may belong to a different product.</span><div class="actions">' +
+            btn("Sign in with Cursor", "pri", { md: true, lead: "login" }) +
+            "</div></div>" +
+            '<div class="sec"><div class="sec-t">Readiness<span class="sp"></span><span class="meta">checked 2 min ago</span></div>' +
+            factList(CURSOR_FACTS) +
+            "</div>" +
+            '<div class="sec"><div class="sec-t">Billing</div><dl class="fl"><dt>Route</dt><dd class="t-mut">' +
+            ic("dash") +
+            '<span style="color:var(--muted)">Not reported</span></dd><dt>X Subscription migration</dt><dd class="t-mut">' +
+            ic("dash") +
+            '<span style="color:var(--muted)">Unknown</span></dd></dl><span class="meta">Cursor sign-in doesn\'t establish whether a unified X Subscription covers this usage.</span></div>' +
+            '<div class="sec"><div class="sec-t">' +
+            ic("right", "t-mut") +
+            "Diagnostics</div></div>"
+          );
+        }
+        figure("f-detail", {
+          title: "Codex detail · Ready",
+          w: 600,
+          h: 940,
+          tags: tag("e1", "E1 facts"),
+          body: '<div class="sheet" style="width:600px">' + detailCodex() + "</div>",
+          caption:
+            "Sign-in, account, entitlement and billing are separate rows. The plan label appears only here, marked as reported.",
+        });
+        figure("f-detail", {
+          title: "Cursor detail · Sign-in required",
+          w: 600,
+          h: 940,
+          tags: tag("e2", "E2 official-cli"),
+          body: '<div class="sheet" style="width:600px">' + detailCursor() + "</div>",
+          caption:
+            "The status panel holds the one next action, as the sheet's only solid violet control. The executable comes from the instance configuration.",
+        });
+
+        /* ---------- ceremonies ---------- */
+        function cer(o) {
+          return (
+            '<div class="cer"><div class="cer-h">' +
+            (o.icon || "") +
+            '<span class="tt">' +
+            esc(o.title) +
+            "</span>" +
+            (o.timer
+              ? '<span class="timer' +
+                (o.warn ? " w" : "") +
+                '">' +
+                ic("timer") +
+                "Expires in " +
+                o.timer +
+                "</span>"
+              : "") +
+            '</div><div class="cer-b">' +
+            o.body +
+            "</div>" +
+            (o.foot ? '<div class="cer-f">' + o.foot + "</div>" : "") +
+            "</div>"
+          );
+        }
+        function steps(list) {
+          return (
+            '<ol class="steps">' +
+            list
+              .map(function (s, i) {
+                return (
+                  '<li><span class="n' +
+                  (s.done ? " done" : "") +
+                  '">' +
+                  (s.done ? "✓" : i + 1) +
+                  '</span><div><div class="step-t">' +
+                  s.t +
+                  "</div>" +
+                  (s.b ? '<div class="step-b">' + s.b + "</div>" : "") +
+                  "</div></li>"
+                );
+              })
+              .join("") +
+            "</ol>"
+          );
+        }
+        var wait = '<span class="wait">' + ic("hourglass") + "Waiting for you…</span>";
+        var cancel = '<span class="sp"></span>' + btn("Cancel", "out");
+        function notice(tone, icon, title, body, actions) {
+          return (
+            '<div class="notice ' +
+            tone +
+            '">' +
+            ic(icon) +
+            '<span class="nt">' +
+            esc(title) +
+            "</span>" +
+            (body ? '<span class="nd">' + body + "</span>" : "") +
+            (actions ? '<div class="actions">' + actions + "</div>" : "") +
+            "</div>"
+          );
+        }
+        function successBody(provider, rows, extra) {
+          return (
+            '<span class="meta" style="color:var(--text)">Account ••••@••••</span><span class="meta">Sign-in doesn\'t settle these. They update as the fresh check arrives:</span>' +
+            factList(rows) +
+            (extra || "") +
+            '<span class="meta">Signing in doesn\'t guarantee a model or included usage.</span>'
+          );
+        }
+        var C = {
+          codex: [
+            {
+              k: "C1",
+              t: "Choose a ceremony",
+              src: "status → login-required · ceremonies browser, device-code",
+              body: cer({
+                title: "Sign in to Codex",
+                body:
+                  '<span class="meta" style="color:var(--text)">Sign in with ChatGPT through the official Codex App Server on This Mac. OpenAI API billing is a separate route.</span>' +
+                  '<div class="actions">' +
+                  btn("Sign in with ChatGPT", "pri", { md: true, lead: "login" }) +
+                  btn("Use a device code instead", "ghost") +
+                  "</div>",
+              }),
+            },
+            {
+              k: "C2",
+              t: "Preparing",
+              src: "client · begin in flight (fresh verification ≤30s)",
+              body: cer({
+                title: "Sign in to Codex",
+                body:
+                  '<span class="wait" style="color:var(--muted)"><span class="spin"></span>Preparing sign-in… checking Codex on This Mac</span>' +
+                  '<span class="meta">After 10 seconds: “Still checking Codex on This Mac…”</span>',
+              }),
+            },
+            {
+              k: "C3",
+              t: "Browser handoff",
+              src: "waiting-for-user · handoff.url",
+              body: cer({
+                title: "Sign in to Codex",
+                timer: "4:12",
+                body: steps([
+                  {
+                    t: "Open the ChatGPT sign-in page",
+                    b:
+                      '<div class="actions">' +
+                      btn("Open ChatGPT sign-in", "pri", { md: true, trail: "ext" }) +
+                      '<span class="hostname">auth.openai.com</span></div>',
+                  },
+                  { t: "Finish signing in there. This page updates by itself.", b: wait },
+                ]),
+                foot:
+                  '<span class="meta">Browser not on This Mac?</span><span class="link">Use a device code instead</span>' +
+                  cancel,
+              }),
+            },
+            {
+              k: "C4",
+              t: "Device code, masked",
+              src: "waiting-for-user · handoff.userCode",
+              body: cer({
+                title: "Sign in with a device code",
+                timer: "4:40",
+                body: steps([
+                  {
+                    t: "Open the verification page on any device",
+                    b:
+                      '<div class="actions">' +
+                      btn("Open verification page", "pri", { md: true, trail: "ext" }) +
+                      '<span class="hostname">auth.openai.com</span></div>',
+                  },
+                  {
+                    t: "Enter this code",
+                    b:
+                      '<div class="code"><span class="code-box mask">••••-••••</span>' +
+                      btn("Show code", "out", { lead: "eye" }) +
+                      btn("Copy", "ghost", { lead: "copy" }) +
+                      '</div><span class="warnline">' +
+                      ic("shield") +
+                      "Enter it only at auth.openai.com. Don't share it.</span>",
+                  },
+                ]),
+                foot: wait + cancel,
+              }),
+            },
+            {
+              k: "C5",
+              t: "Device code, revealed and copied",
+              src: "client reveal · placeholder code",
+              body: cer({
+                title: "Sign in with a device code",
+                timer: "0:48",
+                warn: true,
+                body: steps([
+                  { t: "Open the verification page on any device", done: true },
+                  {
+                    t: "Enter this code",
+                    b:
+                      '<div class="code"><span class="code-box">XXXX-XXXX</span>' +
+                      btn("Hide code", "out", { lead: "eyeOff", cls: "foc" }) +
+                      btn("Copied", "ghost", { lead: "check" }) +
+                      '</div><span class="warnline">' +
+                      ic("check", "t-ok") +
+                      "Copied. Paste it only at auth.openai.com.</span>",
+                  },
+                ]),
+                foot: wait + cancel,
+              }),
+            },
+            {
+              k: "C6",
+              t: "Remote host",
+              src: "login-required · environment devbox (remote)",
+              body: cer({
+                title: "Sign in to Codex on devbox",
+                body:
+                  '<span class="meta" style="color:var(--text)">Browser sign-in finishes on devbox. Use a device code when your browser isn\'t on that machine.</span>' +
+                  '<div class="actions">' +
+                  btn("Use a device code", "pri", { md: true, lead: "key" }) +
+                  btn("Sign in with ChatGPT on devbox", "ghost") +
+                  "</div>",
+              }),
+            },
+            {
+              k: "C7",
+              t: "Signed in",
+              src: "authenticated → fresh E1 snapshot",
+              body: cer({
+                icon: ic("check", "t-ok l"),
+                title: "Signed in to Codex on This Mac",
+                body: successBody("Codex", [
+                  ["Selected model", "v", "gpt-5.5 available"],
+                  ["Subscription entitlement", "u", "Not verified"],
+                  ["Runtime preflight", "v", "Preflight passed"],
+                ]),
+                foot:
+                  '<span class="sp"></span>' +
+                  btn("View readiness", "ghost") +
+                  btn("Done", "pri", { md: true }),
+              }),
+            },
+            {
+              k: "C8",
+              t: "Failed",
+              src: "failed · process-failed",
+              body: notice(
+                "err",
+                "x",
+                "Codex sign-in didn't complete",
+                "The official sign-in stopped before finishing. Check the CLI version, network and configuration, then try again.",
+                btn("Try again", "pri", { md: true }) + btn("Use a device code", "ghost"),
+              ),
+            },
+          ],
+          cursor: [
+            {
+              k: "C9",
+              t: "Start",
+              src: "status → login-required · capability official-cli",
+              body: cer({
+                title: "Sign in to Cursor",
+                body:
+                  '<span class="meta" style="color:var(--text)">Nebula runs Cursor\'s official login with this executable on This Mac:</span>' +
+                  '<div class="kv"><span class="k">Executable</span><span class="v">/usr/local/bin/cursor-agent</span>' +
+                  btn("Copy", "ghost", { lead: "copy" }) +
+                  '</div><div class="actions">' +
+                  btn("Sign in with Cursor", "pri", { md: true, lead: "login" }) +
+                  "</div>",
+              }),
+            },
+            {
+              k: "C10",
+              t: "Browser handoff",
+              src: "waiting-for-user · handoff.url (Cursor domain)",
+              body: cer({
+                title: "Sign in to Cursor",
+                timer: "4:51",
+                body: steps([
+                  {
+                    t: "Open the Cursor sign-in page",
+                    b:
+                      '<div class="actions">' +
+                      btn("Open Cursor sign-in", "pri", { md: true, trail: "ext" }) +
+                      '<span class="hostname">cursor.com</span></div>',
+                  },
+                  { t: "Finish signing in there. This page updates by itself.", b: wait },
+                ]),
+                foot: '<span class="meta">Cancel stops the CLI login.</span>' + cancel,
+              }),
+            },
+            {
+              k: "C11",
+              t: "Signed in",
+              src: "authenticated → fresh readiness and ACP probe",
+              body: cer({
+                icon: ic("check", "t-ok l"),
+                title: "Signed in to Cursor on This Mac",
+                body: successBody(
+                  "Cursor",
+                  [
+                    ["Selected model", "u", "Not verified · static catalog"],
+                    ["Subscription entitlement", "u", "Not verified"],
+                    ["X Subscription migration", "u", "Unknown"],
+                  ],
+                  "",
+                ),
+                foot:
+                  '<span class="sp"></span>' +
+                  btn("View readiness", "ghost") +
+                  btn("Done", "pri", { md: true }),
+              }),
+            },
+          ],
+          claude: [
+            {
+              k: "C12",
+              t: "Start",
+              src: "status → login-required · capability guided-terminal",
+              body: cer({
+                title: "Sign in to Claude from your terminal",
+                body:
+                  '<span class="meta" style="color:var(--text)">Claude sign-in runs in your own terminal, under your control. Nebula doesn\'t open Claude OAuth or collect tokens.</span>' +
+                  '<div class="caveat">' +
+                  ic("info") +
+                  "<span>Whether your Claude plan covers use in third-party apps like Nebula depends on Anthropic's current terms for your account. Nebula doesn't verify entitlement or remaining usage. API keys, auth tokens, key helpers and cloud-provider settings can take precedence over this sign-in.</span></div>" +
+                  '<div class="actions">' +
+                  btn("Start terminal sign-in", "pri", { md: true, lead: "terminal" }) +
+                  "</div>",
+              }),
+            },
+            {
+              k: "C13",
+              t: "Guided steps",
+              src: "waiting-for-user · no handoff",
+              body: cer({
+                title: "Sign in to Claude from your terminal",
+                timer: "4:48",
+                body: steps([
+                  { t: "Open a terminal on This Mac" },
+                  {
+                    t: "Use this instance's executable and configuration",
+                    b:
+                      '<div class="kv"><span class="k">Executable</span><span class="v">/opt/homebrew/bin/claude</span>' +
+                      btn("Copy", "ghost", { lead: "copy" }) +
+                      '<span class="k">CLAUDE_CONFIG_DIR</span><span class="v">~/.claude-work</span>' +
+                      btn("Copy", "ghost", { lead: "copy" }) +
+                      "</div>",
+                  },
+                  { t: 'Run <span class="cmd">auth login</span> with that executable' },
+                  { t: "Finish the prompts in your terminal and browser" },
+                  {
+                    t: "Come back and check",
+                    b:
+                      '<div class="actions">' +
+                      btn("Check sign-in status", "pri", { md: true, lead: "refresh" }) +
+                      "</div>",
+                  },
+                ]),
+                foot:
+                  '<span class="meta">Stop tracking leaves your terminal alone.</span><span class="sp"></span>' +
+                  btn("Stop tracking", "out"),
+              }),
+            },
+            {
+              k: "C14",
+              t: "Not signed in yet",
+              src: "refresh → still waiting-for-user",
+              body: notice(
+                "info",
+                "hourglass",
+                "Claude doesn't report a sign-in on This Mac yet",
+                "Finish the terminal sign-in, then check again. This attempt expires in 2:05.",
+                btn("Check sign-in status", "pri", { md: true, lead: "refresh" }) +
+                  btn("Stop tracking", "ghost"),
+              ),
+            },
+            {
+              k: "C15",
+              t: "Signed in",
+              src: "authenticated → official status, fresh E1",
+              body: cer({
+                icon: ic("check", "t-ok l"),
+                title: "Signed in to Claude on This Mac",
+                body: successBody(
+                  "Claude",
+                  [
+                    ["Billing route", "v", "Subscription · reported by Claude"],
+                    ["Subscription entitlement", "u", "Not verified"],
+                    ["Runtime preflight", "v", "Preflight passed"],
+                  ],
+                  '<div class="caveat">' +
+                    ic("info") +
+                    "<span>Your plan's use in third-party apps depends on Anthropic's current terms. Nebula doesn't verify it.</span></div>",
+                ),
+                foot:
+                  '<span class="sp"></span>' +
+                  btn("View readiness", "ghost") +
+                  btn("Done", "pri", { md: true }),
+              }),
+            },
+          ],
+        };
+        ["codex", "cursor", "claude"].forEach(function (k) {
+          C[k].forEach(function (s) {
+            specimen("c-" + k, { k: s.k, title: s.t, src: s.src, body: s.body });
+          });
+        });
+
+        /* ---------- recovery ---------- */
+        var R = [
+          [
+            1,
+            "Provider not installed",
+            "E1 installed: blocked · E2 not-installed",
+            ["attnE", "Not installed"],
+            [
+              "err",
+              "x",
+              "Codex isn't installed",
+              'Nebula can\'t find Codex at <span class="mono">/opt/homebrew/bin/codex</span> on This Mac. <span class="link">Set executable path</span>',
+              btn("Install guide", "pri", { md: true, trail: "ext" }) + btn("Check again", "ghost"),
+            ],
+          ],
+          [
+            2,
+            "Login required",
+            "E1 authentication: blocked · E2 login-required",
+            ["attnW", "Sign-in required"],
+            [
+              "warn",
+              "login",
+              "Cursor isn't signed in on This Mac",
+              "",
+              btn("Sign in with Cursor", "pri", { md: true, lead: "login" }),
+            ],
+          ],
+          [
+            3,
+            "Waiting for user",
+            "E2 waiting-for-user",
+            ["sign", "Waiting for you"],
+            [
+              "info",
+              "hourglass",
+              "Waiting for you to finish in the browser",
+              "Open the Cursor sign-in page and finish there. Expires in 3:58.",
+              btn("Open Cursor sign-in", "pri", { md: true, trail: "ext" }) +
+                btn("Cancel", "ghost"),
+            ],
+          ],
+          [
+            4,
+            "Authentication in progress",
+            "client preparing · E2 in-progress",
+            ["sign", "Starting sign-in"],
+            [
+              "info",
+              "info",
+              "Starting the official Codex sign-in on This Mac…",
+              "",
+              btn("Cancel", "ghost"),
+            ],
+          ],
+          [
+            5,
+            "Successful authentication",
+            "E2 authenticated",
+            ["ready", "Signed in"],
+            [
+              "ok",
+              "check",
+              "Signed in to Codex on This Mac",
+              "Model, entitlement and runtime update as the fresh check arrives. Signing in doesn't guarantee a model or included usage.",
+              btn("Done", "pri", { md: true }) + btn("View readiness", "ghost"),
+            ],
+          ],
+          [
+            6,
+            "Verification needed",
+            "E1 not fresh · E2 verification-needed",
+            ["unv", "Verification expired · 12 min"],
+            [
+              "",
+              "dash",
+              "Claude hasn't been checked recently",
+              "The last check was 12 minutes ago. Check again for current status.",
+              btn("Check again", "out", { md: true, lead: "refresh" }),
+            ],
+          ],
+          [
+            7,
+            "Authentication expired",
+            "E2 expired · timeout or login-required",
+            ["attnW", "Sign-in expired"],
+            [
+              "warn",
+              "timerOff",
+              "This sign-in expired",
+              "Sign-in attempts end after 5 minutes. Nothing was changed. When a previous sign-in ends instead: “Your Codex sign-in on This Mac has ended.”",
+              btn("Start a new sign-in", "pri", { md: true }),
+            ],
+          ],
+          [
+            8,
+            "Cancelled",
+            "E2 cancelled",
+            ["unv", "Sign-in cancelled"],
+            [
+              "",
+              "slash",
+              "Sign-in cancelled",
+              "Your existing Codex sign-in, if any, wasn't changed.",
+              btn("Start again", "out", { md: true }),
+            ],
+          ],
+          [
+            9,
+            "Failed",
+            "E2 failed · process-failed",
+            ["attnE", "Sign-in didn't complete"],
+            [
+              "err",
+              "x",
+              "Codex sign-in didn't complete",
+              "The official sign-in stopped before finishing. Check the CLI version, network and configuration, then try again.",
+              btn("Try again", "pri", { md: true }) + btn("Use a device code", "ghost"),
+            ],
+          ],
+          [
+            10,
+            "Unsupported configuration",
+            "E2 unsupported · capability unsupported",
+            ["attnW", "Sign-in required"],
+            [
+              "",
+              "ban",
+              "Sign-in from Nebula isn't available for this setup",
+              "Managed login needs the default local App Server launch. Use the official Codex CLI with this instance's launch configuration, then check again.",
+              btn("Open Provider Settings", "out", { md: true }) + btn("Check again", "ghost"),
+            ],
+          ],
+          [
+            11,
+            "Missing access-management permission",
+            "client · scopes lack access:write",
+            ["attnW", "Sign-in required"],
+            [
+              "",
+              "lock",
+              "Signing in needs Manage access",
+              "This connection to This Mac can read provider status but can't manage accounts. Readiness stays visible.",
+              btn("Check again", "ghost", { lead: "refresh" }),
+            ],
+          ],
+          [
+            12,
+            "Disconnected remote host",
+            "client · connection phase ≠ connected",
+            ["attnE", "Disconnected"],
+            [
+              "err",
+              "wifiOff",
+              "devbox is disconnected",
+              "Provider status refreshes after reconnecting. Last checked before disconnect: 10:42. Sign-in views were cleared.",
+              btn("Reconnect", "pri", { md: true }),
+            ],
+          ],
+          [
+            13,
+            "API override detected",
+            "E2 verification-needed · api-override",
+            ["attnW", "API credential overrides sign-in"],
+            [
+              "warn",
+              "key",
+              "An API credential overrides sign-in",
+              'One of <span class="mono">ANTHROPIC_API_KEY</span>, <span class="mono">ANTHROPIC_AUTH_TOKEN</span>, <span class="mono">CLAUDE_CODE_OAUTH_TOKEN</span>, or a Bedrock, Vertex or Foundry setting is configured for this instance on This Mac. It takes precedence, so Nebula won\'t start a sign-in.',
+              btn("Review in Provider Settings", "out", { md: true }) + btn("Check again", "ghost"),
+            ],
+          ],
+          [
+            14,
+            "Disabled in Nebula",
+            "enabled: false",
+            ["off", "Disabled"],
+            [
+              "",
+              "ban",
+              "Antigravity is disabled",
+              "It can't start new sessions until it's enabled.",
+              btn("Enable", "out", { md: true }),
+            ],
+          ],
+          [
+            15,
+            "Driver unavailable",
+            "E1 registered: blocked",
+            ["attnE", "Driver unavailable"],
+            [
+              "err",
+              "x",
+              "Driver unavailable",
+              "This build of Nebula can't run this instance's driver.",
+              btn("Open Provider Settings", "out", { md: true }),
+            ],
+          ],
+          [
+            16,
+            "Selected model unavailable",
+            "E1 modelAvailability: blocked",
+            ["attnE", "Model not offered"],
+            [
+              "err",
+              "x",
+              "gpt-5.5 isn't offered to this account",
+              "",
+              btn("Choose another model", "out", { md: true }),
+            ],
+          ],
+          [
+            17,
+            "Older host",
+            "capability providerAuthentication absent",
+            ["unv", "Not verified"],
+            [
+              "info",
+              "info",
+              "Sign-in from Nebula isn't available on devbox",
+              "devbox runs a Nebula version without sign-in support. Update Nebula there, or sign in with the provider's CLI and check again.",
+              btn("Check again", "out", { md: true, lead: "refresh" }),
+            ],
+          ],
+          [
+            18,
+            "Environment changed",
+            "E2 environment-mismatch · identity differs",
+            ["unv", "Not verified"],
+            [
+              "info",
+              "info",
+              "The execution host changed",
+              "Showing provider status for devbox. Status is re-read automatically.",
+              "",
+            ],
+          ],
+          [
+            19,
+            "Instance unavailable",
+            "E2 instance-unavailable",
+            ["unv", "Instance unavailable"],
+            [
+              "",
+              "ban",
+              "This provider instance no longer exists on This Mac",
+              "",
+              btn("Back to all providers", "out", { md: true, lead: "left" }),
+            ],
+          ],
+          [
+            20,
+            "Stale attempt",
+            "E2 stale-attempt (on cancel)",
+            ["sign", "Waiting for you"],
+            [
+              "info",
+              "info",
+              "This sign-in changed in another window",
+              "Showing its current status. Status is re-read automatically.",
+              "",
+            ],
+          ],
+        ];
+        R.forEach(function (r) {
+          var n = r[4];
+          specimen("rec", {
+            k: "#" + r[0],
+            title: r[1],
+            src: r[2],
+            body:
+              '<div class="stack-v"><div style="display:flex;align-items:center;gap:8px"><span class="meta">Card</span>' +
+              status(r[3][0], r[3][1], r[0] === 11 ? null : r[0] === 12 ? "wifiOff" : null) +
+              (r[0] === 11
+                ? '<span class="status mut">' + ic("lock") + "Needs Manage access</span>"
+                : "") +
+              "</div>" +
+              notice(n[0], n[1], n[2], n[3], n[4]) +
+              "</div>",
+          });
+        });
+
+        /* ---------- interaction states ---------- */
+        function stateRow(label, html) {
+          return (
+            '<div><span class="lbl">' +
+            esc(label) +
+            '</span><div class="swatchrow">' +
+            html +
+            "</div></div>"
+          );
+        }
+        specimen("ix", {
+          title: "Buttons",
+          src: "primary · outline · ghost",
+          body:
+            '<div class="stack-v">' +
+            stateRow(
+              "Primary (messageAction)",
+              btn("Default", "pri", { md: true }) +
+                btn("Hover", "pri", { md: true, cls: "hov" }) +
+                btn("Focus", "pri", { md: true, cls: "foc" }) +
+                btn("Pressed", "pri", { md: true, cls: "prs" }) +
+                btn("Disabled", "pri", { md: true, cls: "dis" }) +
+                '<span class="btn pri md" style="min-width:132px"><span class="spin"></span>Preparing…</span>',
+            ) +
+            stateRow(
+              "Outline (card actions)",
+              btn("Default", "out", { lead: "refresh" }) +
+                btn("Hover", "out", { cls: "hov", lead: "refresh" }) +
+                btn("Focus", "out", { cls: "foc", lead: "refresh" }) +
+                btn("Disabled", "out", { cls: "dis", lead: "refresh" }) +
+                '<span class="btn out"><span class="spin t-mut"></span>Checking…</span>',
+            ) +
+            stateRow(
+              "Ghost",
+              btn("Default", "ghost") +
+                btn("Hover", "ghost", { cls: "hov" }) +
+                btn("Focus", "ghost", { cls: "foc" }),
+            ) +
+            '<span class="meta">Disabled keeps a readable label and always has a tooltip reason. Loading locks the width.</span></div>',
+        });
+        specimen("ix", {
+          title: "Fact values and billing",
+          src: "E1 ReadinessFact · billingRoute",
+          body:
+            '<div class="stack-v">' +
+            stateRow(
+              "verified · blocked · unknown",
+              '<div class="facts" style="border:0;padding:0;width:100%">' +
+                fc("Sign-in", "v", "Signed in") +
+                fc("Sign-in", "b", "Signed out") +
+                fc("Sign-in", "u", "Not verified") +
+                "</div>",
+            ) +
+            stateRow(
+              "Billing · reported",
+              '<span class="chip">' +
+                ic("card") +
+                'Subscription</span><span class="chip warn-o">' +
+                ic("card") +
+                'API billing</span><span class="chip">' +
+                ic("card") +
+                'Provider-managed</span><span class="chip">' +
+                ic("dash") +
+                "Not reported</span>",
+            ) +
+            stateRow(
+              "Advisories (not facts)",
+              '<span class="chip upd">' +
+                ic("arrowUp") +
+                'Update available</span><span class="chip">' +
+                ic("ban") +
+                'Disabled</span><span class="chip">' +
+                ic("timerOff") +
+                "Last sign-in: expired</span>",
+            ) +
+            stateRow(
+              "Last check",
+              lastCheck("1 min ago", false) +
+                lastCheck("checked 12 min ago · expired", true) +
+                lastCheck("Never", true),
+            ) +
+            "</div>",
+        });
+        specimen("ix", {
+          title: "Card states",
+          src: "default · hover · focus · checking",
+          body:
+            '<div class="stack-v">' +
+            card(P.codex, { state: "hov" }) +
+            card(P.cursor, { state: "foc" }) +
+            card(P.claude, { state: "chk", checking: true }) +
+            '<div class="pc"><div class="pc-h"><span class="skel" style="width:32px;height:32px;grid-row:span 2"></span><span class="skel" style="height:14px;width:120px"></span><span class="skel" style="height:14px;width:80px"></span><span class="skel" style="height:10px;width:200px"></span><span></span></div><div class="facts"><span class="skel" style="height:30px"></span><span class="skel" style="height:30px"></span><span class="skel" style="height:30px"></span></div></div>' +
+            "</div>",
+        });
+        specimen("ix", {
+          title: "Triage, countdown and private code",
+          src: "toggle-group · role=timer · PrivateCodeDisplay",
+          body:
+            '<div class="stack-v">' +
+            stateRow(
+              "Triage · All",
+              '<div class="triage" style="padding:0;border:0">' +
+                triage("all")
+                  .replace('<div class="triage">', "")
+                  .replace(/<\/div>$/, "") +
+                "</div>",
+            ) +
+            stateRow(
+              "Triage · Needs attention",
+              '<div class="triage" style="padding:0;border:0">' +
+                triage("attn")
+                  .replace('<div class="triage">', "")
+                  .replace(/<\/div>$/, "") +
+                "</div>",
+            ) +
+            stateRow(
+              "Countdown",
+              '<span class="timer">' +
+                ic("timer") +
+                'Expires in 4:12</span><span class="timer w">' +
+                ic("timer") +
+                'Expires in 0:48</span><span class="timer w">' +
+                ic("timerOff") +
+                "Expired</span>",
+            ) +
+            stateRow(
+              "Device code",
+              '<span class="code-box mask" style="min-width:150px">••••-••••</span><span class="code-box" style="min-width:150px">XXXX-XXXX</span>',
+            ) +
+            '<span class="meta">The countdown is not announced each second. One polite announcement at 1 minute, one at expiry.</span></div>',
+        });
+        specimen("ix", {
+          title: "Shell entry points",
+          src: "ProviderReadinessSummary · ConnectProvidersCta",
+          body:
+            '<div class="stack-v" style="max-width:260px">' +
+            summary("attn") +
+            summary("ready") +
+            '<div class="sum"><span class="spin t-info"></span><span class="tx"><span class="status info">Signing in · Codex</span></span>' +
+            ic("right", "t-mut") +
+            '</div><div class="sum"><span class="dot mut"></span><span class="tx"><span class="status mut">Not verified · check</span></span>' +
+            ic("right", "t-mut") +
+            '</div><div class="sum">' +
+            ic("wifiOff", "t-err") +
+            '<span class="tx"><span class="status err">devbox disconnected</span></span>' +
+            ic("right", "t-mut") +
+            '</div><span class="cta" style="justify-self:start">' +
+            ic("plug", "l") +
+            '<span>Connect providers<small>Cursor</small></span></span><span class="meta">The CTA appears only for fixable attention, never for stale or unverified providers.</span></div>',
+        });
+        specimen("ix", {
+          title: "Focus path",
+          src: "keyboard order in the overview",
+          body:
+            '<div class="stack-v"><ol class="steps">' +
+            [
+              "Sheet opens: focus on the first attention card's action (“Sign in with Cursor”), else the title",
+              "Tab: header → host menu → triage strip (one stop, arrows) → each card's detail button, then its action",
+              "Enter on a card: detail pushes, focus on the provider heading",
+              "After begin: focus on the step's first action. After success: “Done”",
+              "Esc closes the sheet without cancelling an attempt; focus returns to the launcher",
+            ]
+              .map(function (t, i) {
+                return (
+                  '<li><span class="n">' +
+                  (i + 1) +
+                  '</span><div class="step-t" style="font-weight:400">' +
+                  esc(t) +
+                  "</div></li>"
+                );
+              })
+              .join("") +
+            "</ol></div>",
+        });
+
+        /* ---------- responsive ---------- */
+        figure("f-1280", {
+          title: "Overview · laptop",
+          w: 1280,
+          h: 800,
+          meta: "sheet 560px",
+          tags: tag("e3", "Proposed E3"),
+          body:
+            shell({}) +
+            '<div class="scrim"></div><div class="sheet" style="width:560px">' +
+            overviewSheet({}) +
+            "</div>",
+          caption:
+            "Same structure at 560px. Fact grid stays 3 × 2 with tighter gaps; nothing truncates the status label.",
+        });
+        function phoneOverview() {
+          return '<div class="sheet full">' + overviewSheet({ narrow: true }) + "</div>";
+        }
+        function phoneDevice() {
+          return (
+            '<div class="sheet full">' +
+            backBar() +
+            idHeader("Cx", "Codex", "OpenAI · on devbox", status("sign", "Waiting for you")) +
+            '<div style="padding:0 16px">' +
+            cer({
+              title: "Device code",
+              timer: "4:40",
+              body: steps([
+                {
+                  t: "Open the verification page on any device",
+                  b: '<span class="hostname">auth.openai.com</span>',
+                },
+                {
+                  t: "Enter this code",
+                  b:
+                    '<div class="code"><span class="code-box mask">••••-••••</span>' +
+                    btn("Show code", "out", { lead: "eye" }) +
+                    '</div><span class="warnline">' +
+                    ic("shield") +
+                    "Enter it only at auth.openai.com.</span>",
+                },
+              ]),
+            }) +
+            '</div><div style="position:absolute;left:0;right:0;bottom:0;padding:12px 16px 28px;border-top:1px solid var(--hairline);background:var(--overlay);display:flex;gap:8px">' +
+            btn("Cancel", "out", { md: true }) +
+            '<span class="btn pri md" style="flex:1">Open verification page' +
+            ic("ext") +
+            "</span></div></div>"
+          );
+        }
+        function phoneClaude() {
+          return (
+            '<div class="sheet full">' +
+            backBar() +
+            idHeader("Cl", "Claude", "Anthropic · on This Mac", status("sign", "Waiting for you")) +
+            '<div style="padding:0 16px">' +
+            cer({
+              title: "Terminal sign-in",
+              timer: "4:48",
+              body: steps([
+                { t: "Open a terminal on This Mac" },
+                {
+                  t: "Use this executable and configuration",
+                  b:
+                    '<div class="kv" style="grid-template-columns:1fr auto"><span class="k" style="grid-column:1/-1">Executable</span><span class="v">/opt/homebrew/bin/claude</span>' +
+                    btn("Copy", "ghost", { lead: "copy" }) +
+                    '<span class="k" style="grid-column:1/-1">CLAUDE_CONFIG_DIR</span><span class="v">~/.claude-work</span>' +
+                    btn("Copy", "ghost", { lead: "copy" }) +
+                    "</div>",
+                },
+                { t: 'Run <span class="cmd">auth login</span> with it' },
+                { t: "Finish the prompts, then come back" },
+              ]),
+            }) +
+            '</div><div style="position:absolute;left:0;right:0;bottom:0;padding:12px 16px 28px;border-top:1px solid var(--hairline);background:var(--overlay);display:flex;gap:8px">' +
+            btn("Stop tracking", "out", { md: true }) +
+            '<span class="btn pri md" style="flex:1">' +
+            ic("refresh") +
+            "Check sign-in status</span></div></div>"
+          );
+        }
+        figure("f-390", {
+          title: "Narrow · overview",
+          w: 390,
+          h: 844,
+          tags: tag("e3", "E3"),
+          body: phoneOverview(),
+          caption:
+            "Full-screen sheet. Fact grid 2 × 3, full-width card actions, Check all in the ⋯ menu.",
+        });
+        figure("f-390", {
+          title: "Narrow · device code",
+          w: 390,
+          h: 844,
+          tags: tag("e2", "E2"),
+          body: phoneDevice(),
+          caption:
+            "Sticky footer carries the ceremony's primary action. Remote host, so device code is primary.",
+        });
+        figure("f-390", {
+          title: "Narrow · Claude terminal",
+          w: 390,
+          h: 844,
+          tags: tag("e2", "E2"),
+          body: phoneClaude(),
+          caption: "Executable and configuration directory stack; each value copies on its own.",
+        });
+
+        function compact(code, name, g, label, l2, sel) {
+          return (
+            '<div class="cpt' +
+            (sel ? " pc sel" : "") +
+            '" style="' +
+            (sel ? "display:grid;padding:10px 12px" : "") +
+            '">' +
+            mark(code) +
+            '<span style="font-weight:600">' +
+            esc(name) +
+            "</span>" +
+            status(g, label) +
+            '<span class="l2">' +
+            l2 +
+            "</span></div>"
+          );
+        }
+        var cursorWaiting =
+          backBar() +
+          idHeader(
+            "Cu",
+            "Cursor",
+            'Cursor Agent CLI · instance <span class="mono">cursor</span> · on This Mac',
+            status("sign", "Waiting for you"),
+          ) +
+          '<div style="padding:0 20px 14px">' +
+          C.cursor[1].body +
+          "</div>" +
+          '<div class="sec"><div class="sec-t">Readiness<span class="sp"></span><span class="meta">checked 1 min ago</span></div>' +
+          factList(CURSOR_FACTS) +
+          "</div>";
+        figure("f-2560", {
+          title: "Ultrawide · two-pane sheet",
+          w: 2560,
+          h: 1080,
+          meta: "sheet 1000px · list 400 · detail 600",
+          tags: tag("e3", "Proposed E3"),
+          body:
+            shell({}) +
+            '<div class="scrim"></div><div class="sheet" style="width:1000px">' +
+            sheetHead() +
+            scope() +
+            triage("all") +
+            '<div class="panes"><div class="pane-l"><div class="grp">Primary providers</div>' +
+            compact(
+              "Cx",
+              "Codex",
+              "ready",
+              "Ready",
+              '<span class="chip">' + ic("card") + "Subscription</span>1 min ago",
+            ) +
+            compact(
+              "Cu",
+              "Cursor",
+              "sign",
+              "Waiting for you",
+              '<span class="chip">' + ic("dash") + "Not reported</span>Sign-in expires in 4:51",
+              true,
+            ) +
+            compact(
+              "Cl",
+              "Claude",
+              "unv",
+              "Verification expired",
+              '<span class="chip">' + ic("dash") + "Not reported</span>checked 12 min ago",
+            ) +
+            '<div class="grp" style="margin-top:6px">Other registered providers (3)</div>' +
+            compact("Gk", "Grok", "unv", "Sign-in not verified", "Readiness only") +
+            compact("Ag", "Antigravity", "off", "Disabled", "Not counted") +
+            compact("Oc", "OpenCode", "unv", "Not verified yet", "Readiness only") +
+            '</div><div class="pane-r">' +
+            cursorWaiting +
+            "</div></div></div>",
+          caption:
+            "At 1920px and wider the detail stays beside the list; no push navigation. The sheet stops at 1000px so the project stays in view.",
+        });
+
+        /* ---------- dark and light ---------- */
+        ["dark", "light"].forEach(function (m) {
+          figure("f-modes", {
+            title: m === "dark" ? "nebula-ion · dark" : "nebula-ion · light",
+            w: 600,
+            h: 860,
+            fixed: m,
+            body: '<div class="sheet" style="width:600px">' + overviewSheet({}) + "</div>",
+          });
+        });
+        var ROLES = [
+          ["Sheet", "surfaceOverlay", "#1c1e28", "#ffffff"],
+          ["Card", "surface", "#12131b", "#ffffff"],
+          ["Ceremony panel", "surfaceRaised", "#181923", "#f6f7fa"],
+          ["Text / muted", "text · textMuted", "#f2f3f8", "#151620"],
+          ["Hairline", "border", "#282934", "#dcdde5"],
+          ["Ceremony primary", "messageAction", "#7454ea", "#6843dd"],
+          ["Selection", "accentSurface", "#242041", "#ebeaff"],
+          ["Focus ring", "focus", "#57a8ff", "#0072cd"],
+          ["Verified", "success", "#42ce85", "#007e49"],
+          ["Blocked", "error", "#fa686a", "#c22826"],
+          ["Attention · API billing", "warning", "#f2b54a", "#a96000"],
+          ["Signing in", "info", "#45a4f6", "#006cc3"],
+          ["Unknown", "iconMuted", "#9597a4", "#666874"],
+          ["Code and device code", "codeBackground", "#0e0f16", "#f3f4f9"],
+        ];
+        document.getElementById("roles").innerHTML =
+          "<thead><tr><th>Element</th><th>Theme role</th><th>Dark</th><th>Light</th></tr></thead><tbody>" +
+          ROLES.map(function (r) {
+            return (
+              "<tr><td>" +
+              esc(r[0]) +
+              "</td><td><code>" +
+              esc(r[1]) +
+              '</code></td><td><span class="sw" style="background:' +
+              r[2] +
+              '"></span><code>' +
+              r[2] +
+              '</code></td><td><span class="sw" style="background:' +
+              r[3] +
+              '"></span><code>' +
+              r[3] +
+              "</code></td></tr>"
+            );
+          }).join("") +
+          "</tbody>";
+
+        /* ---------- matrix ---------- */
+        var MX = [
+          ["E2", "not-installed", "Not installed", "error", "Install guide"],
+          ["E2", "login-required", "Sign-in required", "warning", "Provider sign-in"],
+          [
+            "E2",
+            "available",
+            "Ready to sign in",
+            "neutral",
+            "Provider sign-in (not emitted today)",
+          ],
+          ["E2", "in-progress", "Starting sign-in", "info", "none · Cancel"],
+          [
+            "E2",
+            "waiting-for-user",
+            "Waiting for you",
+            "info",
+            "Open sign-in page / Show code / Check sign-in status",
+          ],
+          ["E2", "authenticated", "Signed in", "success", "Done"],
+          ["E2", "cancelled", "Sign-in cancelled", "muted", "Start again"],
+          ["E2", "failed", "Sign-in didn't complete", "error", "Try again"],
+          ["E2", "expired", "Expired", "warning", "Start a new sign-in"],
+          [
+            "E2",
+            "unsupported",
+            "Not available here",
+            "muted",
+            "Per reason · Open Provider Settings",
+          ],
+          [
+            "E2",
+            "verification-needed",
+            "Verification needed",
+            "muted",
+            "Check again (api-override: Review in Provider Settings)",
+          ],
+          ["Client", "preparing", "Preparing sign-in…", "info", "none"],
+          ["Client", "no access:write", "Needs Manage access", "neutral · Lock", "none"],
+          ["Client", "disconnected", "Disconnected", "error · WifiOff", "Reconnect"],
+          ["Client", "capability absent", "Sign-in from Nebula unavailable", "info", "Check again"],
+          ["Client", "transport failure", "Status unavailable", "error", "Retry"],
+        ];
+        var tone = {
+          error: "err",
+          warning: "warn",
+          info: "info",
+          success: "ok",
+          muted: "mut",
+          neutral: "mut",
+        };
+        document.getElementById("mtx").innerHTML =
+          "<thead><tr><th>Source</th><th>State</th><th>Rendered</th><th>Tone</th><th>Primary action</th></tr></thead><tbody>" +
+          MX.map(function (r) {
+            var t = tone[r[3].split(" ")[0]] || "mut";
+            return (
+              "<tr><td>" +
+              (r[0] === "E2" ? tag("e2", "E2") : tag("e3", "E3 client")) +
+              "</td><td><code>" +
+              esc(r[1]) +
+              '</code></td><td><span class="nb" data-mode="dark" style="display:inline-block;padding:4px 8px;border-radius:6px;background:var(--overlay)"><span class="status ' +
+              t +
+              '"><span class="dot ' +
+              t +
+              '"></span>' +
+              esc(r[2]) +
+              "</span></span></td><td>" +
+              esc(r[3]) +
+              "</td><td>" +
+              esc(r[4]) +
+              "</td></tr>"
+            );
+          }).join("") +
+          "</tbody>";
+
+        /* ---------- behavior: fit, zoom, mode ---------- */
+        function fit() {
+          var stages = document.querySelectorAll(".stage");
+          for (var i = 0; i < stages.length; i++) {
+            var st = stages[i];
+            var inner = st.querySelector(".frame-inner");
+            var sc = st.querySelector(".scaler");
+            var w = +inner.getAttribute("data-w");
+            var h = +inner.getAttribute("data-h");
+            var actual = st.getAttribute("data-actual") === "1";
+            var s = actual ? 1 : Math.min(1, st.clientWidth / w);
+            inner.style.transform = "scale(" + s + ")";
+            sc.style.height = Math.round(h * s) + "px";
+            sc.style.width = Math.round(w * s) + "px";
+          }
+        }
+        document.addEventListener("click", function (e) {
+          var b = e.target.closest ? e.target.closest(".zoom") : null;
+          if (b) {
+            var st = b.closest(".fig").querySelector(".stage");
+            var on = st.getAttribute("data-actual") !== "1";
+            st.setAttribute("data-actual", on ? "1" : "0");
+            b.setAttribute("aria-pressed", on ? "true" : "false");
+            b.textContent = on ? "Fit" : "100%";
+            fit();
+            return;
+          }
+          var m = e.target.closest ? e.target.closest(".seg button") : null;
+          if (m) setMode(m.getAttribute("data-mode"));
+        });
+        function setMode(mode) {
+          var els = document.querySelectorAll(".nb[data-mode]:not([data-fixed])");
+          for (var i = 0; i < els.length; i++) {
+            els[i].setAttribute("data-mode", mode);
+          }
+          document
+            .getElementById("mode-dark")
+            .setAttribute("aria-pressed", mode === "dark" ? "true" : "false");
+          document
+            .getElementById("mode-light")
+            .setAttribute("aria-pressed", mode === "light" ? "true" : "false");
+          try {
+            localStorage.setItem("nebula-pc-ref-mode", mode);
+          } catch (err) {
+            /* storage unavailable; the page works without it */
+          }
+        }
+        var saved = null;
+        try {
+          saved = localStorage.getItem("nebula-pc-ref-mode");
+        } catch (err) {
+          saved = null;
+        }
+        if (saved === "light" || saved === "dark") setMode(saved);
+        fit();
+        if (typeof ResizeObserver === "function") {
+          var ro = new ResizeObserver(fit);
+          document.querySelectorAll(".stage").forEach(function (s) {
+            ro.observe(s);
+          });
+        } else {
+          window.addEventListener("resize", fit);
+        }
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+      })();
+    </script>
+  </body>
+</html>

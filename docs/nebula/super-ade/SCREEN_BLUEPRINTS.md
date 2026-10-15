@@ -14,6 +14,8 @@
 
 Layouts are drawn at the **desktop** breakpoint (1440×900) unless noted. Measurements are in CSS px.
 
+**D0.2 update:** [§2 Provider Connections](#2-provider-connections) is reconciled with delivered E1 readiness and E2 authentication and is the E3 implementation target. It has a high-fidelity [visual reference](reference/provider-connections.html). The other blueprints are unchanged from D0.
+
 ## 1. Project Home / Overview
 
 **Route:** `/projects/$projectKey` (existing, `ProjectLaunchpad`). **Purpose:** resume real work quickly and see what needs you.
@@ -97,7 +99,7 @@ This follows the audit's order. The mockup's hero is demoted to the empty state.
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Loading                         | Skeletons for each card at final size. The header renders immediately from the cached project                                                           |
 | No threads                      | `EmptyProjectHero`                                                                                                                                      |
-| No provider ready               | Composer disabled with reason. Attention gets "Connect a provider" first. `ConnectProvidersCta` visible                                                 |
+| No provider ready               | Composer disabled with reason when E1 `runtime` is `blocked`. Attention gets "Connect a provider" first. `ConnectProvidersCta` visible                  |
 | Git unavailable / not a repo    | Chip shows "not a Git repository". Branches tab disabled with reason. Task and Mission plan intents disabled                                            |
 | Environment disconnected        | Banner (`errorSurface`) "devbox is offline. Work there is paused, not lost." Actions disabled. Read-only data stays visible with a "last updated" stamp |
 | Partial data (one query failed) | That card shows an inline error with Retry. The others render normally                                                                                  |
@@ -141,160 +143,345 @@ This follows the audit's order. The mockup's hero is demoted to the empty state.
 
 ## 2. Provider Connections
 
-**Entry points:**
+**Status:** Proposed E3 presentation (D0.2) over **delivered** E1 readiness and E2 authentication. Data rules, copy and the state matrix live in [INTERACTION_STATES.md §1](INTERACTION_STATES.md#1-provider-readiness-and-authentication). The high-fidelity [visual reference](reference/provider-connections.html) shows every screen below in dark and light. Where the reference and these documents differ, the documents win.
 
-- sidebar `ProviderReadinessSummary`,
-- toolbar `ConnectProvidersCta`,
-- `ProviderStatusBanner` action,
-- composer disabled reason link,
-- palette "Open Provider Connections".
+**Purpose:** on one execution host, show at a glance which providers are ready, which need attention and which are not verified. Connect each one through its official ceremony without leaving the current project.
 
-**Container:** `ProviderConnectionsSheet` (right sheet, 560px). Advanced configuration stays at `/settings/providers`.
+### 2.1 Navigation decision: sheet-first hybrid
 
-### 2.1 Desktop layout
+**Recommendation: a hybrid.** A focused right-hand sheet, opened from the shell over the current route, holds the overview, the provider detail and every sign-in ceremony. Deep configuration stays in the existing Provider Settings route, one link away.
 
-```
-                                   ┌ Provider Connections ─────────────────── ✕ ┐
-                                   │ This Mac (Primary device) ▾      Checked 2m ago  [Check all] │
-                                   │ ─────────────────────────────────────────── │
-                                   │ NEEDS ATTENTION                             │
-                                   │ ┌───────────────────────────────────────────┐│
-                                   │ │[Cu] Cursor  Early Access                  ││
-                                   │ │     Update required · 2026.01.23 → 2026.04.08  [Update] ›││
-                                   │ │     Then: sign in                         ││
-                                   │ ├───────────────────────────────────────────┤│
-                                   │ │[Gk] Grok  Early Access                    ││
-                                   │ │     Sign-in not verified           [Check again] ›││
-                                   │ └───────────────────────────────────────────┘│
-                                   │ READY                                       │
-                                   │ ┌───────────────────────────────────────────┐│
-                                   │ │[Cx] Codex   Ready · update available       ││
-                                   │ │     ••••@•••• · Subscription · ChatGPT Pro 20x   ›││
-                                   │ ├───────────────────────────────────────────┤│
-                                   │ │[Cl] Claude  Ready                          ││
-                                   │ │     ••••@•••• · Subscription · Claude Max (reported by CLI) ›││
-                                   │ └───────────────────────────────────────────┘│
-                                   │ DISABLED (2)  ▸                              │
-                                   │ ─────────────────────────────────────────── │
-                                   │ [+ Add a provider]        Advanced settings →│
-                                   └─────────────────────────────────────────────┘
-```
+| Option                               | Keeps project context                       | Fits multi-step ceremonies                                           | Duplicates Provider Settings                      | Verdict         |
+| ------------------------------------ | ------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------- | --------------- |
+| Dedicated destination (`/providers`) | No. Navigation leaves the thread or project | Yes                                                                  | Likely. A second full provider page invites forms | Rejected        |
+| Modal dialog (centered)              | Partly. It hides the work behind it         | Poorly. Browser hand-offs and terminal steps outlive a dialog        | No                                                | Rejected        |
+| **Sheet-first hybrid**               | **Yes.** The route underneath stays mounted | **Yes.** Detail pushes inside the sheet; attempts survive closing it | **No.** Forms stay in Settings                    | **Recommended** |
 
-The group labels are drawn in caps here for legibility only. The product renders them in sentence case (`type-meta`, medium).
+Rules:
 
-**Detail view** (pushed inside the sheet):
+- **Container.** `ProviderConnectionsSheet`, `ui/sheet` from the right. Widths in [§2.10](#210-responsive-and-appearance).
+- **Addressable.** Search params on the current route: `connections=all` or `connections={instanceId}`, plus `connectionsEnv={environmentId}`. Back closes or pops the detail. The palette and composer deep-link with them. **Never** put ceremony data, account data or attempt IDs in the URL.
+- **Context preserved.** The underlying route never navigates or remounts. Closing returns focus to the launcher. When the launcher was the composer's "Fix" link, success offers "Back to composer", which closes the sheet and focuses the composer.
+- **Attempts outlive the sheet.** Closing during an attempt does not cancel it. The sidebar summary shows "Signing in · {Provider}" until the attempt ends or expires. Reopening re-reads it with `status`.
+- **No forms.** The sheet never edits paths, environment variables, launch arguments, models or appearance. Its only mutations are Check again, the E2 lifecycle, Enable, the existing Update action and the existing Add provider dialog.
+- **Deeper diagnostics.** The detail's collapsed "Diagnostics" section covers support needs. "Open in Provider Settings" goes to `/settings/providers` with that instance expanded (proposed `instance` search param). Codex verifies that the existing Settings back control returns to the originating route and adds a `returnTo` only if it does not.
+
+**Entry points** (all open the same sheet):
+
+| Entry                                                         | Opens                                | Status             |
+| ------------------------------------------------------------- | ------------------------------------ | ------------------ |
+| Sidebar `ProviderReadinessSummary`                            | Overview, current environment        | Proposed           |
+| Toolbar `ConnectProvidersCta`                                 | Overview filtered to Needs attention | Proposed           |
+| Composer disabled reason "Fix"                                | Detail of the composer's instance    | Extend             |
+| `ProviderStatusBanner` action                                 | Detail of the banner's instance      | Extend             |
+| Model picker "Manage connections"                             | Detail of the highlighted instance   | Extend             |
+| Palette "Open Provider Connections" / "Sign in to {Provider}" | Overview / detail                    | Extend             |
+| Settings → Providers "Open connections"                       | Overview                             | Extend (link only) |
+
+### 2.2 Overview (screen A)
+
+Desktop 1440×900. The sheet is 600px. The shell stays visible behind a scrim.
 
 ```
- ‹ Back   [Cu] Cursor  · instance cursor · v2026.01.23
- ─────────────────────────────────────────────
- Readiness                                   (ReadinessLadder, stacked)
-  ✓ Installed          v2026.01.23 on This Mac
-  ✗ Compatible         Needs 2026.04.08 or newer for model picker   [Update]
-  ✗ Signed in          Not signed in                               [Sign in…]
-  – Account            —
-  – Billing route      —
-  – Model available    —
-  ✗ Ready to execute   Blocked by 2 steps
- ─────────────────────────────────────────────
- How sign-in works for Cursor  (SignInHandoff)
-  Signs in through the Cursor Agent CLI. A browser window opens.
-  ┌ agent login ───────────────────────── [Copy] ┐
-  [Open terminal on This Mac]   [I've signed in. Check again]
- ─────────────────────────────────────────────
- Models (n)   Default: —                      → Advanced settings
+┌ Shell: sidebar · toolbar · Project Home ┬ Provider connections ─────────────── [⟳ Check all] [✕] ┐
+│ (mounted, behind `--scrim`)             │ Execution host [▣ This Mac ▾]  ● Connected · Manage access │
+│                                         │ [All 6] [● Ready 1] [▲ Needs attention 1] [◌ Not verified 1]│
+│                                         ├────────────────────────────────────────────────────────────┤
+│                                         │ Primary providers                                          │
+│                                         │ ┌──────────────────────────────────────────────────────────┐│
+│                                         │ │ [Cx] Codex                                   ● Ready    ›││
+│                                         │ │      OpenAI · App Server · on This Mac                    ││
+│                                         │ │ Sign-in        Account           Billing · reported       ││
+│                                         │ │ ✓ Signed in    ✓ ••••@••••       Subscription             ││
+│                                         │ │ Model          Runtime           Last check               ││
+│                                         │ │ ✓ {model}      ✓ Preflight passed 1 min ago               ││
+│                                         │ └──────────────────────────────────────────────────────────┘│
+│                                         │ ┃┌────────────────────────────────────────────────────────┐ │
+│                                         │ ┃│ [Cu] Cursor                      ▲ Sign-in required    › │ │
+│                                         │ ┃│      Cursor Agent CLI · on This Mac  [Sign in with Cursor]│ │
+│                                         │ ┃│ ✗ Signed out   ◌ Not reported    ◌ Not reported          │ │
+│                                         │ ┃│ ◌ Not verified ✗ Blocked         2 min ago               │ │
+│                                         │ ┃└────────────────────────────────────────────────────────┘ │
+│                                         │ ┌──────────────────────────────────────────────────────────┐│
+│                                         │ │ [Cl] Claude          ◌ Verification expired [Check again]›││
+│                                         │ │      Anthropic · Claude Code · on This Mac                ││
+│                                         │ │ ◌ Not verified ◌ Not reported    ◌ Not reported           ││
+│                                         │ │ ◌ Not verified ◌ Not verified    checked 12 min ago       ││
+│                                         │ └──────────────────────────────────────────────────────────┘│
+│                                         │ Other registered providers (3)                          ▾ │
+│                                         │  [Gk] Grok          ◌ Sign-in not verified    Check again › │
+│                                         │  [Ag] Antigravity   ○ Disabled                Enable      › │
+│                                         │  [Oc] OpenCode      ◌ Not verified yet        Check again › │
+│                                         │  [+ Add a provider]                                        │
+│                                         ├────────────────────────────────────────────────────────────┤
+│                                         │ Checks never send a paid request.     Provider Settings →  │
+└─────────────────────────────────────────┴────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Information hierarchy
+`┃` marks the 2px leading rule on cards that need attention. `[Cx]`-style tiles stand for `ProviderInstanceIcon`; real marks are never recolored.
 
-1. Which environment is being configured.
-2. What needs attention, and the single next action.
-3. What is ready, with account and route.
-4. Disabled instances (collapsed).
-5. Add a provider or open advanced settings.
+**Regions:**
 
-### 2.3 Component inventory
+1. **Header.** Title "Provider connections" (`type-title`). "Check all" (outline, `RefreshCw`) calls `server.refreshProviders` once per enabled instance; each card shows its own spinner. Close.
+2. **Scope row.** "Execution host" menu listing every environment with its connection dot and a cloud icon when remote. Beside it, the access chip: "Manage access" (neutral) or "Read-only · sign-in needs Manage access" (`Lock`). Everything below is scoped to this host.
+3. **Triage strip.** A single-select toggle group: All, Ready, Needs attention, Not verified, each with a count ([states §1.6](INTERACTION_STATES.md#16-composite-connection-status-proposed-e3)). It filters the list and never reorders it. Disabled instances are not counted.
+4. **Primary providers.** Codex, Cursor and Claude in that **fixed** order, one card per configured instance. A missing primary driver renders a muted "Not set up on {host}" card with "Add {Provider}" (existing `AddProviderInstanceDialog`, preselected).
+5. **Other registered providers.** Every other configured instance, including Grok, Antigravity, OpenCode and custom instances, as compact rows in a collapsible group. Collapsed by default unless one of them needs attention. "Add a provider" ends the group.
+6. **Footer.** "Checks never send a paid request." and "Provider Settings →".
 
-| Component                  | Status                                                              |
-| -------------------------- | ------------------------------------------------------------------- |
-| `ProviderConnectionsSheet` | Proposed                                                            |
-| `ProviderConnectionRow`    | Proposed (composes `ProviderInstanceIcon`, `RedactedSensitiveText`) |
-| `ReadinessLadder`          | Proposed                                                            |
-| `SignInHandoff`            | Proposed                                                            |
-| Environment switcher       | Existing (devices picker in `ProviderSettingsPanel`)                |
-| Update action              | Existing (`server.updateProvider`, update popover)                  |
-| Add provider               | Existing (`AddProviderInstanceDialog`)                              |
-| Models section             | Existing (`ProviderModelsSection`), linked, not duplicated          |
+**Fixed order beats status sorting.** Cards never jump when a check finishes. The triage strip, the rule and the badge carry status.
 
-### 2.4 The distinctions this screen must make
+#### Card anatomy (`ProviderConnectionCard`)
 
-Each is a separate, visible fact (see [INTERACTION_STATES.md §1](INTERACTION_STATES.md#1-provider-readiness)):
+| Slot                      | Content                                                                                             | Source                                                  |
+| ------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Identity                  | 32px mark, display name (`type-label`), instance label when a driver has several instances          | `ProviderInstanceIcon`, instance config                 |
+| Sub-line                  | Vendor · mechanism · "on {host}" (`type-meta`). Cloud icon when remote                              | Driver metadata, environment descriptor                 |
+| Status                    | Group dot + label ([states §1.6](INTERACTION_STATES.md#16-composite-connection-status-proposed-e3)) | `deriveProviderConnectionStatus`                        |
+| Primary action            | One outline button, or none                                                                         | Same                                                    |
+| Fact grid (3 × 2)         | Sign-in · Account · Billing (reported) · Model · Runtime · Last check                               | E1 facts and `billingRoute`; `verifiedAt` relative time |
+| Advisory chips (optional) | Update available · API billing · Last sign-in: {outcome}                                            | `versionAdvisory`, `billingRoute`, last E2 outcome      |
+| Open detail               | The whole header is the detail button (chevron)                                                     | —                                                       |
 
-| Fact                                 | Ready example                                                                                     | Not-ready example                              |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| Installed                            | "v0.153.4 on This Mac"                                                                            | "Not installed. How to install →"              |
-| Authenticated                        | "Signed in"                                                                                       | "Not signed in" / "Sign-in not verified"       |
-| Account verified                     | "••••@••••", reported during this check                                                           | "Account not reported"                         |
-| Subscription route known/unknown     | "Subscription · ChatGPT Pro 20x"                                                                  | "Billing route not reported"                   |
-| API billing                          | "API billing · OpenAI API key", shown with a ⚠ and the note "Usage is billed to your API account" | —                                              |
-| Selected model available/unavailable | "gpt-5 available"                                                                                 | "Selected model isn't offered by this account" |
-| Ready to execute                     | "Ready · not yet used here"                                                                       | "Blocked by 2 steps"                           |
+Every fact cell is label (`type-meta`, muted) over value (`type-body-compact`) with its icon. Account values use `RedactedSensitiveText`. "Last check" reads "1 min ago" when fresh, "checked 12 min ago · expired" when stale and "Never" otherwise.
 
-### 2.5 Provider-specific content (OpenAI/Codex, Claude, Cursor/Grok, others)
+### 2.3 Provider detail (screen B)
 
-| Provider                      | "How sign-in works" copy                                                                                                                                     | Route note                                                                                                                                  |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Codex (OpenAI)                | "Signs in with your ChatGPT account through the Codex CLI. A browser window opens. You can also use an OpenAI API key, which is billed to your API account." | Shows the ChatGPT plan when reported. API key → API billing                                                                                 |
-| Claude                        | "Signs in through the Claude CLI. Follow the prompts in the terminal."                                                                                       | The plan label is shown as "reported by Claude CLI", with the F4 info note in detail                                                        |
-| Cursor                        | "Signs in through the Cursor Agent CLI (`agent login`). A browser window opens."                                                                             | Subscription when reported. Models from other vendors inside Cursor may bill as additional usage. Link to the Cursor dashboard, no estimate |
-| Grok (local Grok Build CLI)   | "Signs in through the Grok CLI, or uses an xAI API key you configure."                                                                                       | "Not reported" until the driver reports auth. Never shown as connected to Grok Bots                                                         |
-| Antigravity, OpenCode, others | Driver-specific text from the provider metadata. Generic fallback: "Follow {Provider}'s CLI sign-in instructions."                                           | Unknown unless reported                                                                                                                     |
+Pushed inside the sheet. A back button returns to the overview with focus on the originating card.
 
-**There is no "Connect with one click" button anywhere.** Every sign-in names its mechanism.
+```
+┌ ‹ All providers ─────────────────────────────────────────────────── [✕] ┐
+│ [Cx]  Codex                                                  ● Ready    │
+│       OpenAI · instance codex · v{version} · on This Mac                │
+│ ┌ Status ─────────────────────────────────────────────────────────────┐ │
+│ │ Ready. Preflight passed 1 min ago. A completed turn isn't verified. │ │
+│ │                                                      [Check again]  │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│ Account and sign-in                                                     │
+│   Signed in as ••••@•••• · ChatGPT account (reported)                   │
+│   Sign-in method   Official Codex App Server · browser or device code   │
+│   [Sign in again]                                                       │
+│ Readiness                                              checked 1 min ago │
+│   Driver                     ✓ Driver available                          │
+│   Executable                 ✓ Installed · v{version}                    │
+│   Sign-in                    ✓ Signed in                                 │
+│   Account identity           ✓ Verified                                  │
+│   Subscription entitlement   ◌ Not verified                              │
+│   Selected model             ✓ {model} available                         │
+│   Runtime preflight          ✓ Preflight passed                          │
+│ Billing                                                                 │
+│   Route        Subscription · reported by Codex                         │
+│   Plan label   {label} · reported by Codex                              │
+│   Entitlement and remaining usage aren't verified.      View usage →    │
+│ ▸ Diagnostics                                                           │
+│ Open in Provider Settings →                                             │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-### 2.6 Primary interactions
+Sections, top to bottom:
 
-- Row primary action (Update / Sign in… / Check again / Enable).
-- Row click opens detail.
-- **Check all** refreshes every instance. Rows show their own spinners. There is no global blocking spinner.
-- Environment switcher re-scopes the whole sheet.
+1. **Identity header.** Mark, name, vendor, instance ID, version, host. Group status on the right.
+2. **Status panel.** The composite headline in one sentence plus **the** next action. While an attempt runs, the ceremony ([§2.4](#24-sign-in-flows-screen-c)) replaces this panel. This is the only place in the sheet with a solid violet button.
+3. **Account and sign-in.** Account identity (redacted), the sign-in mechanism from the E2 capability, and "Sign in again" (secondary) when already signed in and a ceremony is advertised. Without `access:write`: "Needs Manage access" with `Lock`.
+4. **Readiness.** All seven E1 facts as a definition list, using the fact copy in [states §1.1](INTERACTION_STATES.md#11-e1-readiness-facts-delivered). Reuses the facts and copy behind the existing `ProviderReadinessDetails`.
+5. **Billing.** Route with "reported by {Provider}", plan label (detail only), the fixed entitlement line, and "View usage →" to the existing Usage page. Cursor adds "X Subscription migration: Unknown". Claude adds the [F4 caveat](INTERACTION_STATES.md#143-claude-guided-terminal).
+6. **Diagnostics** (collapsed). Driver kind, instance ID, executable path, inspection status and `verifiedAt`, model catalog source, E2 capability and ceremonies, the last lifecycle reason code with its fixed text, version advisory. "Copy diagnostics" copies this list as text. It never includes the account email, login URLs, codes or attempt IDs.
+7. **Open in Provider Settings →.**
 
-### 2.7 States
+### 2.4 Sign-in flows (screen C)
 
-| State                                                        | Treatment                                                                                   |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| First load                                                   | Rows as skeletons (64px)                                                                    |
-| Checking (user-initiated)                                    | Row spinner + `aria-busy`. The headline keeps its last value, muted                         |
-| Limited permissions (client lacks `access:write`-equivalent) | Read-only banner (existing). Actions hidden. Facts visible                                  |
-| Environment offline                                          | Sheet header error + the last known facts, labelled "as of {time}"                          |
-| No providers enabled                                         | Empty state: "No providers enabled on This Mac" + a list of available drivers with "Enable" |
-| Update running                                               | Existing update states (queued, running, succeeded, failed, unchanged) inline in the row    |
+The ceremony replaces the detail's status panel. Steps, copy and outcomes are in [states §1.4](INTERACTION_STATES.md#14-provider-specific-sign-in). Every waiting step shows the expiry countdown in the panel header (`role="timer"`, tabular numerals, not announced each second).
 
-### 2.8 Keyboard and focus
+**Codex, browser handoff:**
 
-- The sheet opens with focus on the first row needing attention, or the first row.
-- Arrow keys move between rows. Enter opens detail. Backspace or the Back button returns, with focus restored to the originating row.
-- Esc closes and returns focus to the launcher.
+```
+┌ Sign in to Codex                                          Expires in 4:12 ┐
+│ ① Open the ChatGPT sign-in page                                          │
+│    [Open ChatGPT sign-in ↗]   auth.openai.com                            │
+│ ② Finish signing in there. This page updates by itself.                  │
+│    ⧗ Waiting for you…                                                     │
+│ Browser not on This Mac?  Use a device code instead                      │
+│                                                                [Cancel]  │
+└──────────────────────────────────────────────────────────────────────────┘
+```
 
-### 2.9 Responsive
+**Codex, device code:**
 
-- **compact:** full-screen sheet; detail is a full-screen push.
-- **laptop and above:** 560px right sheet.
-- **ultrawide:** same width (no stretching).
+```
+┌ Sign in to Codex with a device code                       Expires in 4:40 ┐
+│ ① Open the verification page on any device                               │
+│    [Open verification page ↗]   auth.openai.com                          │
+│ ② Enter this code                                                        │
+│    ┌────────────────────┐                                                │
+│    │  ••••-••••         │   [Show code]  [Copy]                          │
+│    └────────────────────┘                                                │
+│    Enter it only at auth.openai.com. Don't share it.                     │
+│    ⧗ Waiting for you…                                         [Cancel]   │
+└──────────────────────────────────────────────────────────────────────────┘
+```
 
-### 2.10 Motion
+**Cursor, official CLI handoff:**
 
-- Sheet enter `--motion-sheet`.
-- Detail push: 16px slide + fade.
-- Status changes crossfade (`--motion-fast`).
-- A successful check that changes a headline briefly highlights the row (accent surface, 600ms, once). Under reduced motion there is no highlight; the announcement still fires.
+```
+┌ Sign in to Cursor                                         Expires in 4:51 ┐
+│ Nebula runs Cursor's official login with this executable on This Mac:    │
+│    /usr/local/bin/{cursor executable}                            [Copy]  │
+│ ① [Open Cursor sign-in ↗]   cursor.com                                   │
+│ ② Finish signing in there. This page updates by itself.                  │
+│    ⧗ Waiting for you…                                         [Cancel]   │
+└──────────────────────────────────────────────────────────────────────────┘
+```
 
-### 2.11 Visual acceptance criteria
+**Claude, guided terminal:**
 
-- [ ] All five observed fixtures ([states §1.5](INTERACTION_STATES.md#15-observed-states-from-the-running-client-accounts-redacted)) render their expected headline and ladder.
-- [ ] No row is green or "Ready" when `auth.status` is `unknown`.
-- [ ] API and cloud billing routes are visibly distinct from subscription.
-- [ ] Emails are redactable (existing setting) in rows and detail.
-- [ ] No sign-in path implies OAuth inside Nebula.
+```
+┌ Sign in to Claude from your terminal                      Expires in 4:48 ┐
+│ Claude sign-in runs in your own terminal. Nebula doesn't open Claude     │
+│ OAuth or collect tokens.                                                 │
+│ ① Open a terminal on This Mac                                            │
+│ ② Use this instance's executable and configuration                       │
+│    Executable          {binaryPath}                              [Copy]  │
+│    CLAUDE_CONFIG_DIR   {homePath} │ Default (not set)            [Copy]  │
+│ ③ Run  auth login  with that executable                                  │
+│ ④ Finish the prompts in your terminal and browser                        │
+│ ⑤ [Check sign-in status]                                                 │
+│ ⓘ Your Claude plan's use in third-party apps depends on Anthropic's      │
+│   current terms. Nebula doesn't verify entitlement or usage.             │
+│                                                         [Stop tracking]  │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**Success (all providers):**
+
+```
+┌ ✓ Signed in to Codex on This Mac ────────────────────────────────────────┐
+│ Account ••••@••••                                                        │
+│ Sign-in doesn't settle these. They update as the fresh check arrives:    │
+│   Selected model             ✓ {model} available                         │
+│   Subscription entitlement   ◌ Not verified                              │
+│   Runtime preflight          ✓ Preflight passed                          │
+│ Signing in doesn't guarantee a model or included usage.                  │
+│                                       [View readiness]   [Done]          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.5 Recovery states (screen D)
+
+All twenty states, with copy and actions, are in [states §1.5](INTERACTION_STATES.md#15-recovery-states). Placement:
+
+| Where                                  | States                                                                                                                                                                                                           |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Scope banner** (under the scope row) | Disconnected remote host (#12), Older host (#17)                                                                                                                                                                 |
+| **Card** (label + primary action)      | Not installed, Sign-in required, Waiting for you, Starting sign-in, Verification needed, Sign-in expired, API credential overrides sign-in, Disabled, Driver unavailable, Model not offered, Needs Manage access |
+| **Detail status panel**                | All of the above with their full message, plus Successful authentication, Cancelled, Failed, Unsupported configuration, Environment changed, Instance unavailable, Stale attempt                                 |
+
+A recovery panel is a `ui/alert` with icon, title (`type-label`), one or two sentences, the primary action and at most one secondary action. Tone follows [states §1.3](INTERACTION_STATES.md#13-e2-authentication-lifecycle-delivered). Permission uses `Lock` and neutral tone, never error.
+
+### 2.6 Information hierarchy
+
+1. Which execution host, and whether Nebula can reach and manage it.
+2. Triage counts: ready, needs attention, not verified.
+3. Primary providers in fixed order, each with status and one next action.
+4. Per-provider facts: sign-in, account, billing (reported), model, runtime, last check.
+5. Other registered providers.
+6. Detail: next action first, then account, readiness, billing, diagnostics.
+
+### 2.7 Component inventory
+
+| Component                                | Status                                                                              |
+| ---------------------------------------- | ----------------------------------------------------------------------------------- |
+| `ProviderConnectionsSheet`               | Proposed (`ui/sheet`, wider variant)                                                |
+| `ProviderConnectionsOverview`            | Proposed                                                                            |
+| `ProviderTriageStrip`                    | Proposed (`ui/toggle-group`)                                                        |
+| `ProviderConnectionCard` / compact row   | Proposed (composes `ProviderInstanceIcon`, `RedactedSensitiveText`)                 |
+| `ProviderFactGrid` / `ProviderFactList`  | Proposed (one fact-copy module shared with `ProviderReadinessDetails`)              |
+| `ProviderConnectionDetail`               | Proposed                                                                            |
+| `ProviderSignInPanel` and ceremony steps | Proposed (logic extracted from the delivered `ProviderAuthenticationControls`)      |
+| `PrivateCodeDisplay`, `AttemptCountdown` | Proposed                                                                            |
+| `ProviderRecoveryNotice`                 | Proposed (`ui/alert`)                                                               |
+| Environment menu                         | Existing pattern (devices picker in `ProviderSettingsPanel`, `ConnectionStatusDot`) |
+| Update action                            | Existing (`server.updateProvider`, update popover)                                  |
+| Add provider                             | Existing (`AddProviderInstanceDialog`)                                              |
+| Usage link                               | Existing (`/usage`)                                                                 |
+
+Full specifications: [COMPONENT_SPECIFICATIONS.md §3](COMPONENT_SPECIFICATIONS.md#3-provider-connections-components).
+
+### 2.8 Primary interactions
+
+- **Open.** Any entry point. If the chosen host is connected, the sheet calls `status` once per enabled instance (with `access:write` and the capability) and `server.refreshProviders` once per enabled, **stale** instance (with `orchestration:operate`), at most once per opening and never more often than every 60s ([founder decision F13](SUPER_ADE_DESIGN_CONTRACT.md#15-founder-decisions)).
+- **Check all / Check again.** `server.refreshProviders`, per instance. The card keeps its last value muted, with a spinner and `aria-busy`, until the new snapshot arrives.
+- **Sign in.** Opens the detail at its ceremony and calls `begin` with the chosen ceremony.
+- **Cancel / Stop tracking.** `cancel` with the current `attemptId`. Never logs out.
+- **Switch host.** Re-scopes everything. It discards ceremony views for the previous host; their attempts continue on that host until they end or expire.
+- **Enable.** The existing provider update path (`server.updateProvider`, `orchestration:operate`).
+
+### 2.9 Loading, empty and error states
+
+| State                                     | Treatment                                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| First load                                | Three primary card skeletons at final height (164px), one 40px row per other instance                  |
+| Snapshot not yet received for an instance | Facts "Not verified", label "Not verified yet", "Checking…" while a refresh runs                       |
+| Checking (user-initiated)                 | Card spinner, `aria-busy`, last values muted                                                           |
+| `begin` slow                              | "Preparing sign-in…" then, after 10s, "Still checking {Provider} on {host}…"                           |
+| Lifecycle RPC failure                     | Inline "Status unavailable. Reconnect and retry." No cause text. Ceremony data dropped                 |
+| No enabled providers on host              | `ui/empty`: "No providers enabled on {host}", with the registered drivers listed and "Enable" or "Add" |
+| Host disconnected                         | Scope banner with Reconnect. Facts "Not verified" with "Last checked before disconnect: {time}"        |
+| Read-only client                          | Access chip "Read-only". Sign-in actions replaced by "Needs Manage access". Facts and Check again stay |
+
+### 2.10 Responsive and appearance
+
+| Viewport                        | Container                                                                           | Overview                                                                                                               | Detail and ceremonies                                                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **1440 desktop**                | 600px right sheet (`--connections-sheet-width`), scrim over the shell               | Fact grid 3 × 2. Primary action beside the status                                                                      | Push inside the sheet                                                                                                  |
+| **1280 laptop**                 | 560px sheet                                                                         | Fact grid 3 × 2 with 12px gaps. When the header is too narrow, the primary action moves under the sub-line             | Push inside the sheet                                                                                                  |
+| **390 narrow** (< 768)          | Full-screen sheet. Header: back/close and title. "Check all" moves to a `⋯` menu    | Host menu full width. Triage strip scrolls horizontally. Fact grid 2 × 3. Primary action full width at the card's foot | Full-screen push. Sticky footer holds the ceremony's primary action. Device code wraps; the code block keeps 22px mono |
+| **Wide and ultrawide** (≥ 1920) | 1000px two-pane sheet (`--connections-sheet-width-wide`): list 400px · detail 600px | Compact cards (fact grid hidden; status, billing chip and last check only)                                             | Always visible beside the list. No push. Nothing stretches beyond 1000px; the project stays visible to the left        |
+
+At every width: no horizontal scroll, 44px hit areas under `pointer: coarse`, and the countdown never wraps away from its label.
+
+**Dark and light.** Built from theme roles only, so every built-in and custom theme works. Target rendering is `nebula-ion` ([DESIGN_TOKENS.md §3](DESIGN_TOKENS.md#3-nebula-ion-role-values)); E3 does **not** change the default theme.
+
+| Element                     | Role (dark and light)                                                                                     |
+| --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Sheet                       | `surfaceOverlay`, `border` on the leading edge, `radius-xl`, overlay shadow                               |
+| Card                        | `surface`, `border`; hover `surfaceRaised`; selected (wide two-pane) `accentSurface` + 2px `primary` rule |
+| Attention rule              | 2px leading rule in `error`, `warning` or `info`                                                          |
+| Fact label / value          | `textMuted` / `text`                                                                                      |
+| Status icon                 | `success` / `error` / `warning` / `info` / `iconMuted`                                                    |
+| Triage chip selected        | `accentSurface` + `aria-pressed`                                                                          |
+| Code block, executable path | `codeBackground`, `codeForeground`, `type-mono`                                                           |
+| Device code                 | `codeBackground`, `type-mono-display`                                                                     |
+| Ceremony primary            | `messageAction` (the sheet's only solid violet control)                                                   |
+| Recovery panels             | `errorSurface`, `warningSurface`, `infoSurface` with matching foregrounds                                 |
+
+### 2.11 Keyboard and focus
+
+- **Open:** focus goes to the first card that needs attention (its primary action), otherwise to the sheet title.
+- **Tab order:** header → scope row → triage strip → each card (detail button, then primary action) → other providers → footer.
+- **Detail:** focus moves to the provider name heading. Back (button, or `Alt+←` / `⌘[` while the sheet has focus) returns focus to the originating card.
+- **Ceremonies:** after `begin` resolves, focus moves to the step's first action ("Open ChatGPT sign-in", "Show code", "Check sign-in status"). After success, focus moves to "Done".
+- **Esc** closes the sheet and returns focus to the launcher. Esc never cancels an attempt.
+- **Triage strip:** one Tab stop, arrow keys between options.
+- **Live regions:** polite for "Checking…" results, ceremony progress and success; assertive for failure and expiry; one polite "Sign-in expires in 1 minute".
+
+### 2.12 Motion
+
+- Sheet enter and exit `--motion-sheet`. Detail push: 16px slide plus fade (`--motion-sheet`).
+- Status and fact changes crossfade (`--motion-fast`). A headline that changes after a user-initiated check highlights the card once (`accentSurface`, 600ms).
+- The `signing-in` dot uses the existing duty-cycled status pulse. Nothing else loops. The countdown changes text only.
+- Reduced motion: no slide, no pulse, no highlight; announcements still fire.
+
+### 2.13 Visual acceptance criteria
+
+- [ ] Every synthetic fixture in [states §1.8](INTERACTION_STATES.md#18-synthetic-fixtures) renders its expected group, label and primary action.
+- [ ] No card is "Ready" unless E1 `runtime` is `verified`. Stale instances read "Verification expired" in neutral tone and are not counted as Needs attention.
+- [ ] Billing always says "reported". API billing is visually distinct. Entitlement always reads "Not verified" today.
+- [ ] No sign-in path implies OAuth inside Nebula. Claude shows terminal steps only.
+- [ ] Login URLs never render in full. Device codes are masked until "Show code".
+- [ ] Reconnecting, switching host and replacing an instance clear every ceremony view.
+- [ ] Without `access:write`, facts are visible and no sign-in control renders.
+- [ ] One solid violet control at most is visible in the sheet.
+- [ ] 1440, 1280, 390 and ≥1920 layouts match [§2.10](#210-responsive-and-appearance) in dark and light, with no horizontal scroll.
 
 ## 3. Branches and Worktrees
 

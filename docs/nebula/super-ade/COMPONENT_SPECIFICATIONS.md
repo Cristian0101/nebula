@@ -1,6 +1,6 @@
 # Super ADE component specifications
 
-**Status:** Proposed.
+**Status:** Proposed. [Section 3](#3-provider-connections-components) was rewritten in D0.2 for E3 against delivered E1 readiness and E2 authentication.
 
 Every component has one of three labels:
 
@@ -20,7 +20,7 @@ Each entry lists: **Status · Reuses · Anatomy · Sizing · Props (conceptual) 
 
 ### 1.1 `ui/tabs`: Proposed primitive
 
-- **Why:** Tabs are hand-rolled today (`role="tablist"` in Command Deck and Button groups elsewhere). Project header tabs, Notes and the Connections sheet need one accessible primitive.
+- **Why:** Tabs are hand-rolled today (`role="tablist"` in Command Deck and Button groups elsewhere). Project header tabs and Notes need one accessible primitive.
 - **Reuses:** Base UI tabs (the same library family as the existing `ui/*` primitives). Visual style follows `Toggle` `segmented` for pill tabs and an underline variant for page tabs.
 - **Variants:**
   - `underline`: page-level. 36px tall, `type-label`, 2px `primary` indicator that slides with `--motion-base`.
@@ -32,7 +32,7 @@ Each entry lists: **Status · Reuses · Anatomy · Sizing · Props (conceptual) 
 ### 1.2 `ui/badge` → StatusBadge: Extend
 
 - **Reuses:** existing variants `success | warning | error | info | secondary | outline`.
-- **Adds:** a `level` prop (`met | attention | blocked | unknown | n/a`) that picks the variant **and** the leading icon from [states §1.1](INTERACTION_STATES.md#11-facts-not-a-single-status). Text is mandatory.
+- **Adds:** a `fact` prop taking E1's `ReadinessFact` (`verified | blocked | unknown`) that picks the variant **and** the leading icon from [states §1.1](INTERACTION_STATES.md#11-e1-readiness-facts-delivered), and a `tone` prop for advisories and lifecycle states that are not facts. D0's five-level `met | attention | blocked | unknown | n/a` prop is withdrawn. Text is mandatory.
 - **Sizing:** existing `sm` (16–20px) for rows, `default` for headers.
 - **Codex verifies:** `info` and `success` variants consume the new theme roles once D1 lands.
 
@@ -77,23 +77,24 @@ Each entry lists: **Status · Reuses · Anatomy · Sizing · Props (conceptual) 
 
 ### 2.4 `ProviderReadinessSummary`: Proposed
 
-- **Purpose:** a truthful, compact provider status in the sidebar. It replaces the mockup's "Integrations" list.
-- **Reuses:** `ProviderInstanceIcon` (with status dot), readiness derivation ([states §1](INTERACTION_STATES.md#1-provider-readiness)), `SidebarProviderUpdatePill` stays separate.
+- **Purpose:** a truthful, compact provider status in the sidebar. It replaces the mockup's "Integrations" list and is the main entry to [Provider Connections](SCREEN_BLUEPRINTS.md#2-provider-connections).
+- **Reuses:** `ProviderInstanceIcon` (with status dot), `deriveProviderConnectionStatus` ([states §1.6](INTERACTION_STATES.md#16-composite-connection-status-proposed-e3)). `SidebarProviderUpdatePill` stays separate.
 - **Anatomy:**
-  - Collapsed row: up to 4 overlapping provider marks (20px, −6px overlap, each with a 6px StatusDot) · summary text "2 ready · 1 needs attention" · chevron.
-  - Expanded (hover/focus/click): one 28px row per **enabled** instance, showing mark · display name · headline (`type-meta`) · level icon.
+  - Collapsed row: up to 4 overlapping provider marks (20px, −6px overlap, each with a 6px StatusDot) · summary text · chevron.
+  - Expanded (hover, focus or click on the chevron): one 28px row per **enabled** instance, showing mark · display name · status label (`type-meta`) · icon.
 - **Sizing:** collapsed 36px tall. The expanded popover anchors upward (`side="top"`) and does not push layout.
-- **Props:** `providers` (derived readiness list), `onOpenConnections`, `environmentLabel`.
-- **States:**
-  - All ready: "{n} providers ready", success icon.
-  - Any attention: "{n} need attention", warning.
-  - Any blocked: "Sign in required" or the first blocker, error.
-  - Checking: spinner.
-  - No providers enabled: "No providers enabled", with a "Connect" link.
-- **Accessibility:** a button with `aria-label` that repeats the full summary; the popover list is navigable with arrow keys.
+- **Props:** `connections` (derived statuses for the current environment), `onOpenConnections`, `environmentLabel`.
+- **Summary text** (first match wins):
+  - Disconnected: "{host} disconnected", `WifiOff`.
+  - Any `signing-in`: "Signing in · {Provider}", `info`. No URL, code or countdown.
+  - Any `attention`: "{n} need attention", `warning` (or `error` when an instance is blocked).
+  - Any `ready`: "{n} ready", `success`, plus "· {k} not verified" muted when some are stale.
+  - Only `unverified`: "Not verified · check", muted. Never warning tone.
+  - No enabled instance: "No providers enabled", with a "Connect" link.
+- **Accessibility:** a button whose `aria-label` repeats the full summary; the popover list is navigable with arrow keys.
 - **Codex verifies:**
-  - disabled instances never appear as "ready";
-  - Antigravity/OpenCode disabled are excluded from counts;
+  - disabled instances never appear as ready and are not counted;
+  - stale instances are never counted as needing attention;
   - multiple environments show the current environment only, with its label.
 
 ### 2.5 Top toolbar breadcrumb: Extend `WorkspaceBreadcrumb` / `ChatHeader`
@@ -117,71 +118,154 @@ Each entry lists: **Status · Reuses · Anatomy · Sizing · Props (conceptual) 
   - 36px button with `--brand-gradient` and white text;
   - leading icon `PlugZap`;
   - title "Connect providers";
-  - sub-line (`type-micro`) listing the non-ready providers ("Cursor, Grok").
-- **Visibility:** only while ≥1 enabled provider is not Ready on the current environment and it is not dismissed (per-environment, local preference).
+  - sub-line (`type-micro`) listing the providers that need attention ("Cursor, Claude").
+- **Visibility:** only while at least one enabled **primary** instance on the current environment is in the `attention` group for a fixable reason (Not installed, Sign-in required, Model not offered, API credential overrides sign-in), and the CTA is not dismissed (per environment, local preference). Never for stale or unverified instances, disabled instances or a disconnected host.
+- **Action:** opens the sheet with the triage strip on Needs attention.
 - **Accessibility:** contrast verified on both gradient ends (white on `primary` ≥4.84:1; on `info` the label must sit over the violet half or use a ≥4.5:1 overlay; Codex measures the final rendering).
 
-## 3. Provider components
+## 3. Provider Connections components
 
-### 3.1 `ReadinessLadder`: Proposed
+**Status:** Proposed for E3 (D0.2). They replace D0's `ReadinessLadder`, `ProviderConnectionRow`, `SignInHandoff` and the 560px sheet spec, which assumed no login RPC and a five-level fact model. New files live in `apps/web/src/components/providerConnections/` unless noted. Screens: [SCREEN_BLUEPRINTS.md §2](SCREEN_BLUEPRINTS.md#2-provider-connections). States and copy: [INTERACTION_STATES.md §1](INTERACTION_STATES.md#1-provider-readiness-and-authentication).
 
-- **Purpose:** show the seven facts compactly.
-- **Variants:**
-  - `inline`: one line of 7 icons with labels hidden and tooltips. Used in the model picker sidebar.
-  - `stacked`: vertical list, icon · fact · value · action. Used in provider detail.
-- **Props:** `facts: Array<{id, level, value, detail?, action?}>`, `variant`.
-- **Accessibility:** the `stacked` variant is a definition list (`dl`); `inline` exposes an `aria-label` sentence ("Codex: installed, update available, signed in, …").
-- **Codex verifies:** facts come only from the pure derivation function; there is a snapshot test per fixture in [states §1.5](INTERACTION_STATES.md#15-observed-states-from-the-running-client-accounts-redacted).
+### 3.0 Container hierarchy and state ownership
 
-### 3.2 `ProviderConnectionRow`: Proposed (composes `ProviderInstanceIcon`)
+```
+<AppSidebarLayout>                       existing shell; the current route stays mounted
+  … current route …
+  <ProviderConnectionsSheet>             mounted once at the shell; open state = URL search params
+    <ProviderConnectionsScope>           host menu · access chip · scope banner (disconnected, older host)
+    ├─ <ProviderConnectionsOverview>     (list pane; always visible at ≥1920)
+    │    <ProviderTriageStrip/>
+    │    <ProviderConnectionCard/> × primary instances
+    │    <OtherProvidersGroup> <ProviderConnectionCard density="compact"/> × others </OtherProvidersGroup>
+    └─ <ProviderConnectionDetail>        (pushed pane; side pane at ≥1920)
+         <ProviderStatusPanel> | <ProviderSignInPanel>
+              <BrowserHandoffStep/> <DeviceCodeStep><PrivateCodeDisplay/></DeviceCodeStep>
+              <GuidedTerminalSteps/> <SignInOutcome/> <AttemptCountdown/>
+         <ProviderRecoveryNotice/>
+         <ProviderFactList/>  <ProviderBillingSection/>  <ProviderDiagnostics/>
+```
 
-- **Anatomy:**
-  - 32px provider mark;
-  - name + badge ("Early Access", existing);
-  - instance label when there are multiple instances;
-  - headline (`type-body-compact`) + sub-line (account · route, `type-meta`; email via existing `RedactedSensitiveText`);
-  - trailing primary action button (from [states §1.4](INTERACTION_STATES.md#14-overall-row-summary));
-  - chevron to detail.
-- **Sizing:** 64px row, 16px horizontal padding, `radius-lg` card in the list.
-- **States:** the summary states from [states §1.4](INTERACTION_STATES.md#14-overall-row-summary), plus checking (row-level spinner and `aria-busy`).
+| State                                                        | Owner                                                                                                            | Lifetime                                            | Persisted?                                 |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
+| Provider snapshots                                           | Existing environment provider state (snapshot subscription)                                                      | Existing                                            | Existing behavior (cache is never "fresh") |
+| E1 readiness                                                 | Derived per render by `deriveProviderReadiness`; one 15s `now` ticker per sheet                                  | Render                                              | No                                         |
+| Session scopes, connection phase and generation              | Existing `useEnvironmentSessionState`, `useEnvironmentConnectionState`                                           | Existing                                            | No                                         |
+| Sheet open, view, host                                       | URL search params (`connections`, `connectionsEnv`)                                                              | Navigation                                          | Browser history only; never ceremony data  |
+| Lifecycle mirror (state, `attemptId`, `expiresAt`, ceremony) | `providerConnectionAttempts` volatile atom family, keyed by `[environmentId, instanceId, connection generation]` | Until terminal state, expiry, or a reset-key change | **No**                                     |
+| Ceremony `handoff` (URL, user code)                          | Local state of the mounted `ProviderSignInPanel` only                                                            | While mounted and the attempt is active             | **Never**                                  |
+| Code revealed, triage filter, Diagnostics open               | Local component state                                                                                            | While mounted                                       | No                                         |
+| Launch origin (element, route)                               | Sheet controller ref                                                                                             | One opening                                         | No                                         |
+
+No component here owns execution state, writes provider configuration, or starts processes other than through `server.refreshProviders`, `server.providerAuthentication` and the existing update/enable paths.
+
+### 3.1 Pure modules (Proposed)
+
+- **`providerConnectionStatus.ts`:** `deriveProviderConnectionStatus({ readiness, lifecycle, connection, scopes, enabled, capabilityAvailable })` returns `{ group, label, tone, icon, primaryAction, subline }` per [states §1.6](INTERACTION_STATES.md#16-composite-connection-status-proposed-e3). Table-driven tests cover every fixture in [states §1.8](INTERACTION_STATES.md#18-synthetic-fixtures) and every E2 `state` × `reason`.
+- **`providerReadinessCopy.ts`:** the fact copy ([states §1.1](INTERACTION_STATES.md#11-e1-readiness-facts-delivered)), billing copy ([§1.2](INTERACTION_STATES.md#12-reported-billing-route-delivered-e1)), lifecycle copy ([§1.3](INTERACTION_STATES.md#13-e2-authentication-lifecycle-delivered)) and recovery copy ([§1.5](INTERACTION_STATES.md#15-recovery-states)). The existing `ProviderReadinessDetails` and `ProviderAuthenticationControls` move to it, so Settings and Connections never disagree.
+- **`providerConnectionsSearch.ts`:** the search-param schema. Accepts `all` or a `ProviderInstanceId`, and an `EnvironmentId`. Rejects everything else.
+- **`providerSignInCopy.ts`:** per-driver ceremony copy (Codex, Cursor, Claude, generic) and the override variable names. No commands are built from configuration values.
+
+### 3.2 `useProviderAuthenticationAttempt`: Proposed (extracted)
+
+- **Why:** the delivered `ProviderAuthenticationControls` already implements the hard parts: the `access:write` gate, reset keys over connection generation and phase, a generation guard against late replies, `inFlight` re-entry protection, client expiry and 1s status polling. E3 extracts them into one hook so the Settings control and the sheet share one implementation.
+- **Returns:** `{ status, phase: "idle" | "preparing" | "active" | "outcome", canManage, begin(ceremony), cancel(), refresh(), readStatus() }`. `status.handoff` is returned only to the mounted panel and is never copied into the attempts atom.
+- **Polling:** `status` every 1s while an attempt is visible and the document is visible; every 5s while the sheet is closed (feeding the sidebar summary); stops on a terminal state, expiry, disconnect or reset.
+- **Reset keys:** `[environmentId, instanceId, connection generation, connection phase, canManage]`. A change drops the mirror and the handoff and re-reads `status`.
+- **Errors:** a transport failure clears ceremony data and sets "Status unavailable". It never surfaces an RPC cause.
+- **Codex verifies:** the existing `ProviderAuthenticationControls.test.tsx` scenarios still pass after the extraction; new tests cover the 5s background poll, the attempts atom never containing `handoff`, and reopening during an attempt.
 
 ### 3.3 `ProviderConnectionsSheet`: Proposed
 
-- **Container:**
-  - `ui/sheet` from the right on desktop: 560px wide; `radius-xl` on the leading edge; `surfaceOverlay`.
-  - Full-screen on `compact`.
-  - Focus returns to the launcher.
-- **Sections:**
-  1. Environment header (which environment you are configuring, with a switcher if there are several environments).
-  2. "Ready", "Needs attention" and "Disabled" groups of `ProviderConnectionRow`.
-  3. "Add a provider" (existing `AddProviderInstanceDialog`).
-  4. Footer: "Checked {relative}" + "Check all" (`server.refreshProviders`) + "Advanced settings" (link to `/settings/providers`).
-- **Detail view:** pushes inside the sheet. A back button sits at the top-left. The step change uses `--motion-sheet`.
-- **Codex verifies:** this is a presentation layer over the same data as `ProviderSettingsPanel`; there is no duplicate fetch loop; the "Limited permissions" read-only state carries over.
+- **Reuses:** `ui/sheet` (`side="right"`), `ui/scroll-area`, `ui/button`.
+- **Sizing:** 600px (`--connections-sheet-width`) at 768–1919px, capped at `calc(100vw - 48px)`; 1000px two-pane (`--connections-sheet-width-wide`) at ≥1920px; full screen under 768px. `radius-xl` on the leading edge, `surfaceOverlay`, `--scrim` backdrop. Existing `max-w-md` is overridden through a variant, not a fork.
+- **Props:** none. It reads search params, environments and access through hooks.
+- **Behavior:** on open, runs the verify-on-open policy ([blueprint §2.8](SCREEN_BLUEPRINTS.md#28-primary-interactions)); records the launch origin; restores focus on close. Closing never cancels an attempt.
+- **Accessibility:** `role="dialog"`, `aria-modal="true"`, labelled by the title; focus trap; Esc closes.
+- **Codex verifies:** no route navigation or remount underneath; back-button behavior; one data source shared with `ProviderSettingsPanel` (no second fetch loop).
 
-### 3.4 `SignInHandoff`: Proposed
+### 3.4 `ProviderConnectionsScope`: Proposed
 
-- **Anatomy:**
-  - "How sign-in works for {Provider}" paragraph;
-  - command block (mono, `codeBackground`, Copy button);
-  - "Open terminal in {env}" (secondary);
-  - "I've signed in. Check again" (primary).
-- **Future slot:** a `begin/status/cancel` stepper replaces the command block when the typed auth lifecycle exists.
-- **Accessibility:** the polite live region announces the check result; Copy confirms with "Copied" for 1.5s.
-- **Must not:** auto-run commands, display tokens/device codes in logs, or open external URLs taken from server prose without a safe-URL check.
+- **Anatomy:** "Execution host" label · menu button (`ConnectionStatusDot`, monitor or cloud icon, environment label) · access chip ("Manage access" or "Read-only", `Lock`) · scope banner slot.
+- **Data:** the environment registry and session scopes. The menu lists every environment, including disconnected ones.
+- **States:** connected, connecting (spinner), disconnected (scope banner with Reconnect), older host (banner without sign-in).
 
-### 3.5 `ProviderStatusBanner`: Extend
+### 3.5 `ProviderTriageStrip`: Proposed
 
-- **Adds:** an action button matching the row's primary action ("Sign in…" opens the sheet at the provider detail; "Update"; "Check again"), keeping dismiss.
-- **Tone:** `warningSurface`/`errorSurface` with leading rule.
+- **Reuses:** `ui/toggle-group`, single select.
+- **Anatomy:** All · Ready · Needs attention · Not verified. Each item has its icon, label and tabular count.
+- **Rule:** it filters, never sorts. Disabled instances are excluded from counts. Counts come from `deriveProviderConnectionStatus`.
+- **Accessibility:** one Tab stop, arrow keys, `aria-pressed`. Each item's accessible name includes its count ("Needs attention, 1").
 
-### 3.6 Model picker readiness: Extend `ModelPickerSidebar`, `ModelPickerContent`
+### 3.6 `ProviderConnectionCard`: Proposed (composes `ProviderInstanceIcon`, `RedactedSensitiveText`)
 
-- **Adds:**
-  - an inline `ReadinessLadder` (icons only) under each instance in the picker sidebar;
-  - a billing route chip on API/cloud instances ("API billing");
-  - on custom models, the existing `isCustom` → "Unverified" chip.
-- **Rule:** an instance that is not Ready remains visible with its reason (existing `disabledReason` behavior).
+- **Anatomy:** see [blueprint §2.2](SCREEN_BLUEPRINTS.md#22-overview-screen-a). Header (identity, sub-line, status, primary action), fact grid, advisory chips. A 2px leading rule appears for `attention` and `signing-in`.
+- **Density:** `default` (164px, fact grid 3 × 2), `narrow` (fact grid 2 × 3, full-width action), `compact` (40px row: mark, name, status, action, chevron; used for other providers and the ≥1920 list pane).
+- **Props:** `connection` (the derived status plus readiness, billing and identity), `selected?`, `onOpenDetail`, `onPrimaryAction`, `density`.
+- **States:** default, hover (`surfaceRaised`), focus-visible (ring on the focused control), checking (spinner, `aria-busy`, values muted), selected (≥1920 only), skeleton.
+- **Accessibility:** `article` labelled by the provider name. The header is one button ("Codex details, Ready"). The primary action is a separate button with a full accessible name ("Sign in to Cursor on This Mac").
+- **Must not:** show ceremony data, show the plan label, or use solid violet.
+
+### 3.7 `ProviderFactGrid` / `ProviderFactList`: Proposed
+
+- **Grid** (cards): six cells (Sign-in, Account, Billing · reported, Model, Runtime, Last check). **List** (detail): the seven E1 facts as a `dl`.
+- **Cell:** label (`type-meta`, `textMuted`) over value (`type-body-compact`) with a 14px icon. Unknown values are muted and dashed-icon, never blank.
+- **Props:** `readiness`, `billingRoute`, `verifiedAt`, `fresh`, `modelLabel`, `accountEmail`, `layout`.
+- **Codex verifies:** copy comes only from `providerReadinessCopy.ts`; no raw snapshot fields are read.
+
+### 3.8 `ProviderConnectionDetail`: Proposed
+
+- **Sections:** identity header, status panel or sign-in panel, account and sign-in, readiness (`ProviderFactList`), billing, diagnostics (`ui/collapsible`, closed), Provider Settings link ([blueprint §2.3](SCREEN_BLUEPRINTS.md#23-provider-detail-screen-b)).
+- **Props:** `environmentId`, `instanceId`.
+- **Data:** readiness from the snapshot; lifecycle from `useProviderAuthenticationAttempt`; the executable path and `CLAUDE_CONFIG_DIR` from the existing instance configuration (display only).
+- **Accessibility:** focus to the heading on push; back restores focus to the card.
+
+### 3.9 `ProviderSignInPanel` and ceremony steps: Proposed
+
+- **Dispatch:** by E2 `capability` and the chosen ceremony: `BrowserHandoffStep` (Codex browser, Cursor), `DeviceCodeStep` (Codex device code), `GuidedTerminalSteps` (Claude), `SignInOutcome` (`authenticated`, `cancelled`, `failed`, `expired`), `ProviderRecoveryNotice` (everything else).
+- **Anatomy:** header (title, `AttemptCountdown`), numbered steps (`ol`), status line (`role="status"`), footer (Cancel or Stop tracking).
+- **Browser handoff:** "Open {Provider} sign-in" (`messageAction`, `ExternalLink` icon) with the parsed host name beside it. Opens only on click, through the desktop external-open bridge or `window.open` with `noopener,noreferrer`.
+- **Guided terminal:** the executable and `CLAUDE_CONFIG_DIR` rows (mono, start-truncated, Copy each) and fixed `auth login` text. **No** "Open terminal in Nebula" and no composed shell line.
+- **Must not:** render the full URL, keep `handoff` after a terminal state, auto-open a browser, or place ceremony data anywhere listed in [states §1.7](INTERACTION_STATES.md#17-ceremony-data-handling).
+- **Codex verifies:** begin, cancel and refresh carry the exact `environmentId`, `instanceId` and current `attemptId`; a response whose identity differs is discarded.
+
+### 3.10 `PrivateCodeDisplay`: Proposed
+
+- **Anatomy:** a 48px code block (`codeBackground`, `type-mono-display`) showing `••••-••••` until revealed · "Show code"/"Hide code" toggle (`Eye`/`EyeOff`, `aria-pressed`) · Copy · the warning line.
+- **Behavior:** reveal lasts while the attempt is active. Copy confirms "Copied. Paste it only at {host name}." for 2s. Expiry or a terminal state clears the value and returns to masked.
+- **Accessibility:** once revealed, the accessible name spells the code in groups. The masked state reads "Device code hidden".
+
+### 3.11 `AttemptCountdown`: Proposed
+
+- **Anatomy:** `Timer` icon + "Expires in m:ss" (`type-meta`, tabular numerals). Under 60s, `warning` tone.
+- **Accessibility:** `role="timer"`, `aria-live="off"`. A separate polite announcement fires once at 60s and once at expiry.
+- **Source:** server `expiresAt`. A local timer moves to the expired presentation without waiting for a poll.
+
+### 3.12 `ProviderRecoveryNotice`: Proposed
+
+- **Reuses:** `ui/alert`.
+- **Props:** `kind` (one of [states §1.5](INTERACTION_STATES.md#15-recovery-states)), `provider`, `host`, `onPrimary`, `onSecondary?`, `guidance?`.
+- **Rule:** icon + title + at most two sentences + primary + at most one secondary button, plus an optional inline link to Provider Settings. Permission uses `Lock` with neutral tone. Shows E2 `guidance` verbatim only for the Unsupported configuration kind.
+
+### 3.13 `ProviderStatusBanner`: Extend
+
+- **Adds:** one action matching the instance's primary action ("Sign in", "Check again", "Update"). It opens the sheet at that instance. Dismiss stays.
+- **Copy change:** replace "Sign in via the CLI to authenticate again." with the provider-specific recovery title. The banner never shows ceremony data.
+- **Tone:** `warningSurface` / `errorSurface` with a leading rule.
+
+### 3.14 Model picker readiness: Extend `ModelPickerSidebar`, `ModelPickerContent`
+
+- **Adds:** a status dot and label per instance from `deriveProviderConnectionStatus`; an "API billing" chip for `billingRoute === "api"`; "Manage connections" at the foot, opening the sheet at the highlighted instance.
+- **Rule:** an instance that is not Ready stays visible with its reason (existing `disabledReason`). Stale instances are selectable and labelled "Not verified".
+
+### 3.15 Existing settings components: Extend lightly
+
+| Component                           | Change                                                                                     | Why                                    |
+| ----------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------- |
+| `ProviderReadinessDetails`          | Consume `providerReadinessCopy.ts`. Same layout                                            | One copy source                        |
+| `ProviderAuthenticationControls`    | Consume `useProviderAuthenticationAttempt`. Same behavior; adds "Open in connections" link | One lifecycle implementation           |
+| `ProviderInstanceCard` (829 lines)  | **No growth.** Only the prop wiring needed for the two changes above                       | Avoid expanding an oversized component |
+| `ProviderSettingsPanel` (910 lines) | Accept the proposed `instance` search param to expand one card. No other change            | Deep link from the sheet               |
 
 ## 4. Execution context
 
