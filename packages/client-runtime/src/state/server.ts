@@ -731,6 +731,10 @@ export function createServerEnvironmentAtoms<R, E>(
         key: ({ environmentId }) => environmentId,
       },
     }),
+    providerAuthentication: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:provider-authentication",
+      tag: WS_METHODS.serverProviderAuthentication,
+    }),
     updateProvider: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:update-provider",
       tag: WS_METHODS.serverUpdateProvider,

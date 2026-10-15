@@ -1,3 +1,8 @@
+import {
+  makeClaudeGuidedAuthenticationFlow,
+  readClaudeAuthenticationStatus,
+} from "../providerAuthenticationFlows.ts";
+import { makeProviderAuthentication } from "../providerAuthentication.ts";
 /**
  * ClaudeDriver — `ProviderDriver` for the Claude Agent SDK runtime.
  *
@@ -19,6 +24,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -169,6 +175,20 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         processEnv,
         cwd,
       ).pipe(
+        Effect.flatMap((provider) =>
+          !provider.enabled ||
+          !provider.installed ||
+          provider.auth.billingRoute === "provider-managed"
+            ? Effect.succeed(provider)
+            : readClaudeAuthenticationStatus(effectiveConfig, processEnv).pipe(
+                Effect.timeoutOption("10 seconds"),
+                Effect.map((auth) => ({
+                  ...provider,
+                  auth: Option.isSome(auth) ? auth.value : { status: "unknown" as const },
+                })),
+                Effect.orElseSucceed(() => ({ ...provider, auth: { status: "unknown" as const } })),
+              ),
+        ),
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -203,6 +223,21 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         ),
       );
 
+      const authentication = yield* makeProviderAuthentication({
+        enabled,
+        flow: makeClaudeGuidedAuthenticationFlow(
+          Boolean(
+            processEnv.ANTHROPIC_API_KEY ||
+            processEnv.ANTHROPIC_AUTH_TOKEN ||
+            processEnv.CLAUDE_CODE_OAUTH_TOKEN ||
+            processEnv.CLAUDE_CODE_USE_BEDROCK ||
+            processEnv.CLAUDE_CODE_USE_VERTEX ||
+            processEnv.CLAUDE_CODE_USE_FOUNDRY,
+          ),
+        ),
+        refresh: Cache.invalidateAll(capabilitiesProbeCache).pipe(Effect.andThen(snapshot.refresh)),
+      });
+
       return {
         instanceId,
         driverKind: DRIVER_KIND,
@@ -214,6 +249,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
+        authentication,
         adapter,
         textGeneration,
       } satisfies ProviderInstance;

@@ -1,4 +1,8 @@
 import { ExecutionContext, GetExecutionContextInput } from "./executionContext.ts";
+import {
+  ProviderAuthenticationInput,
+  ProviderAuthenticationStatus,
+} from "./providerAuthentication.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -260,6 +264,7 @@ export const WS_METHODS = {
   serverProbe: "server.probe",
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
+  serverProviderAuthentication: "server.providerAuthentication",
   serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
   serverUpdateServerWithProgress: "server.updateServerWithProgress",
@@ -355,6 +360,12 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
     instanceId: Schema.optional(ProviderInstanceId),
   }),
   success: ServerProviderUpdatedPayload,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsServerProviderAuthenticationRpc = Rpc.make(WS_METHODS.serverProviderAuthentication, {
+  payload: ProviderAuthenticationInput,
+  success: ProviderAuthenticationStatus,
   error: EnvironmentAuthorizationError,
 });
 
@@ -1039,6 +1050,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
+  WsServerProviderAuthenticationRpc,
   WsServerUpdateProviderRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,

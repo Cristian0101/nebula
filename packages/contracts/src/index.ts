@@ -35,3 +35,4 @@ export * from "./usage.ts";
 export * from "./rpc.ts";
 
 export * from "./executionContext.ts";
+export * from "./providerAuthentication.ts";

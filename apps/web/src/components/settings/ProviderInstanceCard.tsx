@@ -2,6 +2,7 @@
 
 import type { EnvironmentId } from "@t3tools/contracts";
 import { ProviderReadinessDetails } from "./ProviderReadinessDetails";
+import { ProviderAuthenticationControls } from "./ProviderAuthenticationControls";
 import { useProviderReadiness } from "./useProviderReadiness";
 
 import {
@@ -747,6 +748,11 @@ export function ProviderInstanceCard({
         <CollapsibleContent>
           <div className="space-y-5 px-3 pb-4 pt-2 sm:px-4">
             <ProviderReadinessDetails readiness={readiness} />
+            <ProviderAuthenticationControls
+              key={`${environmentId}:${instanceId}`}
+              environmentId={environmentId}
+              instanceId={instanceId}
+            />
             <div>
               <label htmlFor={`provider-instance-${instanceId}-display-name`} className="block">
                 <span className="text-xs font-medium text-foreground">Display name</span>

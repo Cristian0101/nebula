@@ -84,6 +84,7 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
+import { makeProviderAuthenticationRpc } from "./provider/providerAuthenticationRpc.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -378,6 +379,7 @@ const makeWsRpcLayer = (
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+      const providerAuthentication = yield* makeProviderAuthenticationRpc;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
@@ -1619,6 +1621,12 @@ const makeWsRpcLayer = (
               : providerRegistry.refresh()
             ).pipe(Effect.map((providers) => ({ providers }))),
             { "rpc.aggregate": "server" },
+          ),
+        // No RPC observation wrapper: ceremony URLs/codes must not enter diagnostics or telemetry.
+        [WS_METHODS.serverProviderAuthentication]: (input) =>
+          authorizeEffect(
+            requiredScopeForRpcMethod(WS_METHODS.serverProviderAuthentication),
+            providerAuthentication(input),
           ),
         [WS_METHODS.serverUpdateProvider]: (input) =>
           observeRpcEffect(
