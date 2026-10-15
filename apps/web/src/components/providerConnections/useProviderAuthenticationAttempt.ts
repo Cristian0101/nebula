@@ -83,6 +83,7 @@ export function useProviderAuthenticationAttempt({
   const visible = useRef(foreground);
   visible.current = foreground;
   const mounted = useRef(true);
+  const operationRef = useRef<ProviderAuthenticationInput["operation"] | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -124,6 +125,7 @@ export function useProviderAuthenticationAttempt({
       const previous = useProviderConnectionAttempts.getState().attempts[key];
       if (operation === "cancel" && !previous?.attemptId) return;
       pending.set(key, { revision: sharedRevision, token });
+      operationRef.current = operation;
       setBusy(current);
       setError(null);
       if (operation === "cancel") setLocal(null);
@@ -262,7 +264,7 @@ export function useProviderAuthenticationAttempt({
     busy: busyGeneration === fence.current.generation,
     error: errorGeneration === fence.current.generation,
     phase:
-      busyGeneration === fence.current.generation
+      busyGeneration === fence.current.generation && operationRef.current === "begin"
         ? "preparing"
         : active
           ? "active"

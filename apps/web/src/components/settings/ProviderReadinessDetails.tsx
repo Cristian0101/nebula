@@ -32,7 +32,7 @@ export function ProviderReadinessDetails({ readiness }: { readonly readiness: Pr
           );
         })}
         <div className="sm:col-span-2">
-          <dt className="text-muted-foreground">Billing route</dt>
+          <dt className="text-muted-foreground">Billing route · reported</dt>
           <dd>{route}</dd>
         </div>
       </dl>

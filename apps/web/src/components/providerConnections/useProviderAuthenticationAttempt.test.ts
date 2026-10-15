@@ -322,4 +322,28 @@ describe("shared authentication lifecycle boundaries", () => {
       expect(client.execute).not.toHaveBeenCalled();
     },
   );
+  it("distinguishes passive status polling from preparing a sign-in", async () => {
+    let release!: (value: unknown) => void;
+    client.execute.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const statusRequest = render().readStatus();
+    expect(render().phase).not.toBe("preparing");
+    release({ _tag: "Success", value: idle });
+    await statusRequest;
+    client.execute.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const beginRequest = render().begin("browser");
+    expect(render().phase).toBe("preparing");
+    release({ _tag: "Success", value: waiting() });
+    await beginRequest;
+    expect(render().phase).toBe("active");
+  });
 });

@@ -3,7 +3,7 @@ import {
   useProviderAuthenticationAttempt,
   authenticationActive,
 } from "../providerConnections/useProviderAuthenticationAttempt";
-import { RECOVERY_COPY } from "../providerConnections/providerReadinessCopy";
+import { RECOVERY_COPY, LIFECYCLE_COPY } from "../providerConnections/providerReadinessCopy";
 import { ProviderHandoff } from "../providerConnections/ProviderHandoff";
 import { Button } from "../ui/button";
 
@@ -36,7 +36,7 @@ export function ProviderAuthenticationControls({
             {error
               ? "Authentication status is unavailable. Reconnect to the environment and retry."
               : status
-                ? `${status.state.replaceAll("-", " ")} — ${RECOVERY_COPY[status.reason]}`
+                ? `${LIFECYCLE_COPY[status.state]} — ${RECOVERY_COPY[status.reason]}`
                 : "Check status to verify this instance and discover its supported login flow."}
           </p>
           {status?.guidance ? <p className="text-muted-foreground">{status.guidance}</p> : null}

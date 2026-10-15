@@ -50,6 +50,11 @@ export function ProviderSignInPanel({
 }) {
   const { status, canManage, busy, error, begin, cancel, refresh, readStatus } = attempt;
   const copy = signInCopy(provider.driver);
+  const [startedHere, setStartedHere] = useState(false);
+  const start = (ceremony: Parameters<typeof begin>[0]) => {
+    setStartedHere(true);
+    void begin(ceremony);
+  };
   const active = authenticationActive(status);
   const config =
     instance?.config && typeof instance.config === "object"
@@ -70,7 +75,7 @@ export function ProviderSignInPanel({
     provider.enabled !== false;
   const preferred = remote && ceremonies.includes("device-code") ? "device-code" : ceremonies[0];
   const retry = () => {
-    if (preferred) void begin(preferred);
+    if (preferred) start(preferred);
     else void readStatus();
   };
   return (
@@ -96,7 +101,7 @@ export function ProviderSignInPanel({
           <p role="status" className="text-sm">
             {error
               ? "Status unavailable. Reconnect to the host, then retry."
-              : busy
+              : attempt.phase === "preparing"
                 ? "Preparing sign-in…"
                 : status
                   ? LIFECYCLE_COPY[status.state]
@@ -204,7 +209,7 @@ export function ProviderSignInPanel({
             </>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {status?.state === "authenticated" ? (
+              {status?.state === "authenticated" && (startedHere || status.attemptId !== null) ? (
                 <>
                   <p className="w-full text-sm">
                     Signed in on {host}. Signing in doesn't guarantee a model or included usage.
@@ -252,7 +257,7 @@ export function ProviderSignInPanel({
                         variant="outline"
                         size="sm"
                         disabled={busy}
-                        onClick={() => void begin(c)}
+                        onClick={() => start(c)}
                       >
                         {c === "device-code" ? "Use a device code instead" : "Use browser login"}
                       </Button>

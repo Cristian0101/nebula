@@ -1,3 +1,4 @@
+import { authenticationActive } from "./useProviderAuthenticationAttempt";
 import { useEffect, useRef } from "react";
 import { Link } from "@tanstack/react-router";
 import type { EnvironmentId, ProviderInstanceConfig, ServerProvider } from "@t3tools/contracts";
@@ -90,44 +91,48 @@ export function ProviderConnectionDetail({
           </p>
         </div>
       </div>
-      <section className="space-y-2 rounded-xl border p-4">
-        <p className={`text-sm font-medium ${CONNECTION_TONES[status.tone]}`}>{status.label}</p>
-        <p className="text-xs text-muted-foreground">
-          {status.subline || verificationCopy(readiness, now)}
-        </p>
-        {readiness.installed === "blocked" ? (
-          <>
-            <p className="text-sm">
-              Nebula can't find this provider's official executable on {host}. Install it or set the
-              executable path in Provider Settings.
-            </p>
-            {INSTALL_GUIDES[provider.driver] ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  void ensureLocalApi().shell.openExternal(INSTALL_GUIDES[provider.driver]!)
-                }
-              >
-                Install guide ↗
-              </Button>
-            ) : null}
-          </>
-        ) : null}
-        {readiness.modelAvailability === "blocked" ? (
-          <p className="text-sm">
-            The selected model isn't offered to this account. Choose another model in the existing
-            model picker or Provider Settings.
+      {!authenticationActive(attempt.status) && attempt.phase !== "preparing" ? (
+        <section className="space-y-2 rounded-xl border p-4">
+          <p className={`text-sm font-medium ${CONNECTION_TONES[status.tone]}`}>{status.label}</p>
+          <p className="text-xs text-muted-foreground">
+            {status.subline || verificationCopy(readiness, now)}
           </p>
-        ) : null}
-        {canOperate ? (
-          <Button size="sm" variant="outline" onClick={check}>
-            Check again
-          </Button>
-        ) : (
-          <p className="text-xs text-muted-foreground">Checking needs Operate access on {host}.</p>
-        )}
-      </section>
+          {readiness.installed === "blocked" ? (
+            <>
+              <p className="text-sm">
+                Nebula can't find this provider's official executable on {host}. Install it or set
+                the executable path in Provider Settings.
+              </p>
+              {INSTALL_GUIDES[provider.driver] ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void ensureLocalApi().shell.openExternal(INSTALL_GUIDES[provider.driver]!)
+                  }
+                >
+                  Install guide ↗
+                </Button>
+              ) : null}
+            </>
+          ) : null}
+          {readiness.modelAvailability === "blocked" ? (
+            <p className="text-sm">
+              The selected model isn't offered to this account. Choose another model in the existing
+              model picker or Provider Settings.
+            </p>
+          ) : null}
+          {canOperate ? (
+            <Button size="sm" variant="outline" onClick={check}>
+              Check again
+            </Button>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Checking needs Operate access on {host}.
+            </p>
+          )}
+        </section>
+      ) : null}
       {capability ? (
         <ProviderSignInPanel
           provider={provider}
