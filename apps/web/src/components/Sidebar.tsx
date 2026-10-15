@@ -1,3 +1,4 @@
+import { ProviderConnectionEntry } from "./providerConnections/ProviderConnectionEntry";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
@@ -3580,6 +3581,7 @@ export default function Sidebar() {
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
+      <ProviderConnectionEntry />
       <SidebarContent
         className="gap-0"
         fixedHeader={

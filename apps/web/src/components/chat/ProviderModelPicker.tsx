@@ -1,3 +1,4 @@
+import { ProviderConnectionsLink } from "../providerConnections/ProviderConnectionsContext";
 import {
   type ProviderInstanceId,
   type ProviderDriverKind,
@@ -204,6 +205,14 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             : {})}
           onInstanceModelChange={handleInstanceModelChange}
         />
+        <div className="border-t p-2">
+          <ProviderConnectionsLink
+            instanceId={activeInstanceId}
+            onOpen={() => setIsMenuOpen(false)}
+          >
+            Manage provider connections →
+          </ProviderConnectionsLink>
+        </div>
       </PopoverPopup>
     </Popover>
   );

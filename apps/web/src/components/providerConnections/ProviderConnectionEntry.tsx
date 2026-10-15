@@ -1,0 +1,110 @@
+import { useEffect, useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import type { EnvironmentId, ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
+import { deriveProviderReadiness } from "@t3tools/shared/providerReadiness";
+import { useActiveEnvironmentId } from "../../state/entities";
+import { usePrimaryEnvironmentId, useEnvironmentConnectionState } from "../../state/environments";
+import { useEnvironmentSessionState } from "../../state/session";
+import { serverEnvironment, EMPTY_SERVER_PROVIDERS } from "../../state/server";
+import { ProviderConnectionsLink } from "./ProviderConnectionsContext";
+import { deriveProviderConnectionStatus } from "./providerConnectionStatus";
+export function ProviderConnectionEntry({
+  environmentId,
+  mode = "summary",
+}: {
+  environmentId?: EnvironmentId | undefined;
+  mode?: "summary" | "toolbar";
+}) {
+  const active = useActiveEnvironmentId();
+  const primary = usePrimaryEnvironmentId();
+  const id = environmentId ?? active ?? primary;
+  return id ? <ScopedEntry environmentId={id} mode={mode} /> : null;
+}
+function ScopedEntry({
+  environmentId,
+  mode,
+}: {
+  environmentId: EnvironmentId;
+  mode: "summary" | "toolbar";
+}) {
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
+  const connection = useEnvironmentConnectionState(environmentId);
+  const session = useEnvironmentSessionState(environmentId);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const connected = connection.data?.phase === "connected" && !connection.error;
+  if (session.hasError || !session.data?.scopes?.includes("orchestration:read")) return null;
+  const statuses = providers
+    .filter((p) => p.enabled !== false)
+    .map((provider) => ({
+      provider,
+      status: deriveProviderConnectionStatus({
+        readiness: deriveProviderReadiness({
+          environmentId,
+          instanceId: provider.instanceId,
+          snapshot: { environmentId, provider },
+          connected,
+          now,
+        }),
+        connected,
+        enabled: true,
+        canManage: session.data?.scopes?.includes("access:write") === true,
+        canOperate: session.data?.scopes?.includes("orchestration:operate") === true,
+        capabilityAvailable: true,
+        now,
+      }),
+    }));
+  if (mode === "toolbar") {
+    const actionable = statuses.some(
+      ({ provider, status }) =>
+        ["codex", "cursor", "claudeAgent"].includes(provider.driver) &&
+        status.group === "attention" &&
+        status.primaryAction !== null,
+    );
+    return actionable ? (
+      <ProviderConnectionsLink environmentId={environmentId}>
+        Connect providers
+      </ProviderConnectionsLink>
+    ) : null;
+  }
+  const ready = statuses.filter((s) => s.status.group === "ready").length;
+  const attention = statuses.filter((s) => s.status.group === "attention").length;
+  return (
+    <div className="px-2 py-1">
+      <ProviderConnectionsLink environmentId={environmentId}>
+        Providers · {ready}/{statuses.length} ready
+        {attention ? ` · ${attention} need attention` : ""}
+      </ProviderConnectionsLink>
+    </div>
+  );
+}
+export function ComposerProviderRecovery({
+  provider,
+  environmentId,
+  instanceId,
+}: {
+  provider: ServerProvider | null | undefined;
+  environmentId: EnvironmentId;
+  instanceId: ProviderInstanceId;
+}) {
+  const connection = useEnvironmentConnectionState(environmentId);
+  const readiness = deriveProviderReadiness({
+    environmentId,
+    instanceId,
+    snapshot: provider ? { environmentId, provider } : undefined,
+    connected: connection.data?.phase === "connected" && !connection.error,
+    now: Date.now(),
+  });
+  return readiness.runtime === "blocked" ? (
+    <div className="flex flex-wrap items-center gap-1 px-3 pb-2 text-xs text-muted-foreground">
+      <span>{readiness.headline}</span>
+      <ProviderConnectionsLink instanceId={instanceId} environmentId={environmentId}>
+        Fix provider connection
+      </ProviderConnectionsLink>
+    </div>
+  ) : null;
+}
