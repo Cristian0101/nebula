@@ -8,6 +8,9 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { makeAntigravityTextGeneration } from "./AntigravityTextGeneration.ts";
 
+// Preserve the existing JSON bytes; struct encoding could reorder or omit persisted fields.
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
 const decodeSettings = Schema.decodeSync(AntigravitySettings);
 
 it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
@@ -60,11 +63,11 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
         const path = yield* Path.Path;
         const dir = yield* fs.makeTempDirectoryScoped({ prefix: "nebula-agy-fallback-" });
         const binary = path.join(dir, "agy");
-        const response = JSON.stringify({
+        const response = yield* encodeJson({
           structured_output: { toolAction: "Completing task" },
           response:
             '```json\n{"verdict":"approve","summary":"Reviewed"}\n```\n{"toolAction":"Completing task"}',
-        });
+        }).pipe(Effect.orDie);
         yield* fs.writeFileString(
           binary,
           ["#!/bin/sh", `printf '%s' '${response}'`, ""].join("\n"),

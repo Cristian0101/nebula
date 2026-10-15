@@ -47,6 +47,7 @@ import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
@@ -57,6 +58,9 @@ import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { MissionRunReactor, type MissionRunReactorShape } from "../Services/MissionRunReactor.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { redactQualityGateOutput } from "./TaskQualityReactor.ts";
+
+// Preserve the existing JSON bytes; struct encoding could reorder or omit persisted fields.
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const RELEVANT_EVENTS = new Set<OrchestrationEvent["type"]>([
   "mission.run.started",
@@ -899,7 +903,11 @@ const make = Effect.gen(function* () {
           architectPlan?.revisions.filter((revision) => revision.source === "human").length ?? 0,
         generatedAt: run.finalReport.generatedAt,
       });
-      if (JSON.stringify(refreshed) === JSON.stringify(run.finalReport)) return;
+      if (
+        (yield* encodeJson(refreshed).pipe(Effect.orDie)) ===
+        (yield* encodeJson(run.finalReport).pipe(Effect.orDie))
+      )
+        return;
       yield* updateRun({
         runId: run.id,
         status: "completed",
@@ -2217,10 +2225,10 @@ const make = Effect.gen(function* () {
     }
     if (
       run.swarmPolicy &&
-      (JSON.stringify(run.swarmPolicy.qualityPolicy) !==
-        JSON.stringify(project.qualityPolicy ?? null) ||
-        JSON.stringify(run.swarmPolicy.reviewPolicy) !==
-          JSON.stringify(project.reviewPolicy ?? null))
+      ((yield* encodeJson(run.swarmPolicy.qualityPolicy).pipe(Effect.orDie)) !==
+        (yield* encodeJson(project.qualityPolicy ?? null).pipe(Effect.orDie)) ||
+        (yield* encodeJson(run.swarmPolicy.reviewPolicy).pipe(Effect.orDie)) !==
+          (yield* encodeJson(project.reviewPolicy ?? null).pipe(Effect.orDie)))
     ) {
       yield* updateRun({
         runId: run.id,
@@ -2555,8 +2563,10 @@ const make = Effect.gen(function* () {
     const nextStatus = attention.length > 0 ? "attention" : "running";
     const stateChanged =
       run.status !== nextStatus ||
-      JSON.stringify(run.currentReadyTaskIds) !== JSON.stringify(scheduling.currentReadyTaskIds) ||
-      JSON.stringify(run.scheduledTaskIds) !== JSON.stringify(scheduling.scheduledTaskIds) ||
+      (yield* encodeJson(run.currentReadyTaskIds).pipe(Effect.orDie)) !==
+        (yield* encodeJson(scheduling.currentReadyTaskIds).pipe(Effect.orDie)) ||
+      (yield* encodeJson(run.scheduledTaskIds).pipe(Effect.orDie)) !==
+        (yield* encodeJson(scheduling.scheduledTaskIds).pipe(Effect.orDie)) ||
       !sameAttention(run.attention, attention);
     if (stateChanged) {
       yield* updateRun({
