@@ -327,12 +327,15 @@ function ConnectionsEnvironment({
     return () => media.removeEventListener("change", update);
   }, []);
   const lastDetail = useRef<string | null>(null);
+  const previouslyOpen = useRef(false);
   useEffect(() => {
+    const wasOpen = previouslyOpen.current;
+    previouslyOpen.current = open;
     if (selected !== "all") {
       lastDetail.current = selected;
       return;
     }
-    if (!lastDetail.current || !open) return;
+    if (!wasOpen || !lastDetail.current || !open) return;
     // Let the dialog finish recovering focus from the removed detail portal first.
     let frame = requestAnimationFrame(() => {
       frame = requestAnimationFrame(() => {

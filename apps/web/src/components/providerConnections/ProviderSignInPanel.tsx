@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { LockIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ProviderInstanceConfig, ServerProvider } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { ProviderHandoff } from "./ProviderHandoff";
@@ -93,9 +93,6 @@ export function ProviderSignInPanel({
   useEffect(() => {
     setStartedHere(false);
   }, [instance, canManage]);
-  useEffect(() => {
-    if (!status && attempt.phase !== "preparing") setStartedHere(false);
-  }, [status, attempt.phase]);
   const config =
     instance?.config && typeof instance.config === "object"
       ? (instance.config as Record<string, unknown>)
@@ -150,7 +147,7 @@ export function ProviderSignInPanel({
   const state = status?.state;
   const attemptId = status?.attemptId;
   const hasHandoff = status?.handoff !== null && status?.handoff !== undefined;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!startedHere) return;
     const target = active
       ? (panel.current?.querySelector<HTMLElement>("[data-handoff-focus='code']") ??
@@ -160,9 +157,24 @@ export function ProviderSignInPanel({
       : panel.current?.querySelector<HTMLElement>(
           "[data-sign-in-focus='done'], [data-sign-in-focus='retry']",
         );
-    (target ?? panel.current)?.focus({ preventScroll: true });
+    const focus = () => (target ?? panel.current)?.focus({ preventScroll: true });
+    focus();
+    // The dialog also recovers focus when a focused control disappears. Recover
+    // after that work only if focus is still on a fallback, never over user input.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        const focused = document.activeElement;
+        if (
+          focused === document.body ||
+          focused === panel.current ||
+          focused === panel.current?.closest("[role=dialog]")
+        )
+          focus();
+      });
+    });
+    return () => cancelAnimationFrame(frame);
   }, [state, attemptId, attempt.phase, hasHandoff, error, startedHere, active]);
-  const success = state === "authenticated" && (startedHere || attemptId != null);
+  const success = state === "authenticated" && attemptId != null;
   const retryState = state === "failed" || state === "cancelled" || state === "expired";
   const showStart =
     preferred && canBegin && (!primaryStartInStatus || retryState || state === "authenticated");
