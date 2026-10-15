@@ -1,3 +1,4 @@
+import { PaneSessionIdentity } from "./PaneSessionIdentity";
 import { resolveAgentWorkspace } from "./agentWorkspace";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -1079,9 +1080,13 @@ function PaneHeader({
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium">{pane.title}</p>
         <p className="truncate text-[10px] text-muted-foreground">
-          {task
-            ? `${task.title} · ${task.role} · ${task.status}`
-            : (originLabel ?? pane.workspacePath)}
+          {pane.agentSurface ? (
+            <PaneSessionIdentity surface={pane.agentSurface} threadId={pane.threadId} />
+          ) : task ? (
+            `${task.title} · ${task.role} · ${task.status}`
+          ) : (
+            (originLabel ?? pane.workspacePath)
+          )}
         </p>
       </div>
       <Menu>
@@ -1132,7 +1137,7 @@ function PaneHeader({
           size="micro"
           variant="outline"
           aria-label={`Open ${pane.title} Chat to attach a screenshot`}
-          title="Open the linked Chat composer to attach screenshots or other files"
+          title="Open the separate Chat conversation to attach screenshots or other files"
           onMouseDown={(event) => event.stopPropagation()}
           onClick={() => onChangePaneFormat?.("provider")}
         >

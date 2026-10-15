@@ -834,6 +834,7 @@ export function EnvironmentProviderSettings({
               ) : null;
             return (
               <ProviderInstanceCard
+                environmentId={environmentId}
                 key={row.instanceId}
                 instanceId={row.instanceId}
                 instance={row.instance}

@@ -363,7 +363,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "chatgpt");
           assert.strictEqual(status.auth.label, "ChatGPT Pro 20x Subscription");
+          assert.strictEqual(status.auth.billingRoute, "subscription");
+          assert.strictEqual(status.auth.subscriptionEntitlement, "unknown");
           assert.strictEqual(status.auth.email, "test@example.com");
+          assert.strictEqual(status.auth.accountVerified, true);
           assert.deepStrictEqual(status.models, [
             {
               slug: "gpt-live-codex",
@@ -458,6 +461,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "apiKey");
           assert.strictEqual(status.auth.label, "OpenAI API Key");
+          assert.strictEqual(status.auth.billingRoute, "api");
+          assert.strictEqual(status.auth.subscriptionEntitlement, "unknown");
         }),
       );
 
@@ -478,6 +483,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "amazonBedrock");
           assert.strictEqual(status.auth.label, "Amazon Bedrock");
+          assert.strictEqual(status.auth.billingRoute, "provider-managed");
+          assert.strictEqual(status.auth.subscriptionEntitlement, "unknown");
         }),
       );
 
@@ -1850,6 +1857,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "bedrock");
           assert.strictEqual(status.auth.label, "Amazon Bedrock");
+          assert.strictEqual(status.auth.billingRoute, "provider-managed");
+          assert.strictEqual(status.auth.subscriptionEntitlement, "unknown");
         }).pipe(
           Effect.provide(
             mockSpawnerLayer((args) => {
@@ -2057,6 +2066,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "maxplan");
           assert.strictEqual(status.auth.label, "Claude Max Subscription");
+          assert.strictEqual(status.auth.billingRoute, "subscription");
+          assert.strictEqual(status.auth.subscriptionEntitlement, "unknown");
         }).pipe(
           Effect.provide(
             mockSpawnerLayer((args) => {
@@ -2085,6 +2096,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "Claude Max Subscription");
           assert.strictEqual(status.auth.label, "Claude Max Subscription");
+          assert.strictEqual(status.auth.billingRoute, "subscription");
+          assert.strictEqual(status.auth.subscriptionEntitlement, "unknown");
         }).pipe(
           Effect.provide(
             mockSpawnerLayer((args) => {
@@ -2107,6 +2120,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "Claude Max");
           assert.strictEqual(status.auth.label, "Claude Max Subscription");
+          assert.strictEqual(status.auth.billingRoute, "subscription");
+          assert.strictEqual(status.auth.subscriptionEntitlement, "unknown");
         }).pipe(
           Effect.provide(
             mockSpawnerLayer((args) => {
@@ -2267,6 +2282,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "apiKey");
           assert.strictEqual(status.auth.label, "Claude API Key");
+          assert.strictEqual(status.auth.billingRoute, "api");
+          assert.strictEqual(status.auth.subscriptionEntitlement, "unknown");
         }).pipe(
           Effect.provide(
             mockSpawnerLayer((args) => {

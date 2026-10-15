@@ -65,6 +65,11 @@ export const hydrateCachedProvider = (input: {
     status: input.cachedProvider.status,
     auth: input.cachedProvider.auth,
     checkedAt: input.cachedProvider.checkedAt,
+    inspection: {
+      status: "cached",
+      verifiedAt: input.cachedProvider.inspection?.verifiedAt ?? null,
+    },
+    modelCatalogSource: "configuration",
     slashCommands: input.cachedProvider.slashCommands,
     skills: input.cachedProvider.skills,
   };

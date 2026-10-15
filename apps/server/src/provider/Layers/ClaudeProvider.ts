@@ -968,6 +968,16 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         status: "authenticated",
         ...(capabilities.email ? { email: capabilities.email } : {}),
         ...(authMetadata ? authMetadata : {}),
+        accountVerified: Boolean(capabilities.email),
+        billingRoute:
+          capabilities.apiProvider === "bedrock"
+            ? "provider-managed"
+            : normalizeClaudeAuthMethod(capabilities.tokenSource) === "apiKey"
+              ? "api"
+              : capabilities.subscriptionType
+                ? "subscription"
+                : "unknown",
+        subscriptionEntitlement: "unknown",
       },
       ...(versionUpgradeMessage ? { message: versionUpgradeMessage } : {}),
     },

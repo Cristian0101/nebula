@@ -53,7 +53,14 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     PubSub.shutdown,
   );
   const initialSettings = yield* input.getSettings;
-  const initialSnapshot = yield* input.initialSnapshot(initialSettings);
+  const initial = yield* input.initialSnapshot(initialSettings);
+  const initialSnapshot: ServerProvider = {
+    ...initial,
+    inspection:
+      initial.inspection?.status === "cached"
+        ? initial.inspection
+        : { status: "pending", verifiedAt: null },
+  };
   const snapshotStateRef = yield* Ref.make<ProviderSnapshotState>({
     snapshot: initialSnapshot,
     enrichmentGeneration: 0,
@@ -116,9 +123,27 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   ) {
     const forceRefresh = options?.forceRefresh === true;
     const previousSettings = yield* Ref.get(settingsRef);
-    if (!forceRefresh && !input.haveSettingsChanged(previousSettings, nextSettings)) {
+    const settingsChanged = input.haveSettingsChanged(previousSettings, nextSettings);
+    if (!forceRefresh && !settingsChanged) {
       yield* Ref.set(settingsRef, nextSettings);
       return yield* Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot));
+    }
+
+    if (settingsChanged) {
+      // A changed executable, provider home or auth configuration invalidates old evidence.
+      // Advance the existing enrichment generation so an old callback cannot restore it.
+      const pending = yield* Ref.updateAndGet(
+        snapshotStateRef,
+        (state): ProviderSnapshotState => ({
+          snapshot: {
+            ...state.snapshot,
+            inspection: { status: "pending", verifiedAt: null },
+            modelCatalogSource: "configuration",
+          },
+          enrichmentGeneration: state.enrichmentGeneration + 1,
+        }),
+      );
+      yield* PubSub.publish(changesPubSub, pending.snapshot);
     }
 
     const nextSnapshot = yield* input.checkProvider;

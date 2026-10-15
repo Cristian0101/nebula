@@ -1,7 +1,12 @@
+import { ORCHESTRATION_WS_METHODS } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import { Atom } from "effect/unstable/reactivity";
 
-import { createAtomCommandScheduler, createEnvironmentCommand } from "./runtime.ts";
+import {
+  createAtomCommandScheduler,
+  createEnvironmentCommand,
+  createEnvironmentRpcQueryAtomFamily,
+} from "./runtime.ts";
 import {
   type ArchiveThreadInput,
   type CreateThreadInput,
@@ -79,6 +84,12 @@ export function createThreadEnvironmentAtoms<R, E>(
       JSON.stringify([environmentId, input.threadId]),
   };
   return {
+    executionContext: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:queries:thread:execution-context",
+      tag: ORCHESTRATION_WS_METHODS.getExecutionContext,
+      staleTimeMs: 0,
+      refreshIntervalMs: 15_000,
+    }),
     create: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:create",
       execute: (input: CreateThreadInput) => createThread(input),

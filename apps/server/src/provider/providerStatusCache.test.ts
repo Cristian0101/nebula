@@ -175,6 +175,8 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
         status: cachedCodex.status,
         auth: cachedCodex.auth,
         checkedAt: cachedCodex.checkedAt,
+        inspection: { status: "cached", verifiedAt: null },
+        modelCatalogSource: "configuration",
         slashCommands: cachedCodex.slashCommands,
         skills: cachedCodex.skills,
         message: cachedCodex.message,

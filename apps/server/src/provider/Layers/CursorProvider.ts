@@ -715,7 +715,9 @@ function cursorSubscriptionLabel(subscriptionType: string | undefined): string |
 
 function cursorAuthMetadata(
   subscriptionType: string | undefined,
-): Pick<ServerProviderAuth, "label" | "type"> | undefined {
+):
+  | Pick<ServerProviderAuth, "label" | "type" | "billingRoute" | "subscriptionEntitlement">
+  | undefined {
   if (!subscriptionType) {
     return undefined;
   }
@@ -723,6 +725,8 @@ function cursorAuthMetadata(
   return {
     type: subscriptionType,
     label: `Cursor ${subscriptionLabel ?? toTitleCaseWords(subscriptionType)} Subscription`,
+    billingRoute: "subscription",
+    subscriptionEntitlement: "unknown",
   };
 }
 
@@ -879,6 +883,7 @@ export function parseCursorAboutOutput(result: CommandResult): CursorAboutResult
       auth: {
         status: "authenticated",
         email: userEmail,
+        accountVerified: true,
         ...authMetadata,
       },
     };
@@ -937,7 +942,7 @@ export function parseCursorAboutOutput(result: CommandResult): CursorAboutResult
   return {
     version,
     status: "ready",
-    auth: { status: "authenticated", email: userEmail },
+    auth: { status: "authenticated", email: userEmail, accountVerified: true },
   };
 }
 

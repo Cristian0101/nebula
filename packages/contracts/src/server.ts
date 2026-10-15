@@ -58,6 +58,12 @@ export const ServerProviderAuth = Schema.Struct({
   type: Schema.optional(TrimmedNonEmptyString),
   label: Schema.optional(TrimmedNonEmptyString),
   email: Schema.optional(TrimmedNonEmptyString),
+  // Provider-owned probes report these facts; clients must not parse plan labels.
+  billingRoute: Schema.optional(
+    Schema.Literals(["subscription", "api", "provider-managed", "unknown"]),
+  ),
+  accountVerified: Schema.optional(Schema.Boolean),
+  subscriptionEntitlement: Schema.optional(Schema.Literals(["verified", "unknown"])),
 });
 export type ServerProviderAuth = typeof ServerProviderAuth.Type;
 
@@ -177,6 +183,15 @@ export const ServerProvider = Schema.Struct({
   status: ServerProviderState,
   auth: ServerProviderAuth,
   checkedAt: IsoDateTime,
+  // Optional for older servers. A pending/cached snapshot is not a fresh verification.
+  inspection: Schema.optional(
+    Schema.Struct({
+      status: Schema.Literals(["pending", "completed", "cached"]),
+      verifiedAt: Schema.NullOr(IsoDateTime),
+    }),
+  ),
+  // Only a successful provider catalog query can report a complete model catalog.
+  modelCatalogSource: Schema.optional(Schema.Literals(["provider", "configuration"])),
   message: Schema.optional(TrimmedNonEmptyString),
   // Optional for back-compat: every legacy producer omits this field and
   // an absent value is interpreted as `"available"` by consumers (see
