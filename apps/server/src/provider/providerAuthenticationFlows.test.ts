@@ -15,6 +15,7 @@ import {
   makeCursorAuthenticationFlow,
   readClaudeAuthenticationStatus,
 } from "./providerAuthenticationFlows.ts";
+import { checkCodexProviderStatus } from "./Layers/CodexProvider.ts";
 
 const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decode = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
@@ -41,6 +42,49 @@ const handle = (
   });
 
 it.layer(NodeServices.layer)("official auth protocols with synthetic processes", (it) => {
+  it.effect(
+    "fresh Codex readiness refreshes managed auth without making an inference request",
+    () =>
+      Effect.gen(function* () {
+        const output = yield* Queue.unbounded<Uint8Array>();
+        const methods: string[] = [];
+        const send = (message: unknown) =>
+          Queue.offer(output, encoder.encode(encode(message) + "\n"));
+        const stdin = Sink.forEach((chunk: Uint8Array) =>
+          Effect.gen(function* () {
+            for (const line of new TextDecoder().decode(chunk).trim().split("\n")) {
+              const message = decode(line) as { id?: string; method: string; params?: unknown };
+              methods.push(message.method);
+              if (message.method === "initialize")
+                yield* send({
+                  id: message.id,
+                  result: {
+                    userAgent: "synthetic/0.153.4",
+                    codexHome: "/synthetic",
+                    platformFamily: "unix",
+                    platformOs: "linux",
+                  },
+                });
+              if (message.method === "account/read") {
+                assert.deepEqual(message.params, { refreshToken: true });
+                yield* send({
+                  id: message.id,
+                  result: { account: null, requiresOpenaiAuth: true },
+                });
+              }
+            }
+          }),
+        );
+        const spawner = ChildProcessSpawner.make(() =>
+          Effect.succeed(handle(Stream.fromQueue(output), stdin)),
+        );
+        const result = yield* checkCodexProviderStatus(codexConfig({}), undefined, {}).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        );
+        assert.equal(result.auth.status, "unauthenticated");
+        assert.deepEqual(methods, ["initialize", "initialized", "account/read"]);
+      }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
+  );
   it.effect("never copies custom Codex launch configuration into login arguments", () =>
     Effect.gen(function* () {
       let spawned = false;
