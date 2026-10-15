@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { ProviderInstanceConfig, ServerProvider } from "@t3tools/contracts";
 import { Button } from "../ui/button";
@@ -62,6 +63,11 @@ export function ProviderSignInPanel({
         : "Default configured executable";
   const configDir = typeof config.homePath === "string" ? config.homePath : "Default (not set)";
   const ceremonies = status?.ceremonies ?? [];
+  const canBegin =
+    status?.reason !== "api-override" &&
+    status?.state !== "not-installed" &&
+    status?.state !== "unsupported" &&
+    provider.enabled !== false;
   const preferred = remote && ceremonies.includes("device-code") ? "device-code" : ceremonies[0];
   const retry = () => {
     if (preferred) void begin(preferred);
@@ -105,6 +111,11 @@ export function ProviderSignInPanel({
               also take precedence.
             </p>
           ) : null}
+          {provider.driver === "claudeAgent" && status?.state === "cancelled" ? (
+            <p className="text-xs text-muted-foreground">
+              Nebula stopped tracking. Cancel the CLI sign-in yourself in your terminal.
+            </p>
+          ) : null}
           {provider.driver === "cursor" ? (
             <p className="break-all font-mono text-xs">Executable: {executable}</p>
           ) : null}
@@ -117,6 +128,22 @@ export function ProviderSignInPanel({
           {active && status ? (
             <>
               <ProviderHandoff status={status} />
+              {canManage &&
+              status &&
+              ["unsupported", "api-override", "disabled", "missing-executable"].includes(
+                status.reason,
+              ) ? (
+                <Link
+                  to="/settings/providers"
+                  search={{ instance: provider.instanceId, environment: status.environmentId }}
+                  className="text-sm underline"
+                >
+                  {status.reason === "disabled"
+                    ? "Enable in Provider Settings"
+                    : "Review in Provider Settings"}{" "}
+                  →
+                </Link>
+              ) : null}
               {provider.driver === "claudeAgent" ? (
                 <ol className="list-decimal space-y-3 pl-5 text-sm">
                   <li>Open your own terminal on {host}.</li>
@@ -124,9 +151,29 @@ export function ProviderSignInPanel({
                     Use this instance's configuration:
                     <dl className="mt-2 space-y-2 text-xs">
                       <dt className="text-muted-foreground">Executable</dt>
-                      <dd className="break-all font-mono">{executable}</dd>
+                      <dd className="break-all font-mono">
+                        {executable}{" "}
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => void navigator.clipboard.writeText(executable)}
+                        >
+                          Copy executable
+                        </Button>
+                      </dd>
                       <dt className="text-muted-foreground">CLAUDE_CONFIG_DIR</dt>
-                      <dd className="break-all font-mono">{configDir}</dd>
+                      <dd className="break-all font-mono">
+                        {configDir}{" "}
+                        {configDir !== "Default (not set)" ? (
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => void navigator.clipboard.writeText(configDir)}
+                          >
+                            Copy configuration directory
+                          </Button>
+                        ) : null}
+                      </dd>
                     </dl>
                   </li>
                   <li>
@@ -165,23 +212,38 @@ export function ProviderSignInPanel({
                   <Button size="sm" onClick={done}>
                     Done
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      document
+                        .querySelector("[data-provider-connection-readiness]")
+                        ?.scrollIntoView({ block: "start" })
+                    }
+                  >
+                    View readiness
+                  </Button>
                 </>
               ) : null}
-              {preferred &&
-              status?.reason !== "api-override" &&
-              status?.state !== "not-installed" &&
-              status?.state !== "unsupported" ? (
-                <Button size="sm" disabled={busy} onClick={retry}>
-                  {status?.state === "expired"
-                    ? "Start a new sign-in"
-                    : status?.state === "failed"
-                      ? "Try again"
-                      : preferred === "device-code"
-                        ? "Sign in with a device code"
-                        : copy.label}
+              {preferred && canBegin ? (
+                <Button
+                  size="sm"
+                  variant={status?.state === "authenticated" ? "outline" : "default"}
+                  disabled={busy}
+                  onClick={retry}
+                >
+                  {status?.state === "authenticated"
+                    ? "Sign in again"
+                    : status?.state === "expired"
+                      ? "Start a new sign-in"
+                      : status?.state === "failed"
+                        ? "Try again"
+                        : preferred === "device-code"
+                          ? "Sign in with a device code"
+                          : copy.label}
                 </Button>
               ) : null}
-              {ceremonies.length > 1
+              {canBegin && ceremonies.length > 1
                 ? ceremonies
                     .filter((c) => c !== preferred)
                     .map((c) => (

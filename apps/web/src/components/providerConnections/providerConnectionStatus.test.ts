@@ -152,6 +152,13 @@ describe("D0.2 synthetic connection fixtures", () => {
           lifecycle: { ...lifecycle, state, reason } as ProviderAuthenticationStatus,
         });
         expect(result.label).toBeTruthy();
+        expect(result.group).toBe(
+          state === "in-progress" || state === "waiting-for-user"
+            ? "signing-in"
+            : state === "verification-needed" && reason === "api-override"
+              ? "attention"
+              : "ready",
+        );
         expect(LIFECYCLE_COPY[state as keyof typeof LIFECYCLE_COPY]).toBeTruthy();
         expect(RECOVERY_COPY[reason as keyof typeof RECOVERY_COPY]).toBeTruthy();
       }
@@ -159,6 +166,30 @@ describe("D0.2 synthetic connection fixtures", () => {
       for (const state of ["verified", "blocked", "unknown"] as const)
         expect(factCopy(fact, state)).toBeTruthy();
     expect(Object.keys(BILLING_COPY)).toHaveLength(4);
+  });
+
+  it("reports a selected model missing from the fresh provider catalog", () => {
+    const readiness = deriveProviderReadiness({
+      environmentId,
+      instanceId,
+      snapshot: { environmentId, provider },
+      connected: true,
+      now,
+      selectedModel: "not-offered",
+    });
+    expect(readiness.modelAvailability).toBe("blocked");
+    expect(derive(provider, { readiness }).label).toBe("Model not offered");
+  });
+  it("does not promote configured catalogs or reported billing labels to model or entitlement proof", () => {
+    const readiness = deriveProviderReadiness({
+      environmentId,
+      instanceId,
+      snapshot: { environmentId, provider: { ...provider, modelCatalogSource: "configuration" } },
+      connected: true,
+      now,
+    });
+    expect(readiness.modelAvailability).toBe("unknown");
+    expect(readiness.subscriptionEntitlement).toBe("unknown");
   });
   it("strips handoff and guidance from the volatile mirror", () => {
     const mirrored = authenticationMetadata({

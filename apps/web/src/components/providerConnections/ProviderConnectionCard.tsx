@@ -1,4 +1,13 @@
-import { CircleCheckIcon, CircleDashedIcon, CircleXIcon, ChevronRightIcon } from "lucide-react";
+import { signInCopy } from "./providerSignInCopy";
+import {
+  CircleAlertIcon,
+  HourglassIcon,
+  WifiOffIcon,
+  CircleCheckIcon,
+  CircleDashedIcon,
+  CircleXIcon,
+  ChevronRightIcon,
+} from "lucide-react";
 import type { ServerProvider } from "@t3tools/contracts";
 import type { ProviderReadiness, ReadinessFact } from "@t3tools/shared/providerReadiness";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -31,7 +40,15 @@ export function FactValue({ fact, children }: { fact: ReadinessFact; children: R
     </span>
   );
 }
-export function ProviderFactList({ readiness }: { readiness: ProviderReadiness }) {
+export function ProviderFactList({
+  readiness,
+  modelName,
+  version,
+}: {
+  readiness: ProviderReadiness;
+  modelName?: string | undefined;
+  version?: string | undefined;
+}) {
   return (
     <dl className="divide-y divide-border">
       {READINESS_FACTS.map(([key, label]) => (
@@ -41,7 +58,13 @@ export function ProviderFactList({ readiness }: { readiness: ProviderReadiness }
         >
           <dt className="text-muted-foreground">{label}</dt>
           <dd>
-            <FactValue fact={readiness[key]}>{factCopy(key, readiness[key])}</FactValue>
+            <FactValue fact={readiness[key]}>
+              {key === "modelAvailability" && modelName
+                ? `${modelName} · ${factCopy(key, readiness[key])}`
+                : key === "installed" && readiness.installed === "verified" && version
+                  ? `Installed · v${version}`
+                  : factCopy(key, readiness[key])}
+            </FactValue>
           </dd>
         </div>
       ))}
@@ -72,6 +95,7 @@ export function ProviderConnectionCard({
   status,
   now,
   compact = false,
+  modelLabel,
   onDetails,
   onAction,
 }: {
@@ -80,10 +104,19 @@ export function ProviderConnectionCard({
   status: ConnectionStatus;
   now: number;
   compact?: boolean;
+  modelLabel?: string | undefined;
   onDetails: () => void;
   onAction: () => void;
 }) {
   const name = provider.displayName ?? provider.driver;
+  const StatusIcon = {
+    check: CircleCheckIcon,
+    alert: CircleAlertIcon,
+    waiting: HourglassIcon,
+    unverified: CircleDashedIcon,
+    off: CircleDashedIcon,
+    disconnected: WifiOffIcon,
+  }[status.icon];
   return (
     <article
       aria-label={`${name} connection`}
@@ -94,6 +127,7 @@ export function ProviderConnectionCard({
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left focus-visible:outline-2 focus-visible:outline-ring"
+          data-connection-instance={provider.instanceId}
           onClick={onDetails}
           aria-label={`${name} details, ${status.label}`}
         >
@@ -118,13 +152,15 @@ export function ProviderConnectionCard({
           <span
             className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] ${CONNECTION_TONES[status.tone]}`}
           >
-            <CircleDashedIcon aria-hidden className="size-3" />
+            <StatusIcon aria-hidden className="size-3" />
             {status.label}
           </span>
         ) : null}
         {status.actionLabel && !compact ? (
           <Button variant="outline" size="xs" onClick={onAction}>
-            {status.actionLabel}
+            {status.actionLabel === "Sign in"
+              ? signInCopy(provider.driver).label
+              : status.actionLabel}
           </Button>
         ) : null}
       </div>
@@ -153,7 +189,11 @@ export function ProviderConnectionCard({
               {BILLING_COPY[r.billingRoute]}
             </FactCell>
             <FactCell label="Model" fact={r.modelAvailability}>
-              {factCopy("modelAvailability", r.modelAvailability)}
+              {modelLabel ??
+                provider.models.find((model) => model.isDefault)?.shortName ??
+                provider.models.find((model) => model.isDefault)?.name ??
+                "Model"}{" "}
+              · {factCopy("modelAvailability", r.modelAvailability)}
             </FactCell>
             <FactCell label="Runtime" fact={r.runtime}>
               {factCopy("runtime", r.runtime)}
@@ -162,7 +202,7 @@ export function ProviderConnectionCard({
               {verificationCopy(r, now).replace("Verification expired · checked", "Expired ·")}
             </FactCell>
           </dl>
-          {status.subline && status.group !== "unverified" ? (
+          {status.subline && status.group !== "unverified" && status.group !== "ready" ? (
             <p className="px-4 pb-3 text-[11px] text-muted-foreground">{status.subline}</p>
           ) : null}
         </>

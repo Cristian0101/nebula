@@ -17,6 +17,7 @@ export type ConnectionAction =
   | "install"
   | null;
 export interface ConnectionStatus {
+  icon: "check" | "alert" | "waiting" | "unverified" | "off" | "disconnected";
   group: ConnectionGroup;
   label: string;
   subline: string;
@@ -44,7 +45,24 @@ export function deriveProviderConnectionStatus(input: {
     primaryAction: ConnectionAction = null,
     actionLabel: string | null = null,
     subline = "",
-  ): ConnectionStatus => ({ group, label, tone, primaryAction, actionLabel, subline });
+  ): ConnectionStatus => ({
+    icon: (
+      {
+        ready: "check",
+        attention: "alert",
+        "signing-in": "waiting",
+        unverified: "unverified",
+        off: "off",
+        disconnected: "disconnected",
+      } as const
+    )[group],
+    group,
+    label,
+    tone,
+    primaryAction,
+    actionLabel,
+    subline,
+  });
   if (!input.connected) return result("disconnected", "Disconnected", "muted");
   if (input.preparing || l?.state === "in-progress" || l?.state === "waiting-for-user")
     return result(
@@ -63,7 +81,7 @@ export function deriveProviderConnectionStatus(input: {
       "settings",
       "Open Provider Settings",
     );
-  if (l?.reason === "api-override")
+  if (l?.state === "verification-needed" && l.reason === "api-override")
     return result(
       "attention",
       "API credential overrides sign-in",

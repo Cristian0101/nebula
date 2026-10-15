@@ -10,12 +10,14 @@ import { Button } from "../ui/button";
 export function ProviderAuthenticationControls({
   environmentId,
   instanceId,
+  instanceRevision,
 }: {
   readonly environmentId: EnvironmentId;
   readonly instanceId: ProviderInstanceId;
+  readonly instanceRevision?: unknown;
 }) {
   const { status, busy, error, canManage, begin, cancel, refresh } =
-    useProviderAuthenticationAttempt({ environmentId, instanceId });
+    useProviderAuthenticationAttempt({ environmentId, instanceId, instanceRevision });
   const active = authenticationActive(status);
   return (
     <div className="space-y-2 text-xs" aria-label="Provider authentication">

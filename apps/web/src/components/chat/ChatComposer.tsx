@@ -3289,6 +3289,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               provider={selectedProviderStatus}
               environmentId={environmentId}
               instanceId={selectedInstanceId}
+              selectedModel={selectedModel}
             />
             <ComposerPromptLengthValidation
               message={providerInputSubmissionError ?? composerSubmissionError}
@@ -3321,6 +3322,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     </Button>
                   ) : (
                     <ProviderModelPicker
+                      environmentId={environmentId}
                       compact={isComposerFooterCompact}
                       activeInstanceId={selectedInstanceId}
                       model={selectedModelForPickerWithCustomFallback}

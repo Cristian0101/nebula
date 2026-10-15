@@ -1,3 +1,4 @@
+import { useProviderConnectionAttempts } from "./useProviderAuthenticationAttempt";
 import { useEffect, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
@@ -31,6 +32,7 @@ function ScopedEntry({
     useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
   const connection = useEnvironmentConnectionState(environmentId);
   const session = useEnvironmentSessionState(environmentId);
+  const mirror = useProviderConnectionAttempts((state) => state.attempts);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 15000);
@@ -50,6 +52,16 @@ function ScopedEntry({
           connected,
           now,
         }),
+        lifecycle:
+          mirror[
+            JSON.stringify([
+              environmentId,
+              provider.instanceId,
+              connection.data?.generation,
+              connection.data?.phase,
+              connected && session.data?.scopes?.includes("access:write") === true,
+            ])
+          ] ?? null,
         connected,
         enabled: true,
         canManage: session.data?.scopes?.includes("access:write") === true,
@@ -72,7 +84,9 @@ function ScopedEntry({
     ) : null;
   }
   const ready = statuses.filter((s) => s.status.group === "ready").length;
-  const attention = statuses.filter((s) => s.status.group === "attention").length;
+  const attention = statuses.filter(
+    (s) => s.status.group === "attention" || s.status.group === "signing-in",
+  ).length;
   return (
     <div className="px-2 py-1">
       <ProviderConnectionsLink environmentId={environmentId}>
@@ -86,15 +100,18 @@ export function ComposerProviderRecovery({
   provider,
   environmentId,
   instanceId,
+  selectedModel,
 }: {
   provider: ServerProvider | null | undefined;
   environmentId: EnvironmentId;
   instanceId: ProviderInstanceId;
+  selectedModel?: string | undefined;
 }) {
   const connection = useEnvironmentConnectionState(environmentId);
   const readiness = deriveProviderReadiness({
     environmentId,
     instanceId,
+    selectedModel,
     snapshot: provider ? { environmentId, provider } : undefined,
     connected: connection.data?.phase === "connected" && !connection.error,
     now: Date.now(),
@@ -102,7 +119,11 @@ export function ComposerProviderRecovery({
   return readiness.runtime === "blocked" ? (
     <div className="flex flex-wrap items-center gap-1 px-3 pb-2 text-xs text-muted-foreground">
       <span>{readiness.headline}</span>
-      <ProviderConnectionsLink instanceId={instanceId} environmentId={environmentId}>
+      <ProviderConnectionsLink
+        instanceId={instanceId}
+        environmentId={environmentId}
+        selectedModel={selectedModel}
+      >
         Fix provider connection
       </ProviderConnectionsLink>
     </div>

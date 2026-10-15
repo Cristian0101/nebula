@@ -17,7 +17,8 @@ import type { AuthenticationMetadata } from "./providerConnectionStatus";
 export const useProviderConnectionAttempts = create<{
   attempts: Record<string, AuthenticationMetadata>;
 }>(() => ({ attempts: {} }));
-const pending = new Set<string>();
+const pending = new Map<string, { revision: unknown; token: symbol }>();
+const owners = new Map<string, number>();
 const lastPoll = new Map<string, number>();
 export function authenticationMetadata(
   status: ProviderAuthenticationStatus,
@@ -62,6 +63,12 @@ export function useProviderAuthenticationAttempt({
     fence.current = { key, revision: instanceRevision, generation: fence.current.generation + 1 };
   }
   const generation = fence.current.generation;
+  // Settings and Connections share one command lock for the configured instance.
+  // A replacement configuration may supersede an old request.
+  const sharedRevision =
+    instanceRevision && typeof instanceRevision === "object" && "config" in instanceRevision
+      ? instanceRevision.config
+      : instanceRevision;
   const metadata = useProviderConnectionAttempts((s) => s.attempts[key]);
   const [local, setLocal] = useState<{
     generation: number;
@@ -84,10 +91,17 @@ export function useProviderAuthenticationAttempt({
     };
   }, []);
   useEffect(() => {
+    owners.set(key, (owners.get(key) ?? 0) + 1);
     setLocal(null);
     setBusy(null);
     setError(null);
     return () => {
+      const remaining = (owners.get(key) ?? 1) - 1;
+      if (remaining > 0) {
+        owners.set(key, remaining);
+        return;
+      }
+      owners.delete(key);
       useProviderConnectionAttempts.setState((s) => {
         const attempts = { ...s.attempts };
         delete attempts[key];
@@ -104,11 +118,12 @@ export function useProviderAuthenticationAttempt({
       operation: ProviderAuthenticationInput["operation"],
       ceremony?: ProviderAuthenticationInput["ceremony"],
     ) => {
-      if (!canManage || pending.has(key)) return;
       const current = fence.current.generation;
+      if (!canManage || (pending.has(key) && pending.get(key)?.revision === sharedRevision)) return;
+      const token = Symbol();
       const previous = useProviderConnectionAttempts.getState().attempts[key];
       if (operation === "cancel" && !previous?.attemptId) return;
-      pending.add(key);
+      pending.set(key, { revision: sharedRevision, token });
       setBusy(current);
       setError(null);
       if (operation === "cancel") setLocal(null);
@@ -147,7 +162,20 @@ export function useProviderAuthenticationAttempt({
           authenticationActive(value) &&
           value.expiresAt !== null &&
           Date.parse(value.expiresAt) > Date.now();
-        const sanitized = { ...value, handoff: active && visible.current ? value.handoff : null };
+        const invalidActive = authenticationActive(value) && !active;
+        const expired =
+          invalidActive && value.expiresAt !== null && Date.parse(value.expiresAt) <= Date.now();
+        const sanitized: ProviderAuthenticationStatus = {
+          ...value,
+          ...(invalidActive
+            ? {
+                state: expired ? "expired" : "verification-needed",
+                reason: expired ? "timeout" : "verification-failed",
+                expiresAt: null,
+              }
+            : {}),
+          handoff: active && visible.current ? value.handoff : null,
+        };
         useProviderConnectionAttempts.setState((s) => ({
           attempts: { ...s.attempts, [key]: authenticationMetadata(sanitized) },
         }));
@@ -158,12 +186,16 @@ export function useProviderAuthenticationAttempt({
           setError(current);
         }
       } finally {
-        pending.delete(key);
+        if (pending.get(key)?.token === token) pending.delete(key);
         if (mounted.current && fence.current.generation === current) setBusy(null);
       }
     },
-    [canManage, command, environmentId, instanceId, key, instanceRevision],
+    [canManage, command, environmentId, instanceId, key, instanceRevision, sharedRevision],
   );
+  useEffect(() => {
+    if (metadata?.reason === "stale-attempt" || metadata?.reason === "environment-mismatch")
+      void run("status");
+  }, [metadata?.reason, run]);
   const active = authenticationActive(metadata);
   useEffect(() => {
     if (!active || !metadata?.expiresAt || !canManage) return;
@@ -195,12 +227,30 @@ export function useProviderAuthenticationAttempt({
     if (!active || !canManage || errorGeneration === generation) return;
     const delay = foreground && documentVisible ? 1000 : 5000;
     const timer = window.setInterval(() => {
-      if (Date.now() - (lastPoll.get(key) ?? 0) < delay - 100 || pending.has(key)) return;
+      if (
+        (metadata?.expiresAt !== null &&
+          metadata?.expiresAt !== undefined &&
+          Date.parse(metadata.expiresAt) <= Date.now()) ||
+        Date.now() - (lastPoll.get(key) ?? 0) < delay - 100 ||
+        (pending.has(key) && pending.get(key)?.revision === sharedRevision)
+      )
+        return;
       lastPoll.set(key, Date.now());
       void run("status");
     }, delay);
     return () => window.clearInterval(timer);
-  }, [active, canManage, documentVisible, foreground, generation, errorGeneration, key, run]);
+  }, [
+    active,
+    canManage,
+    documentVisible,
+    foreground,
+    generation,
+    errorGeneration,
+    key,
+    run,
+    metadata?.expiresAt,
+    sharedRevision,
+  ]);
   const localStatus =
     canManage && foreground && local?.generation === fence.current.generation ? local.status : null;
   const status = canManage

@@ -19,6 +19,7 @@ export function ProviderConnectionDetail({
   host,
   remote,
   readiness,
+  modelLabel,
   status,
   attempt,
   canOperate,
@@ -34,6 +35,7 @@ export function ProviderConnectionDetail({
   host: string;
   remote: boolean;
   readiness: ProviderReadiness;
+  modelLabel?: string | undefined;
   status: ConnectionStatus;
   attempt: ProviderAuthenticationAttempt;
   canOperate: boolean;
@@ -47,7 +49,15 @@ export function ProviderConnectionDetail({
   useEffect(() => {
     heading.current?.focus();
   }, [provider.instanceId]);
+  const config =
+    instance?.config && typeof instance.config === "object"
+      ? (instance.config as Record<string, unknown>)
+      : {};
+  const executable =
+    typeof config.binaryPath === "string" ? config.binaryPath : "Default configured executable";
   const diagnostics = [
+    `Executable: ${executable}`,
+    `Version advisory: ${provider.versionAdvisory?.status ?? "Not reported"}`,
     `Host: ${host}`,
     `Driver: ${provider.driver}`,
     `Instance: ${provider.instanceId}`,
@@ -149,9 +159,20 @@ export function ProviderConnectionDetail({
           )}
         </div>
       </section>
-      <section>
+      <section data-provider-connection-readiness>
+        {readiness.modelAvailability === "unknown" ? (
+          <p className="mb-3 text-xs text-muted-foreground">
+            Model access is not verified. Static catalogs, custom models, stale checks and a missing
+            selection do not prove account access. Select a model in the existing picker and check
+            again.
+          </p>
+        ) : null}
         <h3 className="mb-2 text-sm font-semibold">Readiness</h3>
-        <ProviderFactList readiness={readiness} />
+        <ProviderFactList
+          readiness={readiness}
+          version={provider.version ?? undefined}
+          modelName={modelLabel}
+        />
         <p className="mt-2 text-xs text-muted-foreground">{verificationCopy(readiness, now)}</p>
       </section>
       <section className="space-y-2">
@@ -167,7 +188,7 @@ export function ProviderConnectionDetail({
           A reported plan does not verify entitlement or remaining usage. Runtime preflight does not
           verify a completed turn.
         </p>
-        <Link to="/usage" className="text-xs underline">
+        <Link to="/usage" search={{}} className="text-xs underline">
           View usage →
         </Link>
       </section>
@@ -193,7 +214,6 @@ export function ProviderConnectionDetail({
       <Link
         to="/settings/providers"
         search={{ instance: provider.instanceId, environment: environmentId }}
-        onClick={close}
         className="text-xs underline"
       >
         Open in Provider Settings →

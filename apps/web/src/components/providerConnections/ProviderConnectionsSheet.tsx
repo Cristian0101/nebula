@@ -51,8 +51,17 @@ export function ProviderConnectionsHost({ children }: { children: ReactNode }) {
   const primary = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
   const origin = useRef<HTMLElement | null>(null);
+  const [modelSelection, setModelSelection] = useState<{
+    instanceId: ProviderInstanceId;
+    environmentId: EnvironmentId;
+    model: string;
+  } | null>(null);
   const open = useCallback(
-    (instanceId?: ProviderInstanceId, environmentId?: EnvironmentId) => {
+    (instanceId?: ProviderInstanceId, environmentId?: EnvironmentId, selectedModel?: string) => {
+      const hostId = environmentId ?? active ?? primary;
+      if (instanceId && hostId && selectedModel)
+        setModelSelection({ instanceId, environmentId: hostId, model: selectedModel });
+      else if (!params.connections) setModelSelection(null);
       if (!params.connections)
         origin.current =
           document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -95,7 +104,35 @@ export function ProviderConnectionsHost({ children }: { children: ReactNode }) {
           switchHost={(id) => open(undefined, id)}
           close={close}
           origin={origin}
+          modelSelection={modelSelection}
         />
+      ) : params.connections ? (
+        <Sheet
+          open
+          onOpenChange={(value) => {
+            if (!value) close();
+          }}
+        >
+          <SheetPopup variant="connections" finalFocus={() => origin.current}>
+            <SheetHeader>
+              <SheetTitle className="text-lg">Provider Connections</SheetTitle>
+              <SheetDescription>
+                The selected execution host is no longer available. Choose a host to continue.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="space-y-2 p-6">
+              {environments.map((host) => (
+                <Button
+                  key={host.environmentId}
+                  variant="outline"
+                  onClick={() => open(undefined, host.environmentId)}
+                >
+                  {host.label}
+                </Button>
+              ))}
+            </div>
+          </SheetPopup>
+        </Sheet>
       ) : null}
     </ProviderConnectionsContext>
   );
@@ -110,6 +147,7 @@ function ConnectionsEnvironment({
   switchHost,
   close,
   origin,
+  modelSelection,
 }: {
   environment: EnvironmentPresentation;
   environments: EnvironmentPresentation[];
@@ -119,6 +157,11 @@ function ConnectionsEnvironment({
   switchHost: (id: EnvironmentId) => void;
   close: () => void;
   origin: React.RefObject<HTMLElement | null>;
+  modelSelection: {
+    instanceId: ProviderInstanceId;
+    environmentId: EnvironmentId;
+    model: string;
+  } | null;
 }) {
   const id = environment.environmentId;
   const providers =
@@ -140,12 +183,10 @@ function ConnectionsEnvironment({
   const connection = useEnvironmentConnectionState(id);
   const connected = connection.data?.phase === "connected" && !connection.error;
   const scopes =
-    connected && !session.hasError && session.data?.authenticated
-      ? (session.data.scopes ?? [])
-      : [];
+    !session.hasError && session.data?.authenticated ? (session.data.scopes ?? []) : [];
   const canRead = scopes.includes("orchestration:read");
-  const canOperate = canRead && scopes.includes("orchestration:operate");
-  const canManage = canRead && scopes.includes("access:write");
+  const canOperate = connected && canRead && scopes.includes("orchestration:operate");
+  const canManage = connected && canRead && scopes.includes("access:write");
   const capability =
     environment.serverConfig?.environment.capabilities.providerAuthentication === true;
   const refresh = useAtomCommand(serverEnvironment.refreshProviders, {
@@ -156,18 +197,22 @@ function ConnectionsEnvironment({
   const [checkMessage, setCheckMessage] = useState("");
   const refreshing = useRef(false);
   const check = useCallback(
-    async (instanceId?: ProviderInstanceId) => {
+    async (instanceId?: ProviderInstanceId, automaticIds?: readonly ProviderInstanceId[]) => {
       if (!canOperate || refreshing.current) return;
       refreshing.current = true;
       setChecking(true);
       setCheckMessage("");
       try {
-        const result = await refresh({
-          environmentId: id,
-          input: instanceId ? { instanceId } : {},
-        });
+        let succeeded = true;
+        for (const target of automaticIds ?? [instanceId]) {
+          const result = await refresh({
+            environmentId: id,
+            input: target ? { instanceId: target } : {},
+          });
+          if (result._tag !== "Success") succeeded = false;
+        }
         setCheckMessage(
-          result._tag === "Success"
+          succeeded
             ? "Provider check completed."
             : "The check couldn't finish. Reconnect and try again.",
         );
@@ -189,12 +234,19 @@ function ConnectionsEnvironment({
   }, [open]);
   const mirror = useProviderConnectionAttempts((s) => s.attempts);
   const rows = providers.map((provider) => {
+    const selectedModel =
+      modelSelection?.environmentId === id && modelSelection.instanceId === provider.instanceId
+        ? modelSelection.model
+        : provider.models.find((model) => model.isDefault)?.slug;
+    const modelLabel =
+      provider.models.find((model) => model.slug === selectedModel)?.name ?? selectedModel;
     const readiness = deriveProviderReadiness({
       environmentId: id,
       instanceId: provider.instanceId,
       snapshot: { environmentId: id, provider },
       connected,
       now,
+      selectedModel,
     });
     const key = JSON.stringify([
       id,
@@ -206,6 +258,7 @@ function ConnectionsEnvironment({
     return {
       provider,
       readiness,
+      modelLabel,
       status: deriveProviderConnectionStatus({
         readiness,
         lifecycle: mirror[key] ?? null,
@@ -220,20 +273,24 @@ function ConnectionsEnvironment({
   });
   useEffect(() => {
     if (!open || !canOperate) return;
-    const stale = providers.some(
-      (provider) =>
-        provider.enabled !== false &&
-        !deriveProviderReadiness({
-          environmentId: id,
-          instanceId: provider.instanceId,
-          snapshot: { environmentId: id, provider },
-          connected,
-          now: Date.now(),
-        }).fresh,
-    );
-    if (!stale || Date.now() - (lastAutomaticCheck.get(id) ?? 0) < 60000) return;
-    lastAutomaticCheck.set(id, Date.now());
-    void check();
+    const timestamp = Date.now();
+    const stale = providers
+      .filter(
+        (provider) =>
+          provider.enabled !== false &&
+          !deriveProviderReadiness({
+            environmentId: id,
+            instanceId: provider.instanceId,
+            snapshot: { environmentId: id, provider },
+            connected,
+            now: timestamp,
+          }).fresh &&
+          timestamp - (lastAutomaticCheck.get(`${id}:${provider.instanceId}`) ?? 0) >= 60000,
+      )
+      .map((provider) => provider.instanceId);
+    if (!stale.length || refreshing.current) return;
+    for (const instanceId of stale) lastAutomaticCheck.set(`${id}:${instanceId}`, timestamp);
+    void check(undefined, stale);
   }, [open, canOperate, providers, connected, id, check]);
   const [filter, setFilter] = useState("all");
   const [wide, setWide] = useState(
@@ -245,6 +302,25 @@ function ConnectionsEnvironment({
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
+  const lastDetail = useRef<string | null>(null);
+  useEffect(() => {
+    if (selected !== "all") {
+      lastDetail.current = selected;
+      return;
+    }
+    if (!lastDetail.current || !open) return;
+    // Let the dialog finish recovering focus from the removed detail portal first.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLButtonElement>(
+            `[data-connection-instance="${CSS.escape(lastDetail.current ?? "")}"]`,
+          )
+          ?.focus();
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selected, open]);
   const [detailTarget, setDetailTarget] = useState<HTMLDivElement | null>(null);
   const counted = rows.filter(
     (row) => row.provider.enabled !== false && row.status.group !== "disconnected",
@@ -308,11 +384,11 @@ function ConnectionsEnvironment({
           finalFocus={() => origin.current}
           aria-label="Provider Connections"
         >
-          <SheetHeader className="border-b p-5 md:p-6">
+          <SheetHeader className="border-b px-5 py-4 md:px-6">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 space-y-2">
-                <SheetTitle>Provider Connections</SheetTitle>
-                <SheetDescription>
+                <SheetTitle className="text-lg">Provider Connections</SheetTitle>
+                <SheetDescription className="sr-only">
                   Official accounts. Verified on your execution host.
                 </SheetDescription>
               </div>
@@ -341,7 +417,7 @@ function ConnectionsEnvironment({
               </div>
             </div>
           </SheetHeader>
-          <div className="space-y-3 border-b px-5 py-4 md:px-6">
+          <div className="connections-scope space-y-2 border-b px-5 py-3 md:px-6">
             <label
               className="block text-[10px] font-medium tracking-widest text-muted-foreground uppercase"
               htmlFor="connections-host"
@@ -428,7 +504,20 @@ function ConnectionsEnvironment({
                 className={`connections-body min-h-0 flex-1 overflow-y-auto ${selected !== "all" ? "connections-detail-selected" : ""}`}
               >
                 <div className="connections-list">{list}</div>
-                <div ref={setDetailTarget} className="connections-detail" />
+                <div ref={setDetailTarget} className="connections-detail">
+                  {selected !== "all" &&
+                  !providers.some((provider) => provider.instanceId === selected) ? (
+                    <div className="space-y-3 p-6">
+                      <h2 className="text-lg font-semibold">Instance unavailable</h2>
+                      <p className="text-sm text-muted-foreground">
+                        This provider instance no longer exists on {environment.label}.
+                      </p>
+                      <Button variant="outline" onClick={() => select()}>
+                        Back to all providers
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </>
           ) : (
@@ -436,10 +525,13 @@ function ConnectionsEnvironment({
           )}
           <SheetFooter className="flex-col! items-start! gap-2! px-5! md:px-6!">
             <p className="text-[10px] leading-relaxed text-muted-foreground">
-              Checks verify sign-in and runtime preflight, never a paid request. Entitlement and
-              remaining usage are separate.
+              Preflight checks never send a paid request. Entitlement and usage stay separate.
             </p>
-            <Link to="/settings/providers" onClick={close} className="text-xs underline">
+            <Link
+              to="/settings/providers"
+              search={{ environment: id }}
+              className="text-xs underline"
+            >
               Advanced Provider Settings →
             </Link>
           </SheetFooter>
@@ -463,9 +555,7 @@ function ConnectionsEnvironment({
               check={() => void check(row.provider.instanceId)}
               back={() => select()}
               close={close}
-              instance={
-                environment.serverConfig?.settings.providerInstances?.[row.provider.instanceId]
-              }
+              instance={displayInstances[row.provider.instanceId]}
             />
           ))
         : null}
@@ -476,6 +566,7 @@ function ProviderRuntime({
   provider,
   readiness,
   status,
+  modelLabel,
   environment,
   canOperate,
   capability,
@@ -489,6 +580,7 @@ function ProviderRuntime({
   instance,
 }: {
   provider: ServerProvider;
+  modelLabel?: string | undefined;
   readiness: ReturnType<typeof deriveProviderReadiness>;
   status: ReturnType<typeof deriveProviderConnectionStatus>;
   environment: EnvironmentPresentation;
@@ -524,6 +616,7 @@ function ProviderRuntime({
           host={environment.label}
           remote={environment.entry.target._tag !== "PrimaryConnectionTarget"}
           readiness={readiness}
+          modelLabel={modelLabel}
           status={status}
           attempt={attempt}
           canOperate={canOperate}

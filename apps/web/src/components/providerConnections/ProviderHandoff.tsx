@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ProviderAuthenticationStatus } from "@t3tools/contracts";
 import { ensureLocalApi } from "../../localApi";
 import { Button } from "../ui/button";
@@ -12,6 +12,11 @@ function PrivateHandoff({ status }: { status: ProviderAuthenticationStatus }) {
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
   const handoff = status.handoff;
   const host = handoff ? officialHandoffHost(handoff.url, status.driver) : null;
   if (!handoff || !host || !status.expiresAt || Date.parse(status.expiresAt) <= Date.now())

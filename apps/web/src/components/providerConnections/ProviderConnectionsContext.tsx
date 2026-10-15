@@ -4,6 +4,7 @@ import { Button } from "../ui/button";
 export type OpenConnections = (
   instanceId?: ProviderInstanceId,
   environmentId?: EnvironmentId,
+  selectedModel?: string,
 ) => void;
 export const ProviderConnectionsContext = createContext<OpenConnections>(() => undefined);
 export const useOpenProviderConnections = () => useContext(ProviderConnectionsContext);
@@ -12,11 +13,13 @@ export function ProviderConnectionsLink({
   environmentId,
   children = "Provider Connections",
   onOpen,
+  selectedModel,
 }: {
   instanceId?: ProviderInstanceId | undefined;
   environmentId?: EnvironmentId | undefined;
   children?: ReactNode;
   onOpen?: (() => void) | undefined;
+  selectedModel?: string | undefined;
 }) {
   const open = useOpenProviderConnections();
   return (
@@ -25,7 +28,7 @@ export function ProviderConnectionsLink({
       variant="ghost"
       onClick={() => {
         onOpen?.();
-        open(instanceId, environmentId);
+        open(instanceId, environmentId, selectedModel);
       }}
     >
       {children}
