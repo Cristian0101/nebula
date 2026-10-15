@@ -90,6 +90,7 @@ export function ProviderSignInPanel({
   const panel = useRef<HTMLElement>(null);
   const consumed = useRef(false);
   const [startedHere, setStartedHere] = useState(false);
+  const needsStatusRetry = error || (!status && !busy && provider.enabled !== false);
   const active = authenticationActive(status);
   useEffect(() => {
     setStartedHere(false);
@@ -174,7 +175,7 @@ export function ProviderSignInPanel({
       });
     });
     return () => cancelAnimationFrame(frame);
-  }, [state, attemptId, attempt.phase, hasHandoff, error, startedHere, active]);
+  }, [state, attemptId, attempt.phase, hasHandoff, error, startedHere, active, needsStatusRetry]);
   const success = state === "authenticated" && attemptId != null;
   const retryState = state === "failed" || state === "cancelled" || state === "expired";
   const showStart =
@@ -206,15 +207,17 @@ export function ProviderSignInPanel({
           >
             {error
               ? "Status unavailable. Reconnect to the host, then retry."
-              : provider.enabled === false
-                ? "Enable this provider in Provider Settings to sign in."
-                : attempt.phase === "preparing"
-                  ? "Preparing sign-in…"
-                  : status
-                    ? status.state === "not-installed"
-                      ? "Provider setup required"
-                      : LIFECYCLE_COPY[status.state]
-                    : "Loading sign-in options…"}
+              : needsStatusRetry
+                ? "Sign-in options need a fresh check."
+                : provider.enabled === false
+                  ? "Enable this provider in Provider Settings to sign in."
+                  : attempt.phase === "preparing"
+                    ? "Preparing sign-in…"
+                    : status
+                      ? status.state === "not-installed"
+                        ? "Provider setup required"
+                        : LIFECYCLE_COPY[status.state]
+                      : "Loading sign-in options…"}
           </p>
           <p className="text-xs leading-relaxed text-muted-foreground">
             {provider.enabled === false
@@ -328,7 +331,7 @@ export function ProviderSignInPanel({
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {error ? (
+              {needsStatusRetry ? (
                 <Button
                   data-sign-in-focus="retry"
                   variant="outline"

@@ -308,7 +308,20 @@ function ConnectionsEnvironment({
   useEffect(() => {
     if (open) setFilter(initialFilter);
   }, [open, initialFilter]);
-  const [beginIntent, setBeginIntent] = useState<ProviderInstanceId | null>(null);
+  const [beginIntent, setBeginIntent] = useState<{
+    instanceId: ProviderInstanceId;
+    generation: unknown;
+    revision: ProviderInstanceConfig | undefined;
+  } | null>(null);
+  const validBeginIntent =
+    beginIntent !== null &&
+    connected &&
+    canManage &&
+    beginIntent.generation === connection.data?.generation &&
+    beginIntent.revision === displayInstances[beginIntent.instanceId];
+  useEffect(() => {
+    if (beginIntent && !validBeginIntent) setBeginIntent(null);
+  }, [beginIntent, validBeginIntent]);
   useEffect(() => {
     if (!open) setBeginIntent(null);
   }, [open]);
@@ -386,7 +399,15 @@ function ConnectionsEnvironment({
       onAction={() => {
         if (row.status.primaryAction === "check") void check(row.provider.instanceId);
         else {
-          setBeginIntent(row.status.primaryAction === "sign-in" ? row.provider.instanceId : null);
+          setBeginIntent(
+            row.status.primaryAction === "sign-in"
+              ? {
+                  instanceId: row.provider.instanceId,
+                  generation: connection.data?.generation,
+                  revision: displayInstances[row.provider.instanceId],
+                }
+              : null,
+          );
           select(row.provider.instanceId);
         }
       }}
@@ -621,7 +642,9 @@ function ConnectionsEnvironment({
               back={() => select()}
               close={close}
               instance={displayInstances[row.provider.instanceId]}
-              beginRequested={beginIntent === row.provider.instanceId}
+              beginRequested={
+                validBeginIntent && beginIntent?.instanceId === row.provider.instanceId
+              }
               onBeginHandled={() => setBeginIntent(null)}
             />
           ))
