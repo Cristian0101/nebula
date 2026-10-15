@@ -217,7 +217,8 @@ describe("E3.5 provider connection presentation", () => {
       />,
     );
     expect(html).toContain("/fixture/cursor</code>");
-    expect(html).toContain("Copy executable</button>");
+    expect(html).toContain('aria-label="Copy executable"');
+    expect(html).toContain(">Copy</button>");
   });
   it("masks device codes without replacing the code's accessible text", () => {
     const html = renderToStaticMarkup(

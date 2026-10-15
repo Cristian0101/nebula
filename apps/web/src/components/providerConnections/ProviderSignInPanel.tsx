@@ -54,9 +54,10 @@ function CopyValue({
           <Button
             variant="outline"
             size="xs"
+            aria-label={`Copy ${label === "CLAUDE_CONFIG_DIR" ? "configuration directory" : "executable"}`}
             onClick={() => void navigator.clipboard.writeText(value)}
           >
-            Copy {label === "CLAUDE_CONFIG_DIR" ? "configuration directory" : "executable"}
+            Copy
           </Button>
         ) : null}
       </dd>
