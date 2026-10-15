@@ -1,3 +1,4 @@
+import { ProviderService } from "./provider/Services/ProviderService.ts";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -627,18 +628,21 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ProviderRegistry.ProviderRegistry)({
-          getProviders: Effect.succeed([]),
-          refresh: () => Effect.succeed([]),
-          refreshInstance: () => Effect.succeed([]),
-          getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
-            Effect.succeed(
-              makeManualOnlyProviderMaintenanceCapabilities({ provider, packageName: null }),
-            ),
-          setProviderMaintenanceActionState: () => Effect.succeed([]),
-          streamChanges: Stream.empty,
-          ...options?.layers?.providerRegistry,
-        }),
+        Layer.mergeAll(
+          Layer.mock(ProviderService)({ listSessions: () => Effect.succeed([]) }),
+          Layer.mock(ProviderRegistry.ProviderRegistry)({
+            getProviders: Effect.succeed([]),
+            refresh: () => Effect.succeed([]),
+            refreshInstance: () => Effect.succeed([]),
+            getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+              Effect.succeed(
+                makeManualOnlyProviderMaintenanceCapabilities({ provider, packageName: null }),
+              ),
+            setProviderMaintenanceActionState: () => Effect.succeed([]),
+            streamChanges: Stream.empty,
+            ...options?.layers?.providerRegistry,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ServerSettings.ServerSettingsService)({
@@ -3397,7 +3401,22 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(wsTicketResponse.status, 200);
       const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(wsTicketBody.ticket)}`;
       const rpcError = yield* Effect.flip(
-        Effect.scoped(withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({}))),
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            Effect.gen(function* () {
+              const contextError = yield* client[ORCHESTRATION_WS_METHODS.getExecutionContext]({
+                threadId: ThreadId.make("untrusted-thread"),
+              }).pipe(
+                Effect.match({
+                  onFailure: (error) => error._tag,
+                  onSuccess: () => "unexpected-success",
+                }),
+              );
+              assert.equal(contextError, "EnvironmentAuthorizationError");
+              return yield* client[WS_METHODS.serverGetConfig]({});
+            }),
+          ),
+        ),
       );
       assert.equal(rpcError._tag, "EnvironmentAuthorizationError");
       if (rpcError._tag === "EnvironmentAuthorizationError") {

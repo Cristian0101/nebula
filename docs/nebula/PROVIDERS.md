@@ -2,6 +2,8 @@
 
 Nebula providers extend the inherited ProviderDriver SPI. Authentication, credentials, model execution, and provider-specific tools remain owned by the provider CLI. Nebula stores only non-secret configuration, the resolved binary path, normalized runtime state, and continuation metadata.
 
+See [Provider readiness and execution context](../user/provider-readiness.md) for the per-instance readiness facts, billing uncertainty, verification freshness, and Chat/Terminal identity shown in the existing UI.
+
 ## Antigravity CLI — implemented
 
 Antigravity is the supported Google first-party terminal provider for individual Google accounts. Nebula invokes the official `agy` headless interface:

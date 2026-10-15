@@ -1,3 +1,4 @@
+import { ExecutionContext, GetExecutionContextInput } from "./executionContext.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -911,6 +912,15 @@ export const WsOrchestrationGetFullThreadDiffRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationGetExecutionContextRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getExecutionContext,
+  {
+    payload: GetExecutionContextInput,
+    success: ExecutionContext,
+    error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+  },
+);
+
 export const WsOrchestrationGetTaskChangesRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getTaskChanges, {
   payload: OrchestrationRpcSchemas.getTaskChanges.input,
   success: OrchestrationRpcSchemas.getTaskChanges.output,
@@ -1123,6 +1133,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationGetTaskChangesRpc,
+  WsOrchestrationGetExecutionContextRpc,
   WsOrchestrationGetTaskFileDiffRpc,
   WsOrchestrationGetIntegrationChangesRpc,
   WsOrchestrationGetIntegrationFileDiffRpc,

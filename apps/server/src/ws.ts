@@ -1,3 +1,4 @@
+import { makeExecutionContextQuery } from "./orchestration/executionContextQuery.ts";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -365,6 +366,7 @@ const makeWsRpcLayer = (
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const taskChangeSetQuery = yield* TaskChangeSetQuery.TaskChangeSetQuery;
+      const getExecutionContext = yield* makeExecutionContextQuery;
       const keybindings = yield* Keybindings.Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
@@ -1302,6 +1304,12 @@ const makeWsRpcLayer = (
                   }),
               ),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getExecutionContext]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getExecutionContext,
+            getExecutionContext(input),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.getTaskChanges]: (input) =>

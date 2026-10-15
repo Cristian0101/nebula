@@ -489,6 +489,16 @@ function accountProbeStatus(account: CodexAppServerProviderSnapshot["account"]):
     ...(account.account?.type ? { type: account.account?.type } : {}),
     ...(authLabel ? { label: authLabel } : {}),
     ...(authEmail ? { email: authEmail } : {}),
+    accountVerified: Boolean(authEmail),
+    billingRoute:
+      account.account?.type === "chatgpt"
+        ? "subscription"
+        : account.account?.type === "apiKey"
+          ? "api"
+          : account.account?.type === "amazonBedrock"
+            ? "provider-managed"
+            : "unknown",
+    subscriptionEntitlement: "unknown",
   } satisfies ServerProvider["auth"];
 
   if (account.account) {
@@ -606,6 +616,10 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     enabled: codexSettings.enabled,
     checkedAt,
     models: snapshot.models,
+    modelCatalogSource:
+      !snapshot.account.account && snapshot.account.requiresOpenaiAuth
+        ? "configuration"
+        : "provider",
     skills: snapshot.skills,
     probe: {
       installed: true,

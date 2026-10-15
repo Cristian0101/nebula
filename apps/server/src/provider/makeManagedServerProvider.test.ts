@@ -61,6 +61,7 @@ const initialSnapshot: ServerProvider = {
   auth: { status: "unknown" },
   checkedAt: "2026-04-10T00:00:00.000Z",
   message: "Checking provider availability...",
+  inspection: { status: "pending", verifiedAt: null },
   models: [],
   slashCommands: [],
   skills: [],
@@ -75,6 +76,7 @@ const refreshedSnapshot: ServerProvider = {
   status: "ready",
   auth: { status: "authenticated" },
   checkedAt: "2026-04-10T00:00:01.000Z",
+  inspection: { status: "completed", verifiedAt: "2026-04-10T00:00:01.000Z" },
   models: [],
   slashCommands: [],
   skills: [],
@@ -318,6 +320,7 @@ describe("makeManagedServerProvider", () => {
         const checkCalls = yield* Ref.make(0);
         const releaseInitialCheck = yield* Deferred.make<void>();
         const releaseSettingsCheck = yield* Deferred.make<void>();
+        const settingsCheckStarted = yield* Deferred.make<void>();
         const provider = yield* makeManagedServerProvider<TestSettings>({
           maintenanceCapabilities,
           getSettings: Ref.get(settingsRef),
@@ -328,13 +331,16 @@ describe("makeManagedServerProvider", () => {
             Effect.flatMap((count) =>
               count === 1
                 ? Deferred.await(releaseInitialCheck).pipe(Effect.as(refreshedSnapshot))
-                : Deferred.await(releaseSettingsCheck).pipe(Effect.as(refreshedSnapshotSecond)),
+                : Deferred.succeed(settingsCheckStarted, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseSettingsCheck)),
+                    Effect.as(refreshedSnapshotSecond),
+                  ),
             ),
           ),
           refreshInterval: "1 hour",
         });
 
-        const updatesFiber = yield* Stream.take(provider.streamChanges, 2).pipe(
+        const updatesFiber = yield* Stream.take(provider.streamChanges, 3).pipe(
           Stream.runCollect,
           Effect.forkChild,
         );
@@ -343,12 +349,25 @@ describe("makeManagedServerProvider", () => {
         yield* Deferred.succeed(releaseInitialCheck, undefined);
         yield* Ref.set(settingsRef, { enabled: false });
         yield* PubSub.publish(settingsChanges, { enabled: false });
+        yield* Deferred.await(settingsCheckStarted);
+        assert.deepStrictEqual((yield* provider.getSnapshot).inspection, {
+          status: "pending",
+          verifiedAt: null,
+        });
         yield* Deferred.succeed(releaseSettingsCheck, undefined);
 
         const updates = Array.from(yield* Fiber.join(updatesFiber));
         const latest = yield* provider.getSnapshot;
 
-        assert.deepStrictEqual(updates, [refreshedSnapshot, refreshedSnapshotSecond]);
+        assert.deepStrictEqual(updates, [
+          refreshedSnapshot,
+          {
+            ...refreshedSnapshot,
+            inspection: { status: "pending", verifiedAt: null },
+            modelCatalogSource: "configuration",
+          },
+          refreshedSnapshotSecond,
+        ]);
         assert.deepStrictEqual(latest, refreshedSnapshotSecond);
         assert.strictEqual(yield* Ref.get(checkCalls), 2);
       }),

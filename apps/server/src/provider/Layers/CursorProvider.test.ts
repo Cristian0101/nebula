@@ -534,6 +534,9 @@ describe("parseCursorAboutOutput", () => {
         email: "jmarminge@gmail.com",
         type: "Team",
         label: "Cursor Team Subscription",
+        billingRoute: "subscription",
+        accountVerified: true,
+        subscriptionEntitlement: "unknown",
       },
     });
   });

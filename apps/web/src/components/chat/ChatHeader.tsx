@@ -1,3 +1,4 @@
+import { ExecutionContextDetails } from "./ExecutionContextDetails";
 import {
   type EnvironmentId,
   type EditorId,
@@ -380,6 +381,12 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
+        {isServerThread ? (
+          <ExecutionContextDetails
+            environmentId={activeThreadEnvironmentId}
+            threadId={activeThreadId}
+          />
+        ) : null}
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}

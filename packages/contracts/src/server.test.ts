@@ -9,6 +9,7 @@ import {
 } from "./server.ts";
 
 const decodeServerProvider = Schema.decodeUnknownSync(ServerProvider);
+const encodeServerProviderJson = Schema.encodeSync(Schema.fromJsonString(ServerProvider));
 const decodeServerProviders = Schema.decodeUnknownSync(ServerProviders);
 const decodeUpsertKeybindingResult = Schema.decodeUnknownSync(ServerUpsertKeybindingResult);
 const decodeAvailableEditors = Schema.decodeUnknownSync(ServerConfig.fields.availableEditors);
@@ -26,6 +27,46 @@ const baseProviderSnapshot = {
 };
 
 describe("ServerProvider", () => {
+  it("serializes readiness evidence without provider credential or continuation fields", () => {
+    const parsed = decodeServerProvider({
+      ...baseProviderSnapshot,
+      auth: {
+        status: "authenticated",
+        billingRoute: "subscription",
+        accountVerified: true,
+        subscriptionEntitlement: "unknown",
+        accessToken: "synthetic-access-marker",
+        refreshToken: "synthetic-refresh-marker",
+        credentials: { secret: "synthetic-credential-marker" },
+      },
+      resumeCursor: { token: "synthetic-continuation-marker" },
+      inspection: { status: "completed", verifiedAt: baseProviderSnapshot.checkedAt },
+      modelCatalogSource: "provider",
+    });
+    const serialized = encodeServerProviderJson(parsed);
+    expect(JSON.parse(serialized)).toMatchObject({
+      auth: {
+        billingRoute: "subscription",
+        accountVerified: true,
+        subscriptionEntitlement: "unknown",
+      },
+      inspection: { status: "completed" },
+      modelCatalogSource: "provider",
+    });
+    for (const excluded of [
+      "accessToken",
+      "refreshToken",
+      "credentials",
+      "resumeCursor",
+      "synthetic-access-marker",
+      "synthetic-refresh-marker",
+      "synthetic-credential-marker",
+      "synthetic-continuation-marker",
+    ]) {
+      expect(serialized).not.toContain(excluded);
+    }
+  });
+
   it("defaults capability arrays when decoding provider snapshots", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex",

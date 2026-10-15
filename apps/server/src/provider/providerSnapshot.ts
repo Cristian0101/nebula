@@ -222,6 +222,7 @@ export function buildServerProvider(input: {
   slashCommands?: ReadonlyArray<ServerProviderSlashCommand>;
   skills?: ReadonlyArray<ServerProviderSkill>;
   probe: ProviderProbeResult;
+  modelCatalogSource?: ServerProvider["modelCatalogSource"];
 }): ServerProviderDraft {
   const versionAdvisory = input.driver
     ? createProviderVersionAdvisory({
@@ -245,6 +246,11 @@ export function buildServerProvider(input: {
     status: input.enabled ? input.probe.status : "disabled",
     auth: input.probe.auth,
     checkedAt: input.checkedAt,
+    inspection: {
+      status: input.enabled ? "completed" : "pending",
+      verifiedAt: input.enabled ? input.checkedAt : null,
+    },
+    modelCatalogSource: input.modelCatalogSource ?? "configuration",
     ...(input.probe.message ? { message: input.probe.message } : {}),
     models: input.models,
     slashCommands: [...(input.slashCommands ?? [])],

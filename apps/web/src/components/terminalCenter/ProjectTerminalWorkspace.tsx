@@ -1,3 +1,4 @@
+import { PaneSessionIdentity } from "./PaneSessionIdentity";
 import { resolveAgentWorkspace } from "./agentWorkspace";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -1060,7 +1061,7 @@ function PaneHeader({
     pane.agentSurface === "terminal" && hasAgentIdentity && Boolean(onChangePaneFormat);
   return (
     <div
-      className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border/70 bg-muted/20 px-1.5"
+      className={`flex shrink-0 items-center gap-1.5 border-b border-border/70 bg-muted/20 px-1.5 ${pane.agentSurface ? "min-h-10 flex-wrap py-1" : "h-10"}`}
       onMouseDown={onSelect}
     >
       <button
@@ -1078,11 +1079,13 @@ function PaneHeader({
       </span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium">{pane.title}</p>
-        <p className="truncate text-[10px] text-muted-foreground">
-          {task
-            ? `${task.title} · ${task.role} · ${task.status}`
-            : (originLabel ?? pane.workspacePath)}
-        </p>
+        {!pane.agentSurface ? (
+          <p className="truncate text-[10px] text-muted-foreground">
+            {task
+              ? `${task.title} · ${task.role} · ${task.status}`
+              : (originLabel ?? pane.workspacePath)}
+          </p>
+        ) : null}
       </div>
       <Menu>
         <MenuTrigger
@@ -1132,7 +1135,7 @@ function PaneHeader({
           size="micro"
           variant="outline"
           aria-label={`Open ${pane.title} Chat to attach a screenshot`}
-          title="Open the linked Chat composer to attach screenshots or other files"
+          title="Open the separate Chat conversation to attach screenshots or other files"
           onMouseDown={(event) => event.stopPropagation()}
           onClick={() => onChangePaneFormat?.("provider")}
         >
@@ -1226,6 +1229,11 @@ function PaneHeader({
       >
         <XIcon />
       </Button>
+      {pane.agentSurface ? (
+        <p className="w-full px-0.5 text-[10px] text-muted-foreground">
+          <PaneSessionIdentity surface={pane.agentSurface} threadId={pane.threadId} />
+        </p>
+      ) : null}
     </div>
   );
 }

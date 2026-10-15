@@ -38,8 +38,7 @@ export function getProviderSummary(provider: ServerProvider | undefined) {
   if (!provider.enabled) {
     return {
       headline: "Disabled",
-      detail:
-        provider.message ?? "This provider is installed but disabled for new sessions in Nebula.",
+      detail: provider.message ?? "This provider is disabled for new sessions in Nebula.",
     };
   }
   if (!provider.installed) {
@@ -76,7 +75,8 @@ export function getProviderSummary(provider: ServerProvider | undefined) {
   }
   return {
     headline: "Available",
-    detail: provider.message ?? "Installed and ready, but authentication could not be verified.",
+    detail:
+      provider.message ?? "CLI detected; authentication and runtime access have not been verified.",
   };
 }
 

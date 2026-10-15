@@ -1,5 +1,9 @@
 "use client";
 
+import type { EnvironmentId } from "@t3tools/contracts";
+import { ProviderReadinessDetails } from "./ProviderReadinessDetails";
+import { useProviderReadiness } from "./useProviderReadiness";
+
 import {
   ArrowUpCircleIcon,
   ChevronDownIcon,
@@ -320,6 +324,7 @@ function ProviderEnvironmentSection(props: {
 }
 
 interface ProviderInstanceCardProps {
+  readonly environmentId: EnvironmentId;
   readonly instanceId: ProviderInstanceId;
   readonly instance: ProviderInstanceConfig;
   readonly driverOption: DriverOption | undefined;
@@ -375,6 +380,7 @@ interface ProviderInstanceCardProps {
  *     false wins, then envelope, then config, then the driver default).
  */
 export function ProviderInstanceCard({
+  environmentId,
   instanceId,
   instance,
   driverOption,
@@ -394,20 +400,33 @@ export function ProviderInstanceCard({
   isUpdating = false,
 }: ProviderInstanceCardProps) {
   const enabled = resolveProviderInstanceEnabled(instance);
+  const readiness = useProviderReadiness(environmentId, instanceId, liveProvider);
   // The server-reported status wins when present; otherwise fall back to
   // "disabled"/"warning" based on the local `enabled` flag so the dot
   // reflects the persisted intent even before the first probe completes.
-  const statusKey: ProviderStatusKey =
-    (liveProvider?.status as ProviderStatusKey | undefined) ?? (enabled ? "warning" : "disabled");
+  const statusKey: ProviderStatusKey = !enabled
+    ? "disabled"
+    : readiness.runtime === "blocked"
+      ? "error"
+      : readiness.runtime === "verified"
+        ? "ready"
+        : "warning";
   const statusStyle = PROVIDER_STATUS_STYLES[statusKey];
   const rawSummary = getProviderSummary(liveProvider);
   const authEmail = liveProvider?.auth.email;
   const hasAuthenticatedEmail =
-    liveProvider?.auth.status === "authenticated" && Boolean(authEmail?.trim());
+    readiness.authentication === "verified" && Boolean(authEmail?.trim());
   const authenticatedDetail = hasAuthenticatedEmail
     ? (liveProvider?.auth.label ?? liveProvider?.auth.type ?? null)
     : null;
-  const summary = rawSummary;
+  const summary = {
+    headline: readiness.headline,
+    detail: !enabled
+      ? "This provider is disabled for new sessions in Nebula."
+      : readiness.fresh
+        ? rawSummary.detail
+        : "Check again to verify current installation, sign-in, and billing.",
+  };
   const versionLabel = getProviderVersionLabel(liveProvider?.version);
   const versionAdvisory = getProviderVersionAdvisoryPresentation(liveProvider?.versionAdvisory);
   const updateCommand = versionAdvisory?.updateCommand ?? null;
@@ -580,14 +599,13 @@ export function ProviderInstanceCard({
     <p className="flex min-w-0 flex-wrap items-center gap-x-1 text-[13px] leading-[1.45] text-muted-foreground/80">
       {hasAuthenticatedEmail ? (
         <>
-          <span>Authenticated as</span>
+          <span>{summary.headline} · Account:</span>
           <ProviderAuthEmail email={authEmail} />
           {authenticatedDetail ? <span>· {authenticatedDetail}</span> : null}
         </>
       ) : (
         <>
           <span>{summary.headline}</span>
-          <ProviderAuthEmail email={authEmail} separator prefix="Email" />
         </>
       )}
       {summary.detail ? <span>- {summary.detail}</span> : null}
@@ -728,6 +746,7 @@ export function ProviderInstanceCard({
       <Collapsible open={isExpanded} onOpenChange={onExpandedChange}>
         <CollapsibleContent>
           <div className="space-y-5 px-3 pb-4 pt-2 sm:px-4">
+            <ProviderReadinessDetails readiness={readiness} />
             <div>
               <label htmlFor={`provider-instance-${instanceId}-display-name`} className="block">
                 <span className="text-xs font-medium text-foreground">Display name</span>
