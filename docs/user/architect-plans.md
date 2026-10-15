@@ -6,6 +6,20 @@ Architect plans turn a high-level engineering objective into a reviewable Missio
 
 Generation requires a clean Git repository and records the exact HEAD commit. Nebula sends a bounded context package: a limited-depth tree, selected small text files, project quality/review policy, and enabled Shared Resources. Protected paths, environment files, credentials, binaries, large files, build output, dependency trees, and Git internals are excluded. Repository text is evidence, not policy, and cannot override Nebula's schema or human approval boundary.
 
+Environment protection covers `.env`, all `.env.*` variants (including examples), `.envrc` variants,
+and nested copies. The same path rule excludes credential directories and files, provider state,
+and private-key filenames from file selection and tree discovery. A protected or unsafe explicit
+context path fails generation; remove it and retry. Linked files, paths beneath linked directories,
+and hard-linked files are omitted, including when they replace default context such as `README.md`.
+Ordinary small repository text remains available. Known credential assignments, tokens and private-key
+blocks in otherwise readable text are redacted before reaching the Planner.
+
+Replanning reads canonical Mission evidence rather than repository files, and redacts its bounded
+model context. Existing saved proposals and approved Mission evidence remain history after a context
+protection update. Regenerate proposals to obtain new context evidence; use the existing approved
+Replan/review recovery workflow for Mission changes. Protection does not retroactively remove any
+previously exposed information from historical artifacts.
+
 The result is a separate durable proposal, not a Mission. It contains proposed Tasks, roles, reviewer assignments, named checkpoints, observable acceptance criteria, dependency edges, write/read/deny ownership, existing Shared Resource requirements, advisory provider recommendations, assumptions, risks, unresolved questions, and resource-policy gaps. Deterministic validation checks team bounds, checkpoint references, approved gate IDs, canonical ownership syntax, known resources, unique Task keys, and the canonical Mission DAG. Warnings identify broad/overlapping writes without pretending those cases are always invalid.
 
 Generation state is durable and truthful. Nebula records repository validation, context preparation, provider start, provider work, decoding, validation, readiness, cancellation, staleness, and classified failures. It does not expose hidden model reasoning. The UI shows the current phase, elapsed time, Planner identity, attempt history, and retained diagnostics.

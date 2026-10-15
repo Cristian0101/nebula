@@ -6,6 +6,60 @@
 
 Every human Plan edit appends a validated revision with a version, source, timestamp, and reason. A deterministic revision diff is presentation data derived from two persisted versions. Approval materializes only the current proposal; previous versions never contribute Tasks to the Mission.
 
+### Architect context protection
+
+`ArchitectPlanGeneration.ts` owns the shared protected-component rule for selected files and the
+bounded repository tree. Environment files (`.env`, every `.env.*`, `.envrc` and `.envrc.*`), credential
+files/directories, provider state, private-key filenames, Git internals, dependencies and build output
+are excluded at any repository depth. This intentionally excludes environment examples as well.
+Explicit protected/traversal/absolute requests fail before file reads or provider invocation with a
+generic diagnostic; they never trigger a fallback read. Both slash styles are checked, and canonical
+relative paths are checked again after normalization.
+
+The component policy is case-insensitive and applies below the repository root:
+
+| Class                                 | Excluded paths                                                                                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Environment                           | `.env`, `.env.*`, `.envrc`, `.envrc.*`                                                                                                           |
+| Credential names                      | `credential`, `credentials`, `secret`, `secrets`, `token`, `tokens`, including dot-suffixed variants and directories                             |
+| Credential files                      | `.netrc`, `.npmrc`, `.pypirc`, `.git-credentials`, `.dockercfg`                                                                                  |
+| Credential/provider state directories | `.ssh`, `.aws`, `.azure`, `.gnupg`, `.kube`, `.docker`, `.codex`, `.claude`, `.cursor`, `.gemini`, `.grok`, `.opencode`, `.t3`                   |
+| Other credential locations            | `.config/gcloud`, `.config/gh`, `.config/opencode`, `.local/share/opencode`                                                                      |
+| Key filenames                         | `id_` followed by letters, digits, underscores or hyphens; extensions `.pem`, `.key`, `.p8`, `.p12`, `.pfx`, `.der`, `.ppk`, `.jks`, `.keystore` |
+| Repository internals/output           | `.git`, `node_modules`, `dist`, `build`, `coverage`                                                                                              |
+
+The inherited environment expression consumed only the dot in `.env.local` and then required a path
+boundary, permitting the remaining suffix to bypass the filter. The inherited file collector also
+checked only the final component for symlinks, allowing a selected file beneath a linked parent to
+escape. Collection now resolves the repository root with Effect FileSystem/Path, checks every
+relative component for links, and requires the final real path to equal the expected path beneath
+that root. Linked files, linked parents, dangling links and multiply linked files (when link-count
+metadata is available) are omitted from both context surfaces. A platform alias of the repository
+root itself remains supported.
+
+Selected text is redacted with the shared credential/private-key redactor before model use. The
+64 KiB per-file and 256 KiB aggregate limits are byte-based; the aggregate includes file headers and
+separators. The tree retains its 300-entry and depth limits. Replanning performs no repository reads:
+it uses bounded canonical Mission evidence, now redacting all string values, including nested review,
+resource and contract evidence, before serialization and its 64 KiB byte limit. Provider failure
+diagnostics retain redacted messages and classifications without retaining raw provider causes.
+
+The context-fingerprint algorithm and JSON field ordering are unchanged. Future planning fingerprints
+can differ because protected/link tree entries and selected paths are removed. File-evidence bytes
+can differ because of redaction and the stricter aggregate budget; the existing planning fingerprint
+records commit/tree/selected paths/resources, not a separate hash of file text. Resource fingerprints
+are unchanged for unchanged resources. Replan fingerprints reflect the redacted model-bound evidence.
+Safe-input golden fingerprints remain unchanged. Historical events, approved plans and Mission/review
+artifacts are never rewritten or relabeled as regenerated evidence by this correction.
+
+Regenerate an unapproved pre-correction proposal when fresh protected-context evidence is needed;
+an unsafe saved context selection must first be removed. Existing approved Mission changes still
+require the canonical human-approved Replan/apply path: started or terminal Tasks remain immutable,
+affected Task context/reviews require their existing recovery/freshness gates, and integration retains
+its snapshot and eligibility checks. This patch adds no automatic historical invalidation or recovery
+approval. It also does not sandbox a hostile process racing filesystem changes, identify opaque
+secrets copied into arbitrary safe files, or purge secrets from historical evidence.
+
 ## Core architectural thesis
 
 Nebula is not fundamentally a terminal manager, chatbot, or model router. Nebula is:
