@@ -50,6 +50,9 @@ import {
   makeClaudeAdapter,
   type ClaudeAdapterLiveOptions,
 } from "./ClaudeAdapter.ts";
+// Preserve the existing JSON bytes; struct encoding could reorder or omit persisted fields.
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
@@ -365,7 +368,9 @@ describe("ClaudeAdapterLive", () => {
       });
 
       const options = harness.getLastCreateQueryInput()?.options;
-      const serializedMcpConfig = JSON.stringify({ mcpServers: options?.mcpServers });
+      const serializedMcpConfig = yield* encodeJson({ mcpServers: options?.mcpServers }).pipe(
+        Effect.orDie,
+      );
       assert.equal(serializedMcpConfig.includes(secret), false);
       const mcpServer = options?.mcpServers?.["t3-code"];
       assert.equal(

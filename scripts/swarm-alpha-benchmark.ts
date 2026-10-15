@@ -4,6 +4,8 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import * as Console from "effect/Console";
+import * as Effect from "effect/Effect";
 
 const repoRoot = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 const fixtureSource = NodePath.join(repoRoot, "apps/server/integration/fixtures/swarm-alpha");
@@ -80,18 +82,20 @@ if (
   throw new Error("The Swarm Alpha fixture no longer matches its four-Task acceptance contract.");
 }
 
-console.log(
-  JSON.stringify(
-    {
-      status: "PASS",
-      scope: "deterministic-only",
-      fixtureRepository: resolvedTempRoot,
-      baseline: "PASS",
-      preImplementationIntegrationGate: "EXPECTED_FAIL",
-      orchestrationPolicyTests: "PASS",
-      liveProviderCoverage: false,
-    },
-    null,
-    2,
+Effect.runSync(
+  Console.log(
+    JSON.stringify(
+      {
+        status: "PASS",
+        scope: "deterministic-only",
+        fixtureRepository: resolvedTempRoot,
+        baseline: "PASS",
+        preImplementationIntegrationGate: "EXPECTED_FAIL",
+        orchestrationPolicyTests: "PASS",
+        liveProviderCoverage: false,
+      },
+      null,
+      2,
+    ),
   ),
 );

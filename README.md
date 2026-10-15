@@ -14,12 +14,12 @@ Open source makes the coordination policy inspectable and adaptable. Developers 
 
 T3 Code provides the execution harness that Nebula extends. Nebula's contribution is the coordination layer over those existing provider, Thread, Git, and persistence primitives:
 
-| Developer need | Nebula contribution | Guide |
-| --- | --- | --- |
-| Divide work without losing ownership | Tasks, isolated worktrees, and declared path ownership | [Project contract](docs/nebula/PROJECT_CONTRACT.md) |
-| Coordinate dependent changes | Missions, dependency scheduling, and shared-resource leases | [Shared Resources](docs/user/shared-resources.md) |
-| Supervise a team of agents | Human-approved plans, bounded recovery, and independent review | [Architect plans](docs/user/architect-plans.md) |
-| Inspect the combined result | Integration in a separate worktree with final validation | [Architecture](docs/nebula/ARCHITECTURE.md) |
+| Developer need                       | Nebula contribution                                            | Guide                                               |
+| ------------------------------------ | -------------------------------------------------------------- | --------------------------------------------------- |
+| Divide work without losing ownership | Tasks, isolated worktrees, and declared path ownership         | [Project contract](docs/nebula/PROJECT_CONTRACT.md) |
+| Coordinate dependent changes         | Missions, dependency scheduling, and shared-resource leases    | [Shared Resources](docs/user/shared-resources.md)   |
+| Supervise a team of agents           | Human-approved plans, bounded recovery, and independent review | [Architect plans](docs/user/architect-plans.md)     |
+| Inspect the combined result          | Integration in a separate worktree with final validation       | [Architecture](docs/nebula/ARCHITECTURE.md)         |
 
 See the [upstream policy](UPSTREAM.md) for attribution and intentional divergence.
 

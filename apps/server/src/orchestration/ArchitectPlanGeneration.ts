@@ -1,7 +1,4 @@
 import * as NodeCrypto from "node:crypto";
-import * as NodeFSP from "node:fs/promises";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
 import {
   ArchitectReplanGenerationDraft,
   ArchitectMissionGenerationDraft,
@@ -24,9 +21,15 @@ import { validateArchitectPlan } from "@t3tools/shared/architectPlan";
 import { redactSensitiveText } from "@t3tools/shared/redaction";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
+
+// Preserve the existing JSON bytes; struct encoding could reorder or omit persisted fields.
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const MAX_CONTEXT_BYTES = 256 * 1024;
 const MAX_FILE_BYTES = 64 * 1024;
@@ -189,19 +192,20 @@ export const generateArchitectReplan = Effect.fn("generateArchitectReplan")(func
     `REPLAN PROPOSAL ID\n${input.proposal.id}`,
     `BOUNDED CANONICAL CONTEXT\n${context.text}`,
   ].join("\n\n");
-  const executionCwd = yield* Effect.tryPromise({
-    try: () => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "nebula-architect-replan-")),
-    catch: (cause) =>
-      new ArchitectPlanGenerationError({
-        message: "Could not create the isolated Architect replan directory.",
-        category: "unknown",
-        cause,
-      }),
-  });
-  const removeExecutionCwd = Effect.tryPromise({
-    try: () => NodeFSP.rm(executionCwd, { recursive: true, force: true }),
-    catch: () => undefined,
-  }).pipe(Effect.ignore);
+  const fs = yield* FileSystem.FileSystem;
+  const executionCwd = yield* fs.makeTempDirectory({ prefix: "nebula-architect-replan-" }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ArchitectPlanGenerationError({
+          message: "Could not create the isolated Architect replan directory.",
+          category: "unknown",
+          cause,
+        }),
+    ),
+  );
+  const removeExecutionCwd = fs
+    .remove(executionCwd, { recursive: true, force: true })
+    .pipe(Effect.ignore);
   const modelSelection = {
     instanceId: input.modelSelection.instanceId,
     model: input.modelSelection.model,
@@ -319,7 +323,11 @@ export function normalizeGeneratedDraft(
   };
 }
 
-export function validateArchitectContextPath(root: string, requested: string): string {
+export function validateArchitectContextPath(
+  path: Path.Path,
+  root: string,
+  requested: string,
+): string {
   const normalized = requested.replaceAll("\\", "/").replace(/^\.\//, "");
   if (
     !normalized ||
@@ -329,52 +337,77 @@ export function validateArchitectContextPath(root: string, requested: string): s
   ) {
     throw new Error(`Planning context path '${requested}' is unsafe or protected.`);
   }
-  const absolute = NodePath.resolve(root, normalized);
-  const rel = NodePath.relative(root, absolute);
-  if (!rel || rel.startsWith(`..${NodePath.sep}`) || rel === "..")
+  const absolute = path.resolve(root, normalized);
+  const rel = path.relative(root, absolute);
+  if (!rel || rel.startsWith(`..${path.sep}`) || rel === "..")
     throw new Error(`Planning context path '${requested}' is outside the repository.`);
-  return rel.replaceAll(NodePath.sep, "/");
+  return rel.replaceAll(path.sep, "/");
 }
 
-export async function collectArchitectContextTree(root: string): Promise<string[]> {
+export const collectArchitectContextTree = Effect.fn("collectArchitectContextTree")(function* (
+  root: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const pathService = yield* Path.Path;
   const entries: string[] = [];
-  async function visit(directory: string, depth: number) {
+  const visit = Effect.fn(function* (directory: string, depth: number): Effect.fn.Return<void> {
     if (depth > 3 || entries.length >= MAX_TREE_ENTRIES) return;
-    const children = await NodeFSP.readdir(NodePath.resolve(root, directory), {
-      withFileTypes: true,
-    }).catch(() => []);
-    for (const child of children.toSorted((a, b) => a.name.localeCompare(b.name))) {
-      const path = directory ? `${directory}/${child.name}` : child.name;
+    const children = yield* fs
+      .readDirectory(pathService.resolve(root, directory))
+      .pipe(Effect.catch(() => Effect.succeed([])));
+    for (const child of children.toSorted((a, b) => a.localeCompare(b))) {
+      const path = directory ? `${directory}/${child}` : child;
       if (PROTECTED.test(path)) continue;
-      entries.push(child.isDirectory() ? `${path}/` : path);
+      const absolute = pathService.resolve(root, path);
+      // FileSystem.stat follows links. Detect links first to retain Dirent/lstat behavior,
+      // including dangling links in the tree and never traversing a directory link.
+      const link = yield* fs.readLink(absolute).pipe(Effect.option);
+      const info = Option.isSome(link)
+        ? Option.none()
+        : yield* fs.stat(absolute).pipe(Effect.option);
+      const isDirectory = Option.isSome(info) && info.value.type === "Directory";
+      entries.push(isDirectory ? `${path}/` : path);
       if (entries.length >= MAX_TREE_ENTRIES) return;
-      if (child.isDirectory()) await visit(path, depth + 1);
+      if (isDirectory) yield* visit(path, depth + 1);
     }
-  }
-  await visit("", 0);
+  });
+  yield* visit("", 0);
   return entries;
-}
+});
 
-export async function collectArchitectContextFiles(root: string, requested: ReadonlyArray<string>) {
-  const paths = [
-    ...new Set(
-      [...DEFAULT_CONTEXT, ...requested].map((path) => validateArchitectContextPath(root, path)),
-    ),
-  ].toSorted();
+export const collectArchitectContextFiles = Effect.fn("collectArchitectContextFiles")(function* (
+  root: string,
+  requested: ReadonlyArray<string>,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const pathService = yield* Path.Path;
+  const validatePath = (path: string) => validateArchitectContextPath(pathService, root, path);
+  const validated = yield* Effect.try({
+    try: () => [...DEFAULT_CONTEXT, ...requested].map(validatePath),
+    catch: (cause) =>
+      new ArchitectPlanGenerationError({
+        message: "Could not build the bounded Architect context package.",
+        category: "unknown",
+        cause,
+      }),
+  });
+  const paths = [...new Set(validated)].toSorted();
   const sections: string[] = [];
   const included: string[] = [];
   let total = 0;
   for (const path of paths) {
-    const absolute = NodePath.resolve(root, path);
-    const info = await NodeFSP.lstat(absolute).catch(() => null);
+    const absolute = pathService.resolve(root, path);
+    const link = yield* fs.readLink(absolute).pipe(Effect.option);
+    if (Option.isSome(link)) continue;
+    const info = yield* fs.stat(absolute).pipe(Effect.option);
     if (
-      !info?.isFile() ||
-      info.isSymbolicLink() ||
-      info.size > MAX_FILE_BYTES ||
+      Option.isNone(info) ||
+      info.value.type !== "File" ||
+      info.value.size > BigInt(MAX_FILE_BYTES) ||
       total >= MAX_CONTEXT_BYTES
     )
       continue;
-    const buffer = await NodeFSP.readFile(absolute);
+    const buffer = Buffer.from(yield* fs.readFile(absolute));
     if (buffer.includes(0)) continue;
     const text = buffer.toString("utf8");
     const bounded = text.slice(0, Math.min(MAX_FILE_BYTES, MAX_CONTEXT_BYTES - total));
@@ -383,19 +416,21 @@ export async function collectArchitectContextFiles(root: string, requested: Read
     sections.push(`FILE: ${path}\n${bounded}`);
   }
   return { included, text: sections.join("\n\n") };
-}
+});
 
-export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function* (input: {
+export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function* <
+  ProgressError = never,
+>(input: {
   readonly request: ArchitectPlanGenerateInput;
   readonly project: OrchestrationProject;
   readonly onProgress?: (
     phase: ArchitectPlanningPhase,
     patch?: ArchitectPlanningProgressPatch,
-  ) => Effect.Effect<void, unknown>;
+  ) => Effect.Effect<void, ProgressError>;
 }): Effect.fn.Return<
   ArchitectPlanGenerateResult,
   ArchitectPlanGenerationError,
-  GitWorkflowService | TextGeneration
+  GitWorkflowService | TextGeneration | FileSystem.FileSystem | Path.Path
 > {
   const progress = (phase: ArchitectPlanningPhase, patch?: ArchitectPlanningProgressPatch) =>
     (input.onProgress?.(phase, patch) ?? Effect.void).pipe(
@@ -448,31 +483,34 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
     planningBaseCommit: commitSha,
     observedHeadCommit: commitSha,
   });
-  const context = yield* Effect.tryPromise({
-    try: async () => ({
-      tree: await collectArchitectContextTree(input.project.workspaceRoot),
-      files: await collectArchitectContextFiles(
+  const context = yield* Effect.gen(function* () {
+    return {
+      tree: yield* collectArchitectContextTree(input.project.workspaceRoot),
+      files: yield* collectArchitectContextFiles(
         input.project.workspaceRoot,
         input.request.contextPaths ?? [],
       ),
-    }),
-    catch: (cause) =>
-      new ArchitectPlanGenerationError({
-        message: "Could not build the bounded Architect context package.",
-        category: "unknown",
-        cause,
-      }),
-  });
+    };
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ArchitectPlanGenerationError({
+          message: "Could not build the bounded Architect context package.",
+          category: "unknown",
+          cause,
+        }),
+    ),
+  );
   const resources = (input.project.sharedResources ?? []).filter((resource) => resource.enabled);
-  const contextEvidence = JSON.stringify({
+  const contextEvidence = yield* encodeJson({
     commitSha,
     tree: context.tree,
     paths: context.files.included,
     resources,
-  });
+  }).pipe(Effect.orDie);
   const contextFingerprint = NodeCrypto.createHash("sha256").update(contextEvidence).digest("hex");
   const resourcePolicyFingerprint = NodeCrypto.createHash("sha256")
-    .update(JSON.stringify(resources))
+    .update(yield* encodeJson(resources).pipe(Effect.orDie))
     .digest("hex");
   const prompt = [
     "You are the Architect inside Nebula. Produce only the requested structured engineering plan.",
@@ -483,14 +521,14 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
     "Return named checkpoints for meaningful wave boundaries. Every checkpoint must identify requiredTaskKeys and unlockTaskKeys. Quality gate IDs must come from the supplied Project policy. Human approval is only required when the objective or supplied constraints make that boundary genuinely irreversible or high risk.",
     `OBJECTIVE\n${input.request.objective}`,
     `CONSTRAINTS\n${input.request.constraints ?? "None supplied"}`,
-    `TEAM LIMITS\n${JSON.stringify(input.request.team ?? null)}\nThe executionAgentCount excludes the Planner. Do not propose more simultaneously writable work than maxWritableConcurrency. The final Task graph may use fewer Tasks than team seats, but never more execution roles than the selected team limit.`,
+    `TEAM LIMITS\n${yield* encodeJson(input.request.team ?? null).pipe(Effect.orDie)}\nThe executionAgentCount excludes the Planner. Do not propose more simultaneously writable work than maxWritableConcurrency. The final Task graph may use fewer Tasks than team seats, but never more execution roles than the selected team limit.`,
     input.request.revisionFeedback ? `REVISION FEEDBACK\n${input.request.revisionFeedback}` : "",
     input.request.previousProposal
-      ? `PREVIOUS PROPOSAL\n${JSON.stringify(input.request.previousProposal)}`
+      ? `PREVIOUS PROPOSAL\n${yield* encodeJson(input.request.previousProposal).pipe(Effect.orDie)}`
       : "",
     `PLANNING BASE COMMIT\n${commitSha}`,
-    `PROJECT POLICIES\n${JSON.stringify({ qualityPolicy: input.project.qualityPolicy ?? null, reviewPolicy: input.project.reviewPolicy ?? null })}`,
-    `SHARED RESOURCES\n${JSON.stringify(resources)}`,
+    `PROJECT POLICIES\n${yield* encodeJson({ qualityPolicy: input.project.qualityPolicy ?? null, reviewPolicy: input.project.reviewPolicy ?? null }).pipe(Effect.orDie)}`,
+    `SHARED RESOURCES\n${yield* encodeJson(resources).pipe(Effect.orDie)}`,
     `REPOSITORY TREE (bounded)\n${context.tree.join("\n")}`,
     `SELECTED FILE EVIDENCE (bounded)\n${context.files.text}`,
   ]
@@ -515,19 +553,20 @@ export const generateArchitectPlan = Effect.fn("generateArchitectPlan")(function
       ? { options: input.request.modelSelection.options }
       : {}),
   };
-  const executionCwd = yield* Effect.tryPromise({
-    try: () => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "nebula-architect-")),
-    catch: (cause) =>
-      new ArchitectPlanGenerationError({
-        message: "Could not create the isolated Architect execution directory.",
-        category: "unknown",
-        cause,
-      }),
-  });
-  const removeExecutionCwd = Effect.tryPromise({
-    try: () => NodeFSP.rm(executionCwd, { recursive: true, force: true }),
-    catch: () => undefined,
-  }).pipe(Effect.ignore);
+  const fs = yield* FileSystem.FileSystem;
+  const executionCwd = yield* fs.makeTempDirectory({ prefix: "nebula-architect-" }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ArchitectPlanGenerationError({
+          message: "Could not create the isolated Architect execution directory.",
+          category: "unknown",
+          cause,
+        }),
+    ),
+  );
+  const removeExecutionCwd = fs
+    .remove(executionCwd, { recursive: true, force: true })
+    .pipe(Effect.ignore);
   yield* progress("planner_working");
   const generated = yield* textGeneration
     .generateStructured({
