@@ -5,6 +5,7 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Logger from "effect/Logger";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
@@ -111,6 +112,10 @@ it.layer(NodeServices.layer)("official auth protocols with synthetic processes",
       () =>
         Effect.gen(function* () {
           const output = yield* Queue.unbounded<Uint8Array>();
+          const logs: unknown[] = [];
+          const logger = Logger.make<unknown, void>((options) => {
+            logs.push(options.message, options.cause);
+          });
           const methods: string[] = [];
           const params: unknown[] = [];
           const send = (message: unknown) =>
@@ -194,11 +199,13 @@ it.layer(NodeServices.layer)("official auth protocols with synthetic processes",
             "/synthetic-workspace",
           ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
           const handoffs: unknown[] = [];
-          yield* flow.run(ceremony, (value) =>
-            Effect.sync(() => {
-              handoffs.push(value);
-            }),
-          );
+          yield* flow
+            .run(ceremony, (value) =>
+              Effect.sync(() => {
+                handoffs.push(value);
+              }),
+            )
+            .pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
           assert.equal(handoffs.length, 1);
           assert.deepEqual(methods, [
             "initialize",
@@ -216,6 +223,9 @@ it.layer(NodeServices.layer)("official auth protocols with synthetic processes",
                 method === "account/logout",
             ),
           );
+          const diagnostics = encode(logs);
+          assert.notInclude(diagnostics, "synthetic=private");
+          assert.notInclude(diagnostics, "SYNTHETIC-CODE");
         }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
     );
   }
@@ -226,19 +236,26 @@ it.layer(NodeServices.layer)("official auth protocols with synthetic processes",
       Effect.gen(function* () {
         const output = yield* Queue.unbounded<Uint8Array>();
         const handedOff = yield* Deferred.make<void>();
+        let released = 0;
         const spawner = ChildProcessSpawner.make((command) =>
-          Effect.sync(() => {
-            const value = command as unknown as {
-              command: string;
-              args: string[];
-              options: { shell?: boolean; env?: NodeJS.ProcessEnv };
-            };
-            assert.equal(value.command, "configured-cursor;literal");
-            assert.deepEqual(value.args, ["login"]);
-            assert.equal(value.options.shell, false);
-            assert.equal(value.options.env?.NO_OPEN_BROWSER, "1");
-            return handle(Stream.fromQueue(output));
-          }),
+          Effect.acquireRelease(
+            Effect.sync(() => {
+              const value = command as unknown as {
+                command: string;
+                args: string[];
+                options: { shell?: boolean; env?: NodeJS.ProcessEnv };
+              };
+              assert.equal(value.command, "configured-cursor;literal");
+              assert.deepEqual(value.args, ["login"]);
+              assert.equal(value.options.shell, false);
+              assert.equal(value.options.env?.NO_OPEN_BROWSER, "1");
+              return handle(Stream.fromQueue(output));
+            }),
+            () =>
+              Effect.sync(() => {
+                released++;
+              }),
+          ),
         );
         const flow = yield* makeCursorAuthenticationFlow(
           "configured-cursor;literal",
@@ -261,6 +278,7 @@ it.layer(NodeServices.layer)("official auth protocols with synthetic processes",
         yield* Deferred.await(handedOff);
         assert.deepEqual(handoffs, [{ url: "https://cursor.com/login?challenge=synthetic" }]);
         yield* Fiber.interrupt(worker);
+        assert.equal(released, 1);
       }).pipe(Effect.scoped, Effect.provideService(HostProcessPlatform, "linux")),
   );
 
@@ -270,9 +288,16 @@ it.layer(NodeServices.layer)("official auth protocols with synthetic processes",
       Effect.gen(function* () {
         const spawner = ChildProcessSpawner.make((command) =>
           Effect.sync(() => {
-            const value = command as unknown as { command: string; args: string[] };
+            const value = command as unknown as {
+              command: string;
+              args: string[];
+              options: { env?: NodeJS.ProcessEnv; extendEnv?: boolean; shell?: boolean };
+            };
             assert.equal(value.command, "configured-claude;literal");
             assert.deepEqual(value.args, ["auth", "status", "--json"]);
+            assert.equal(value.options.env?.CLAUDE_CONFIG_DIR, "/synthetic-claude");
+            assert.equal(value.options.extendEnv, false);
+            assert.equal(value.options.shell, false);
             return handle(
               Stream.make(encoder.encode('{"loggedIn":false,"accessToken":"synthetic-secret"}')),
               Sink.drain,

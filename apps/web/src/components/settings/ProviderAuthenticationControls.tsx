@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentSessionState } from "../../state/session";
+import { useEnvironmentConnectionState } from "../../state/environments";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 
@@ -41,9 +42,40 @@ export function ProviderAuthenticationControls({
   readonly instanceId: ProviderInstanceId;
 }) {
   const session = useEnvironmentSessionState(environmentId);
+  const connection = useEnvironmentConnectionState(environmentId);
   const canManage =
+    connection.data?.phase === "connected" &&
+    !connection.error &&
+    !session.hasError &&
     session.data?.authenticated === true &&
     session.data.scopes?.includes(AuthAccessWriteScope) === true;
+  // A transport generation owns its volatile renderer state. Cached session scopes
+  // can survive a disconnect; they must not keep a previous ceremony visible.
+  return (
+    <ProviderAuthenticationAttemptControls
+      key={JSON.stringify([
+        environmentId,
+        instanceId,
+        connection.data?.generation,
+        connection.data?.phase,
+        canManage,
+      ])}
+      environmentId={environmentId}
+      instanceId={instanceId}
+      canManage={canManage}
+    />
+  );
+}
+
+function ProviderAuthenticationAttemptControls({
+  environmentId,
+  instanceId,
+  canManage,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly instanceId: ProviderInstanceId;
+  readonly canManage: boolean;
+}) {
   const command = useAtomCommand(serverEnvironment.providerAuthentication, {
     reportFailure: false,
     reportDefect: false,
@@ -59,13 +91,6 @@ export function ProviderAuthenticationControls({
     },
     [environmentId, instanceId],
   );
-  useEffect(() => {
-    if (!canManage || session.hasError) {
-      generation.current += 1;
-      setStatus(null);
-      setBusy(false);
-    }
-  }, [canManage, session.hasError]);
   const run = useCallback(
     async (
       operation: ProviderAuthenticationInput["operation"],

@@ -11,3 +11,20 @@ Automated acceptance uses fake providers and synthetic processes. Real-account l
 7. Retain only redacted versions, identity, outcomes and readiness facts. Never retain URLs, device codes, credentials or pairing screens. Report deterministic, real-account, desktop/browser and hosted/release evidence separately.
 
 Stop at unsupported flows, missing account authorization or paid-execution boundaries. E3 is outside this procedure.
+
+## Bounded approval matrix
+
+Approve each route separately with the exact execution host and provider instance. Each managed
+attempt has a five-minute bound. Record only versions, identity, timestamps, redacted outcomes and
+independent E1 readiness facts; never retain ceremony URLs, codes or account credentials.
+
+| Provider / route                   | Acceptance after explicit approval                                                                                                                          | Boundaries                                                                                                                                                               |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Codex / App Server ChatGPT browser | One private ceremony, correlated completion, fresh `account/read` and E1 readiness; cancel only the owned unfinished attempt when approved.                 | Default launch configuration and installed protocol support required. No logout, API fallback or inference.                                                              |
+| Codex / device code                | Separately approved private device-code ceremony, correlated completion and fresh readiness.                                                                | Never retain the URL/code. Test expiry with fixtures rather than invalidating a shared login.                                                                            |
+| Cursor / official CLI browser      | Verify the executable is Cursor; fixed `login` with `NO_OPEN_BROWSER=1`, private handoff, then fresh about/ACP readiness.                                   | No X Subscription migration, model entitlement or third-party coverage claim. No paid turn.                                                                              |
+| Claude / user-controlled terminal  | Verify executable, environment, `CLAUDE_CONFIG_DIR`, shared-store effects and override names; human completes official login, then fresh structured status. | Review current official eligibility guidance. No token extraction, SDK OAuth implementation or automatic Console/API selection. Cancel tracking and terminal separately. |
+
+Reconnect or restart only the task-owned Nebula environment, then verify identity and fresh status.
+Use synthetic instances for replacement and recovery. Existing shared provider stores and applications
+must remain untouched by setup or cleanup.
