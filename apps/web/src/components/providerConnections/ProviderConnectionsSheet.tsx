@@ -40,6 +40,8 @@ import {
   useProviderAuthenticationAttempt,
   useProviderConnectionAttempts,
 } from "./useProviderAuthenticationAttempt";
+import { LockIcon } from "lucide-react";
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "../ui/empty";
 const lastAutomaticCheck = new Map<string, number>();
 const primaryDrivers = ["codex", "cursor", "claudeAgent"];
 
@@ -51,13 +53,20 @@ export function ProviderConnectionsHost({ children }: { children: ReactNode }) {
   const primary = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
   const origin = useRef<HTMLElement | null>(null);
+  const [initialFilter, setInitialFilter] = useState("all");
   const [modelSelection, setModelSelection] = useState<{
     instanceId: ProviderInstanceId;
     environmentId: EnvironmentId;
     model: string;
   } | null>(null);
   const open = useCallback(
-    (instanceId?: ProviderInstanceId, environmentId?: EnvironmentId, selectedModel?: string) => {
+    (
+      instanceId?: ProviderInstanceId,
+      environmentId?: EnvironmentId,
+      selectedModel?: string,
+      filter?: "attention",
+    ) => {
+      if (!params.connections) setInitialFilter(filter ?? "all");
       const hostId = environmentId ?? active ?? primary;
       if (instanceId && hostId && selectedModel)
         setModelSelection({ instanceId, environmentId: hostId, model: selectedModel });
@@ -105,6 +114,7 @@ export function ProviderConnectionsHost({ children }: { children: ReactNode }) {
           close={close}
           origin={origin}
           modelSelection={modelSelection}
+          initialFilter={initialFilter}
         />
       ) : params.connections ? (
         <Sheet
@@ -115,7 +125,7 @@ export function ProviderConnectionsHost({ children }: { children: ReactNode }) {
         >
           <SheetPopup variant="connections" finalFocus={() => origin.current}>
             <SheetHeader>
-              <SheetTitle className="text-lg">Provider Connections</SheetTitle>
+              <SheetTitle className="text-lg">Provider connections</SheetTitle>
               <SheetDescription>
                 The selected execution host is no longer available. Choose a host to continue.
               </SheetDescription>
@@ -148,6 +158,7 @@ function ConnectionsEnvironment({
   close,
   origin,
   modelSelection,
+  initialFilter,
 }: {
   environment: EnvironmentPresentation;
   environments: EnvironmentPresentation[];
@@ -157,6 +168,7 @@ function ConnectionsEnvironment({
   switchHost: (id: EnvironmentId) => void;
   close: () => void;
   origin: React.RefObject<HTMLElement | null>;
+  initialFilter: string;
   modelSelection: {
     instanceId: ProviderInstanceId;
     environmentId: EnvironmentId;
@@ -292,7 +304,19 @@ function ConnectionsEnvironment({
     for (const instanceId of stale) lastAutomaticCheck.set(`${id}:${instanceId}`, timestamp);
     void check(undefined, stale);
   }, [open, canOperate, providers, connected, id, check]);
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState(initialFilter);
+  useEffect(() => {
+    if (open) setFilter(initialFilter);
+  }, [open, initialFilter]);
+  const [beginIntent, setBeginIntent] = useState<ProviderInstanceId | null>(null);
+  useEffect(() => {
+    if (!open) setBeginIntent(null);
+  }, [open]);
+  const title = useRef<HTMLHeadingElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (open) scroller.current?.scrollTo(0, 0);
+  }, [open, selected]);
   const [wide, setWide] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(min-width: 1920px)").matches,
   );
@@ -316,7 +340,7 @@ function ConnectionsEnvironment({
           .querySelector<HTMLButtonElement>(
             `[data-connection-instance="${CSS.escape(lastDetail.current ?? "")}"]`,
           )
-          ?.focus();
+          ?.focus({ preventScroll: true });
       });
     });
     return () => cancelAnimationFrame(frame);
@@ -334,7 +358,9 @@ function ConnectionsEnvironment({
     unverified: counted.filter((r) => r.status.group === "unverified").length,
   };
   const primary = primaryDrivers.flatMap((driver) => {
-    const row = rows.find((r) => r.provider.driver === driver && r.provider.enabled !== false);
+    const row =
+      rows.find((r) => r.provider.driver === driver && r.provider.enabled !== false) ??
+      rows.find((r) => r.provider.driver === driver);
     return row ? [row] : [];
   });
   const others = rows.filter((row) => !primary.includes(row));
@@ -348,22 +374,47 @@ function ConnectionsEnvironment({
       {...row}
       compact={compact}
       now={now}
-      onDetails={() => select(row.provider.instanceId)}
+      environmentId={id}
+      checking={checking}
+      onDetails={() => {
+        setBeginIntent(null);
+        select(row.provider.instanceId);
+      }}
       onAction={() => {
         if (row.status.primaryAction === "check") void check(row.provider.instanceId);
-        else select(row.provider.instanceId);
+        else {
+          setBeginIntent(row.status.primaryAction === "sign-in" ? row.provider.instanceId : null);
+          select(row.provider.instanceId);
+        }
       }}
     />
   );
   const list = (
     <div className="space-y-4 p-5 md:p-6">
-      <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-        Primary providers
-      </p>
+      {!rows.some((row) => row.provider.enabled !== false) ? (
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyTitle>No providers enabled on {environment.label}</EmptyTitle>
+            <EmptyDescription>
+              Enable a provider in Provider Settings to get started.
+            </EmptyDescription>
+          </EmptyHeader>
+          <Button
+            variant="outline"
+            size="sm"
+            render={<Link to="/settings/providers" search={{ environment: id }} />}
+          >
+            Open Provider Settings
+          </Button>
+        </Empty>
+      ) : null}
+      {primary.some(matches) ? (
+        <h2 className="text-xs font-medium text-muted-foreground">Primary providers</h2>
+      ) : null}
       {primary.filter(matches).map((r) => renderCard(r))}
-      <p className="pt-2 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-        Other providers
-      </p>
+      {others.some(matches) ? (
+        <h2 className="pt-2 text-xs font-medium text-muted-foreground">Other providers</h2>
+      ) : null}
       {others.filter(matches).map((r) => renderCard(r, true))}
       {rows.filter(matches).length === 0 ? (
         <p className="text-sm text-muted-foreground">No providers in this view.</p>
@@ -382,12 +433,18 @@ function ConnectionsEnvironment({
           variant="connections"
           showCloseButton={false}
           finalFocus={() => origin.current}
+          initialFocus={() =>
+            document.querySelector<HTMLElement>("[data-connection-attention]:not(:disabled)") ??
+            title.current
+          }
           aria-label="Provider Connections"
         >
           <SheetHeader className="border-b px-5 py-4 md:px-6">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 space-y-2">
-                <SheetTitle className="text-lg">Provider Connections</SheetTitle>
+                <SheetTitle ref={title} tabIndex={-1} className="text-lg outline-none">
+                  Provider connections
+                </SheetTitle>
                 <SheetDescription className="sr-only">
                   Official accounts. Verified on your execution host.
                 </SheetDescription>
@@ -419,7 +476,7 @@ function ConnectionsEnvironment({
           </SheetHeader>
           <div className="connections-scope space-y-2 border-b px-5 py-3 md:px-6">
             <label
-              className="block text-[10px] font-medium tracking-widest text-muted-foreground uppercase"
+              className="block text-xs font-medium text-muted-foreground"
               htmlFor="connections-host"
             >
               Execution host
@@ -437,11 +494,16 @@ function ConnectionsEnvironment({
                   </option>
                 ))}
               </select>
-              <span className="rounded-md border px-2 py-1 text-[10px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground">
+                {!canManage ? <LockIcon aria-hidden className="size-3" /> : null}
                 {canManage ? "Manage access" : "Read-only"}
               </span>
-              <span className="text-xs text-muted-foreground">
-                {connected ? "● Connected" : "○ Disconnected"}
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <span
+                  aria-hidden="true"
+                  className={`size-1.5 rounded-full ${connected ? "bg-current" : "border border-current"}`}
+                />
+                {connected ? "Connected" : "Disconnected"}
               </span>
             </div>
             {!connected ? (
@@ -469,11 +531,13 @@ function ConnectionsEnvironment({
           </div>
           {canRead ? (
             <>
-              <div className="border-b px-5 py-3 md:px-6">
+              <div
+                className={`border-b px-5 py-3 md:px-6 ${selected !== "all" && !wide ? "hidden" : ""}`}
+              >
                 <ToggleGroup
                   value={[filter]}
                   onValueChange={(value) => setFilter(value[0] ?? "all")}
-                  className="grid w-full grid-cols-4 gap-1"
+                  className="flex w-full gap-1 overflow-x-auto md:grid md:grid-cols-4"
                   aria-label="Filter providers"
                 >
                   {(
@@ -487,20 +551,18 @@ function ConnectionsEnvironment({
                     <Toggle
                       value={key}
                       key={key}
-                      className={`rounded-md px-1 py-2 text-[10px] focus-visible:outline-2 focus-visible:outline-ring ${filter === key ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                      className={`shrink-0 rounded-md px-2 py-2 text-xs focus-visible:outline-2 focus-visible:outline-ring ${filter === key ? "bg-muted text-foreground" : "text-muted-foreground"}`}
                     >
                       {label} <span className="font-mono tabular-nums">{counts[key]}</span>
                     </Toggle>
                   ))}
                 </ToggleGroup>
               </div>
-              <p
-                role="status"
-                className={checkMessage ? "px-6 pt-2 text-xs text-muted-foreground" : "sr-only"}
-              >
+              <p role="status" className="sr-only">
                 {checkMessage}
               </p>
               <div
+                ref={scroller}
                 className={`connections-body min-h-0 flex-1 overflow-y-auto ${selected !== "all" ? "connections-detail-selected" : ""}`}
               >
                 <div className="connections-list">{list}</div>
@@ -524,7 +586,7 @@ function ConnectionsEnvironment({
             <div className="flex-1" />
           )}
           <SheetFooter className="flex-col! items-start! gap-2! px-5! md:px-6!">
-            <p className="text-[10px] leading-relaxed text-muted-foreground">
+            <p className="text-xs leading-relaxed text-foreground">
               Preflight checks never send a paid request. Entitlement and usage stay separate.
             </p>
             <Link
@@ -556,6 +618,8 @@ function ConnectionsEnvironment({
               back={() => select()}
               close={close}
               instance={displayInstances[row.provider.instanceId]}
+              beginRequested={beginIntent === row.provider.instanceId}
+              onBeginHandled={() => setBeginIntent(null)}
             />
           ))
         : null}
@@ -578,6 +642,8 @@ function ProviderRuntime({
   back,
   close,
   instance,
+  beginRequested,
+  onBeginHandled,
 }: {
   provider: ServerProvider;
   modelLabel?: string | undefined;
@@ -595,6 +661,8 @@ function ProviderRuntime({
   back: () => void;
   close: () => void;
   instance: ProviderInstanceConfig | undefined;
+  beginRequested: boolean;
+  onBeginHandled: () => void;
 }) {
   const show = open && target !== null && selected === provider.instanceId;
   const attempt = useProviderAuthenticationAttempt({
@@ -625,6 +693,8 @@ function ProviderRuntime({
           check={check}
           back={back}
           close={close}
+          beginRequested={beginRequested}
+          onBeginHandled={onBeginHandled}
         />,
         target,
       )

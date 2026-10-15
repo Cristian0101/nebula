@@ -7,8 +7,10 @@ import {
   CircleDashedIcon,
   CircleXIcon,
   ChevronRightIcon,
+  LoaderCircleIcon,
 } from "lucide-react";
-import type { ServerProvider } from "@t3tools/contracts";
+import { Link } from "@tanstack/react-router";
+import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
 import type { ProviderReadiness, ReadinessFact } from "@t3tools/shared/providerReadiness";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { Button } from "../ui/button";
@@ -22,7 +24,7 @@ import {
   READINESS_FACTS,
 } from "./providerReadinessCopy";
 export const CONNECTION_TONES = {
-  success: "text-success",
+  success: "text-success-foreground",
   destructive: "text-destructive",
   warning: "text-warning",
   muted: "text-muted-foreground",
@@ -33,7 +35,7 @@ export function FactValue({ fact, children }: { fact: ReadinessFact; children: R
     fact === "verified" ? CircleCheckIcon : fact === "blocked" ? CircleXIcon : CircleDashedIcon;
   return (
     <span
-      className={`inline-flex min-w-0 items-center gap-1.5 ${fact === "verified" ? "text-success" : fact === "blocked" ? "text-destructive" : "text-muted-foreground"}`}
+      className={`inline-flex min-w-0 items-center gap-1.5 ${fact === "verified" ? "text-success-foreground" : fact === "blocked" ? "text-destructive" : "text-muted-foreground"}`}
     >
       <Icon className="size-3.5 shrink-0" aria-hidden />
       <span className="break-words">{children}</span>
@@ -82,7 +84,7 @@ function FactCell({
 }) {
   return (
     <div className="min-w-0 space-y-1">
-      <dt className="text-[10px] text-muted-foreground">{label}</dt>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="text-xs">
         <FactValue fact={fact}>{children}</FactValue>
       </dd>
@@ -98,6 +100,8 @@ export function ProviderConnectionCard({
   modelLabel,
   onDetails,
   onAction,
+  checking = false,
+  environmentId,
 }: {
   provider: ServerProvider;
   readiness: ProviderReadiness;
@@ -107,6 +111,8 @@ export function ProviderConnectionCard({
   modelLabel?: string | undefined;
   onDetails: () => void;
   onAction: () => void;
+  checking?: boolean;
+  environmentId?: EnvironmentId;
 }) {
   const name = provider.displayName ?? provider.driver;
   const StatusIcon = {
@@ -120,13 +126,14 @@ export function ProviderConnectionCard({
   return (
     <article
       aria-label={`${name} connection`}
+      aria-busy={checking}
       data-connection-group={status.group}
       className={`connections-card rounded-xl border bg-card ${status.group === "attention" ? "border-l-2 border-l-warning" : status.group === "signing-in" ? "border-l-2 border-l-primary" : "border-border"}`}
     >
       <div className="flex flex-wrap items-center gap-2 p-4">
         <button
           type="button"
-          className="flex min-w-32 flex-1 items-center gap-3 rounded-md text-left focus-visible:outline-2 focus-visible:outline-ring"
+          className="flex min-w-32 flex-1 cursor-pointer items-center gap-3 rounded-md text-left hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring"
           data-connection-instance={provider.instanceId}
           onClick={onDetails}
           aria-label={`${name} details, ${status.label}`}
@@ -141,28 +148,30 @@ export function ProviderConnectionCard({
               {name}
             </span>
             <span
-              className={`block truncate text-[11px] text-muted-foreground ${compact ? "" : "connections-card-meta"}`}
+              className={`block truncate text-xs text-muted-foreground ${compact ? "" : "connections-card-meta"}`}
             >
               {compact
                 ? status.label
                 : `${provider.version ? `v${provider.version} · ` : ""}${provider.instanceId}`}
             </span>
             {!compact ? (
-              <span className="connections-card-list-status text-[11px] text-muted-foreground">
+              <span className="connections-card-list-status text-xs text-muted-foreground">
                 {status.label}
               </span>
             ) : null}
           </span>
-          {compact ? (
-            <ChevronRightIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-          ) : null}
+          <ChevronRightIcon aria-hidden className="ml-auto size-4 shrink-0 text-muted-foreground" />
         </button>
         {!compact ? (
           <span
-            className={`connections-card-status inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] ${CONNECTION_TONES[status.tone]}`}
+            className={`connections-card-status inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs ${CONNECTION_TONES[status.tone]}`}
           >
-            <StatusIcon aria-hidden className="size-3" />
-            {status.label}
+            {checking ? (
+              <LoaderCircleIcon aria-hidden className="size-3 motion-safe:animate-spin" />
+            ) : (
+              <StatusIcon aria-hidden className="size-3" />
+            )}
+            {checking ? "Checking…" : status.label}
           </span>
         ) : null}
         {status.actionLabel && !compact ? (
@@ -170,11 +179,25 @@ export function ProviderConnectionCard({
             className="connections-card-action max-md:w-full"
             variant="outline"
             size="xs"
-            onClick={onAction}
+            render={
+              status.primaryAction === "settings" && environmentId ? (
+                <Link
+                  to="/settings/providers"
+                  search={{ instance: provider.instanceId, environment: environmentId }}
+                />
+              ) : undefined
+            }
+            onClick={status.primaryAction === "settings" && environmentId ? undefined : onAction}
+            disabled={checking}
+            data-connection-attention={
+              status.group === "attention" || status.group === "signing-in" ? "" : undefined
+            }
           >
             {status.actionLabel === "Sign in"
               ? signInCopy(provider.driver).label
-              : status.actionLabel}
+              : status.primaryAction === "settings" && provider.enabled === false
+                ? "Enable in Provider Settings"
+                : status.actionLabel}
           </Button>
         ) : null}
       </div>
@@ -217,7 +240,7 @@ export function ProviderConnectionCard({
             </FactCell>
           </dl>
           {status.subline && status.group !== "unverified" && status.group !== "ready" ? (
-            <p className="px-4 pb-3 text-[11px] text-muted-foreground">{status.subline}</p>
+            <p className="px-4 pb-3 text-xs text-muted-foreground">{status.subline}</p>
           ) : null}
         </>
       ) : null}

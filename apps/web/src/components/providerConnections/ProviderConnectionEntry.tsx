@@ -1,3 +1,4 @@
+import { PlugIcon } from "lucide-react";
 import { useProviderConnectionAttempts } from "./useProviderAuthenticationAttempt";
 import { useEffect, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
@@ -78,7 +79,8 @@ function ScopedEntry({
         status.primaryAction !== null,
     );
     return actionable ? (
-      <ProviderConnectionsLink environmentId={environmentId}>
+      <ProviderConnectionsLink environmentId={environmentId} filter="attention">
+        <PlugIcon aria-hidden className="size-3.5" />
         Connect providers
       </ProviderConnectionsLink>
     ) : null;
@@ -89,9 +91,16 @@ function ScopedEntry({
   ).length;
   return (
     <div className="px-2 py-1">
-      <ProviderConnectionsLink environmentId={environmentId}>
-        Providers · {ready}/{statuses.length} ready
-        {attention ? ` · ${attention} need attention` : ""}
+      <ProviderConnectionsLink
+        environmentId={environmentId}
+        className="w-full min-w-0 justify-start"
+      >
+        <PlugIcon aria-hidden className="size-3.5" />
+        <span className="truncate">
+          {statuses.length === 0
+            ? "No providers enabled"
+            : `Providers · ${ready}/${statuses.length} ready${attention ? ` · ${attention} need attention` : ""}`}
+        </span>
       </ProviderConnectionsLink>
     </div>
   );

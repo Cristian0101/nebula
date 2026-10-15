@@ -48,7 +48,7 @@ export const LIFECYCLE_COPY: Record<ProviderAuthenticationStatus["state"], strin
   authenticated: "Signed in",
   cancelled: "Sign-in cancelled",
   failed: "Sign-in didn't complete",
-  expired: "Sign-in expired",
+  expired: "Sign-in attempt timed out",
   unsupported: "Sign-in not available here",
   "verification-needed": "Verification needed",
 };
@@ -66,7 +66,8 @@ export const RECOVERY_COPY: Record<ProviderAuthenticationStatus["reason"], strin
   "login-required": "Sign in with the provider's official flow on this execution host.",
   "process-failed":
     "The official login process stopped before finishing. Check the CLI version, network and configuration, then try again.",
-  timeout: "This sign-in expired after 5 minutes. Start a new sign-in.",
+  timeout:
+    "This attempt timed out after 5 minutes. Your account may still be signed in. Start a new attempt if needed.",
   "verification-failed":
     "The last check couldn't finish. Check status before relying on the connection.",
   cancelled:

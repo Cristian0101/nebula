@@ -22,36 +22,47 @@ function PrivateHandoff({ status }: { status: ProviderAuthenticationStatus }) {
   if (!handoff || !host || !status.expiresAt || Date.parse(status.expiresAt) <= Date.now())
     return null;
   return (
-    <div className="space-y-3">
-      <Button
-        variant="outline"
-        onClick={() => {
-          void ensureLocalApi()
-            .shell.openExternal(handoff.url)
-            .catch(() => setFailed(true));
-        }}
-      >
-        {handoff.userCode
-          ? "Open verification page"
-          : status.driver === "codex"
-            ? "Open ChatGPT sign-in"
-            : "Open Cursor sign-in"}{" "}
-        ↗
-      </Button>
-      <p className="text-xs text-muted-foreground">{host}</p>
-      {failed ? <p role="status">The sign-in page could not open. Try again.</p> : null}
+    <ol className="list-decimal space-y-3 pl-5">
+      <li>
+        <Button
+          data-handoff-focus="open"
+          onClick={() => {
+            void ensureLocalApi()
+              .shell.openExternal(handoff.url)
+              .catch(() => setFailed(true));
+          }}
+        >
+          {handoff.userCode
+            ? "Open verification page"
+            : status.driver === "codex"
+              ? "Open ChatGPT sign-in"
+              : "Open Cursor sign-in"}{" "}
+          ↗
+        </Button>
+        <p className="text-xs text-muted-foreground">{host}</p>
+        {failed ? <p role="alert">The sign-in page could not open. Try again.</p> : null}
+      </li>
       {handoff.userCode ? (
-        <>
-          <div className="flex flex-wrap items-center gap-2">
-            <code
-              aria-label={revealed ? "Private device code" : "Device code hidden"}
-              className="rounded-lg border bg-muted px-4 py-3 font-mono text-xl tracking-widest"
-            >
-              {revealed ? handoff.userCode : "••••-••••"}
+        <li>
+          <div
+            role="group"
+            aria-label="Private device code"
+            className="flex flex-wrap items-center gap-2"
+          >
+            <code className="rounded-lg border bg-muted px-4 py-3 font-mono text-xl tracking-widest">
+              {revealed ? (
+                handoff.userCode
+              ) : (
+                <>
+                  <span aria-hidden="true">••••-••••</span>
+                  <span className="sr-only">Device code hidden</span>
+                </>
+              )}
             </code>
             <Button
               size="sm"
               variant="outline"
+              data-handoff-focus="code"
               aria-pressed={revealed}
               onClick={() => setRevealed(!revealed)}
             >
@@ -75,11 +86,11 @@ function PrivateHandoff({ status }: { status: ProviderAuthenticationStatus }) {
               ? `Copied. Paste it only at ${host}.`
               : `Enter this code only at ${host}. Don't share it.`}
           </p>
-        </>
+        </li>
       ) : null}
-      <p className="text-sm text-muted-foreground">
+      <li className="text-sm text-muted-foreground">
         Finish signing in there. This page updates by itself.
-      </p>
-    </div>
+      </li>
+    </ol>
   );
 }

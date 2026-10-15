@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { LockIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { ProviderInstanceConfig, ServerProvider } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { ProviderHandoff } from "./ProviderHandoff";
@@ -23,14 +24,43 @@ export function AttemptCountdown({ expiresAt }: { expiresAt: string }) {
       >
         Expires in {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}
       </span>
-      <span className="sr-only" role="status">
+      <span className="sr-only" role={left === 0 ? "alert" : "status"}>
         {left === 0
-          ? "Sign-in expired"
+          ? "Sign-in attempt timed out"
           : left <= 60
             ? "Sign-in expires in less than one minute"
             : ""}
       </span>
     </>
+  );
+}
+function CopyValue({
+  label,
+  value,
+  copyable = true,
+}: {
+  label: string;
+  value: string;
+  copyable?: boolean;
+}) {
+  return (
+    <div className="space-y-1">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="flex flex-wrap items-start gap-2">
+        <code className="min-w-0 flex-1 break-all rounded-md border bg-background p-2 font-mono text-xs">
+          {value}
+        </code>
+        {copyable ? (
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => void navigator.clipboard.writeText(value)}
+          >
+            Copy {label === "CLAUDE_CONFIG_DIR" ? "configuration directory" : "executable"}
+          </Button>
+        ) : null}
+      </dd>
+    </div>
   );
 }
 export function ProviderSignInPanel({
@@ -40,6 +70,9 @@ export function ProviderSignInPanel({
   instance,
   attempt,
   done,
+  beginRequested = false,
+  onBeginHandled,
+  primaryStartInStatus = false,
 }: {
   provider: ServerProvider;
   host: string;
@@ -47,15 +80,22 @@ export function ProviderSignInPanel({
   instance: ProviderInstanceConfig | undefined;
   attempt: ProviderAuthenticationAttempt;
   done: () => void;
+  beginRequested?: boolean;
+  onBeginHandled?: () => void;
+  primaryStartInStatus?: boolean;
 }) {
   const { status, canManage, busy, error, begin, cancel, refresh, readStatus } = attempt;
   const copy = signInCopy(provider.driver);
+  const panel = useRef<HTMLElement>(null);
+  const consumed = useRef(false);
   const [startedHere, setStartedHere] = useState(false);
-  const start = (ceremony: Parameters<typeof begin>[0]) => {
-    setStartedHere(true);
-    void begin(ceremony);
-  };
   const active = authenticationActive(status);
+  useEffect(() => {
+    setStartedHere(false);
+  }, [instance, canManage]);
+  useEffect(() => {
+    if (!status && attempt.phase !== "preparing") setStartedHere(false);
+  }, [status, attempt.phase]);
   const config =
     instance?.config && typeof instance.config === "object"
       ? (instance.config as Record<string, unknown>)
@@ -74,41 +114,101 @@ export function ProviderSignInPanel({
     status?.state !== "unsupported" &&
     provider.enabled !== false;
   const preferred = remote && ceremonies.includes("device-code") ? "device-code" : ceremonies[0];
-  const retry = () => {
-    if (preferred) start(preferred);
-    else void readStatus();
+  const start = (ceremony: Parameters<typeof begin>[0]) => {
+    setStartedHere(true);
+    void begin(ceremony);
   };
+  // A card's explicit sign-in action survives the status read, then is consumed once.
+  // The intent contains no ceremony material and never enters URL or shared state.
+  useEffect(() => {
+    if (!beginRequested) {
+      consumed.current = false;
+      return;
+    }
+    if (consumed.current || busy || !status) return;
+    if (!canManage || !canBegin || active || error || !preferred) {
+      consumed.current = true;
+      onBeginHandled?.();
+      return;
+    }
+    consumed.current = true;
+    onBeginHandled?.();
+    setStartedHere(true);
+    void begin(preferred);
+  }, [
+    beginRequested,
+    busy,
+    status,
+    canManage,
+    canBegin,
+    active,
+    error,
+    preferred,
+    begin,
+    onBeginHandled,
+  ]);
+  const state = status?.state;
+  const attemptId = status?.attemptId;
+  const hasHandoff = status?.handoff !== null && status?.handoff !== undefined;
+  useEffect(() => {
+    if (!startedHere) return;
+    const target = active
+      ? (panel.current?.querySelector<HTMLElement>("[data-handoff-focus='code']") ??
+        panel.current?.querySelector<HTMLElement>(
+          "[data-handoff-focus='open'], [data-sign-in-focus='check']",
+        ))
+      : panel.current?.querySelector<HTMLElement>(
+          "[data-sign-in-focus='done'], [data-sign-in-focus='retry']",
+        );
+    (target ?? panel.current)?.focus({ preventScroll: true });
+  }, [state, attemptId, attempt.phase, hasHandoff, error, startedHere, active]);
+  const success = state === "authenticated" && (startedHere || attemptId != null);
+  const retryState = state === "failed" || state === "cancelled" || state === "expired";
+  const showStart =
+    preferred && canBegin && (!primaryStartInStatus || retryState || state === "authenticated");
   return (
     <section
+      ref={panel}
+      tabIndex={-1}
       aria-label="Official provider sign-in"
-      className="space-y-4 rounded-xl border bg-muted/35 p-4"
+      className="space-y-4 rounded-xl border bg-muted/35 p-4 outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">
-          Sign in to {provider.displayName ?? provider.driver}
-        </h3>
+        <h3 className="text-sm font-semibold">Account and sign-in</h3>
         {active && status?.expiresAt ? <AttemptCountdown expiresAt={status.expiresAt} /> : null}
       </div>
       <p className="text-xs text-muted-foreground">
         Execution host: {host} · Instance: {provider.instanceId}
       </p>
       {!canManage ? (
-        <p role="status" className="text-sm text-muted-foreground">
+        <p role="status" className="flex items-start gap-2 text-sm text-muted-foreground">
+          <LockIcon aria-hidden className="mt-0.5 size-4 shrink-0" />
           Needs Manage access. Signing in requires Manage access on {host}. Readiness stays visible.
         </p>
       ) : (
         <>
-          <p role="status" className="text-sm">
+          <p
+            role={error || state === "failed" || state === "expired" ? "alert" : "status"}
+            className="text-sm"
+          >
             {error
               ? "Status unavailable. Reconnect to the host, then retry."
-              : attempt.phase === "preparing"
-                ? "Preparing sign-in…"
-                : status
-                  ? LIFECYCLE_COPY[status.state]
-                  : "Check status to discover the supported official sign-in flow."}
+              : provider.enabled === false
+                ? "Enable this provider in Provider Settings to sign in."
+                : attempt.phase === "preparing"
+                  ? "Preparing sign-in…"
+                  : status
+                    ? status.state === "not-installed"
+                      ? "Provider setup required"
+                      : LIFECYCLE_COPY[status.state]
+                    : "Loading sign-in options…"}
           </p>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            {status && status.reason !== "none" ? RECOVERY_COPY[status.reason] : copy.description}
+            {provider.enabled === false
+              ? RECOVERY_COPY.disabled
+              : status && status.reason !== "none"
+                ? RECOVERY_COPY[status.reason]
+                : copy.description}
           </p>
           {status?.reason === "api-override" ? (
             <p className="break-words text-xs text-muted-foreground">
@@ -116,13 +216,15 @@ export function ProviderSignInPanel({
               also take precedence.
             </p>
           ) : null}
-          {provider.driver === "claudeAgent" && status?.state === "cancelled" ? (
+          {provider.driver === "claudeAgent" && state === "cancelled" ? (
             <p className="text-xs text-muted-foreground">
               Nebula stopped tracking. Cancel the CLI sign-in yourself in your terminal.
             </p>
           ) : null}
-          {provider.driver === "cursor" ? (
-            <p className="break-all font-mono text-xs">Executable: {executable}</p>
+          {provider.driver === "cursor" && !success ? (
+            <dl>
+              <CopyValue label="Executable" value={executable} />
+            </dl>
           ) : null}
           {provider.driver === "codex" && remote ? (
             <p className="text-xs text-muted-foreground">
@@ -130,55 +232,37 @@ export function ProviderSignInPanel({
               another machine.
             </p>
           ) : null}
-          {active && status ? (
+          {status &&
+          ["unsupported", "api-override", "disabled", "missing-executable"].includes(
+            status.reason,
+          ) ? (
+            <Link
+              to="/settings/providers"
+              search={{ instance: provider.instanceId, environment: status.environmentId }}
+              className="inline-block text-sm underline"
+            >
+              {status.reason === "disabled"
+                ? "Enable in Provider Settings"
+                : "Review in Provider Settings"}{" "}
+              →
+            </Link>
+          ) : null}
+          {active && status && !error ? (
             <>
-              <ProviderHandoff status={status} />
-              {canManage &&
-              status &&
-              ["unsupported", "api-override", "disabled", "missing-executable"].includes(
-                status.reason,
-              ) ? (
-                <Link
-                  to="/settings/providers"
-                  search={{ instance: provider.instanceId, environment: status.environmentId }}
-                  className="text-sm underline"
-                >
-                  {status.reason === "disabled"
-                    ? "Enable in Provider Settings"
-                    : "Review in Provider Settings"}{" "}
-                  →
-                </Link>
-              ) : null}
-              {provider.driver === "claudeAgent" ? (
+              {provider.driver !== "claudeAgent" ? (
+                <ProviderHandoff status={status} />
+              ) : (
                 <ol className="list-decimal space-y-3 pl-5 text-sm">
                   <li>Open your own terminal on {host}.</li>
                   <li>
                     Use this instance's configuration:
-                    <dl className="mt-2 space-y-2 text-xs">
-                      <dt className="text-muted-foreground">Executable</dt>
-                      <dd className="break-all font-mono">
-                        {executable}{" "}
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          onClick={() => void navigator.clipboard.writeText(executable)}
-                        >
-                          Copy executable
-                        </Button>
-                      </dd>
-                      <dt className="text-muted-foreground">CLAUDE_CONFIG_DIR</dt>
-                      <dd className="break-all font-mono">
-                        {configDir}{" "}
-                        {configDir !== "Default (not set)" ? (
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            onClick={() => void navigator.clipboard.writeText(configDir)}
-                          >
-                            Copy configuration directory
-                          </Button>
-                        ) : null}
-                      </dd>
+                    <dl className="mt-2 space-y-3">
+                      <CopyValue label="Executable" value={executable} />
+                      <CopyValue
+                        label="CLAUDE_CONFIG_DIR"
+                        value={configDir}
+                        copyable={configDir !== "Default (not set)"}
+                      />
                     </dl>
                   </li>
                   <li>
@@ -187,6 +271,7 @@ export function ProviderSignInPanel({
                   <li>Finish the prompts in your terminal and browser.</li>
                   <li>
                     <Button
+                      data-sign-in-focus="check"
                       variant="outline"
                       size="sm"
                       disabled={busy}
@@ -196,8 +281,7 @@ export function ProviderSignInPanel({
                     </Button>
                   </li>
                 </ol>
-              ) : null}
-              <p className="text-xs text-muted-foreground">Waiting for you…</p>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -207,48 +291,60 @@ export function ProviderSignInPanel({
                 {provider.driver === "claudeAgent" ? "Stop tracking" : "Cancel"}
               </Button>
             </>
+          ) : success ? (
+            <div className="flex flex-wrap gap-2">
+              <p className="w-full text-sm">
+                Signed in on {host}. Signing in doesn't guarantee a model or included usage.
+              </p>
+              <Button data-sign-in-focus="done" size="sm" onClick={done}>
+                Done
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const readiness = document.querySelector<HTMLElement>(
+                    "[data-provider-connection-readiness]",
+                  );
+                  readiness?.focus({ preventScroll: true });
+                  readiness?.scrollIntoView({ block: "start" });
+                }}
+              >
+                View readiness
+              </Button>
+            </div>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {status?.state === "authenticated" && (startedHere || status.attemptId !== null) ? (
-                <>
-                  <p className="w-full text-sm">
-                    Signed in on {host}. Signing in doesn't guarantee a model or included usage.
-                  </p>
-                  <Button size="sm" onClick={done}>
-                    Done
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      document
-                        .querySelector("[data-provider-connection-readiness]")
-                        ?.scrollIntoView({ block: "start" })
-                    }
-                  >
-                    View readiness
-                  </Button>
-                </>
-              ) : null}
-              {preferred && canBegin ? (
+              {error ? (
                 <Button
+                  data-sign-in-focus="retry"
+                  variant="outline"
                   size="sm"
-                  variant={status?.state === "authenticated" ? "outline" : "default"}
                   disabled={busy}
-                  onClick={retry}
+                  onClick={() => void readStatus()}
                 >
-                  {status?.state === "authenticated"
+                  Retry status
+                </Button>
+              ) : showStart ? (
+                <Button
+                  data-sign-in-focus="retry"
+                  size="sm"
+                  variant={state === "authenticated" ? "outline" : "default"}
+                  disabled={busy}
+                  onClick={() => start(preferred)}
+                >
+                  {state === "authenticated"
                     ? "Sign in again"
-                    : status?.state === "expired"
+                    : state === "expired"
                       ? "Start a new sign-in"
-                      : status?.state === "failed"
+                      : retryState
                         ? "Try again"
                         : preferred === "device-code"
                           ? "Sign in with a device code"
                           : copy.label}
                 </Button>
               ) : null}
-              {canBegin && ceremonies.length > 1
+              {!error && canBegin && ceremonies.length > 1
                 ? ceremonies
                     .filter((c) => c !== preferred)
                     .map((c) => (
@@ -263,9 +359,6 @@ export function ProviderSignInPanel({
                       </Button>
                     ))
                 : null}
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}>
-                {error ? "Retry status" : "Check status"}
-              </Button>
             </div>
           )}
         </>

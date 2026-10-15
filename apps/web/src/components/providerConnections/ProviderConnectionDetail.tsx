@@ -1,5 +1,5 @@
 import { authenticationActive } from "./useProviderAuthenticationAttempt";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import type { EnvironmentId, ProviderInstanceConfig, ServerProvider } from "@t3tools/contracts";
 import type { ProviderReadiness } from "@t3tools/shared/providerReadiness";
@@ -11,7 +11,7 @@ import type { ProviderAuthenticationAttempt } from "./useProviderAuthenticationA
 import { ProviderFactList, CONNECTION_TONES } from "./ProviderConnectionCard";
 import { ProviderSignInPanel } from "./ProviderSignInPanel";
 import { BILLING_COPY, verificationCopy, RECOVERY_COPY } from "./providerReadinessCopy";
-import { INSTALL_GUIDES } from "./providerSignInCopy";
+import { INSTALL_GUIDES, signInCopy } from "./providerSignInCopy";
 import { ensureLocalApi } from "../../localApi";
 export function ProviderConnectionDetail({
   provider,
@@ -29,6 +29,8 @@ export function ProviderConnectionDetail({
   check,
   back,
   close,
+  beginRequested = false,
+  onBeginHandled,
 }: {
   provider: ServerProvider;
   instance: ProviderInstanceConfig | undefined;
@@ -45,10 +47,19 @@ export function ProviderConnectionDetail({
   check: () => void;
   back: () => void;
   close: () => void;
+  beginRequested?: boolean;
+  onBeginHandled?: () => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
+  const [startRequested, setStartRequested] = useState(false);
+  const retryState = ["failed", "expired", "cancelled"].includes(attempt.status?.state ?? "");
+  const success = attempt.status?.state === "authenticated" && attempt.status.attemptId != null;
+  const primaryStartInStatus =
+    status.primaryAction === "sign-in" && capability && attempt.canManage && !retryState;
   useEffect(() => {
-    heading.current?.focus();
+    heading.current?.focus({ preventScroll: true });
+    heading.current?.closest(".connections-body")?.scrollTo(0, 0);
+    heading.current?.closest(".connections-detail")?.scrollTo(0, 0);
   }, [provider.instanceId]);
   const config =
     instance?.config && typeof instance.config === "object"
@@ -71,9 +82,11 @@ export function ProviderConnectionDetail({
   ].join("\n");
   return (
     <div className="space-y-6 p-5 md:p-6">
-      <Button size="xs" variant="ghost" onClick={back}>
-        ← All providers
-      </Button>
+      <div className="sticky top-0 z-10 -mx-1 bg-popover py-1">
+        <Button size="xs" variant="ghost" onClick={back}>
+          ← All providers
+        </Button>
+      </div>
       <div className="flex min-w-0 items-center gap-3">
         <ProviderInstanceIcon
           driverKind={provider.driver}
@@ -91,46 +104,74 @@ export function ProviderConnectionDetail({
           </p>
         </div>
       </div>
-      {!authenticationActive(attempt.status) && attempt.phase !== "preparing" ? (
-        <section className="space-y-2 rounded-xl border p-4">
+      {!authenticationActive(attempt.status) && attempt.phase !== "preparing" && !success ? (
+        <section className="space-y-3 rounded-xl border p-4">
           <p className={`text-sm font-medium ${CONNECTION_TONES[status.tone]}`}>{status.label}</p>
           <p className="text-xs text-muted-foreground">
             {status.subline || verificationCopy(readiness, now)}
           </p>
           {readiness.installed === "blocked" ? (
-            <>
-              <p className="text-sm">
-                Nebula can't find this provider's official executable on {host}. Install it or set
-                the executable path in Provider Settings.
-              </p>
-              {INSTALL_GUIDES[provider.driver] ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    void ensureLocalApi().shell.openExternal(INSTALL_GUIDES[provider.driver]!)
-                  }
-                >
-                  Install guide ↗
-                </Button>
-              ) : null}
-            </>
+            <p className="text-sm">
+              Nebula can't find this provider's official executable on {host}. Install it or set the
+              executable path in Provider Settings.
+            </p>
           ) : null}
           {readiness.modelAvailability === "blocked" ? (
             <p className="text-sm">
-              The selected model isn't offered to this account. Choose another model in the existing
-              model picker or Provider Settings.
+              The selected model isn't offered to this account. Choose another model in the model
+              picker or Provider Settings.
             </p>
           ) : null}
-          {canOperate ? (
-            <Button size="sm" variant="outline" onClick={check}>
-              Check again
-            </Button>
-          ) : (
+          <div className="flex flex-wrap gap-2">
+            {status.primaryAction === "settings" ||
+            status.primaryAction === "models" ||
+            (status.primaryAction === "install" && !INSTALL_GUIDES[provider.driver]) ? (
+              <Button
+                size="sm"
+                render={
+                  <Link
+                    to="/settings/providers"
+                    search={{ instance: provider.instanceId, environment: environmentId }}
+                  />
+                }
+              >
+                {status.primaryAction === "models"
+                  ? "Choose another model"
+                  : provider.enabled === false
+                    ? "Enable in Provider Settings"
+                    : "Review in Provider Settings"}
+              </Button>
+            ) : status.primaryAction === "install" ? (
+              <Button
+                size="sm"
+                onClick={() =>
+                  void ensureLocalApi().shell.openExternal(INSTALL_GUIDES[provider.driver]!)
+                }
+              >
+                Install guide ↗
+              </Button>
+            ) : status.primaryAction === "check" && canOperate ? (
+              <Button size="sm" onClick={check}>
+                Check again
+              </Button>
+            ) : primaryStartInStatus && !attempt.error && attempt.status?.ceremonies.length ? (
+              <Button size="sm" disabled={attempt.busy} onClick={() => setStartRequested(true)}>
+                {remote && attempt.status.ceremonies.includes("device-code")
+                  ? "Sign in with a device code"
+                  : signInCopy(provider.driver).label}
+              </Button>
+            ) : null}
+            {canOperate && provider.enabled !== false && status.primaryAction !== "check" ? (
+              <Button size="sm" variant="outline" onClick={check}>
+                Check again
+              </Button>
+            ) : null}
+          </div>
+          {!canOperate ? (
             <p className="text-xs text-muted-foreground">
               Checking needs Operate access on {host}.
             </p>
-          )}
+          ) : null}
         </section>
       ) : null}
       {capability ? (
@@ -141,6 +182,12 @@ export function ProviderConnectionDetail({
           instance={instance}
           attempt={attempt}
           done={close}
+          beginRequested={beginRequested || startRequested}
+          onBeginHandled={() => {
+            setStartRequested(false);
+            onBeginHandled?.();
+          }}
+          primaryStartInStatus={primaryStartInStatus}
         />
       ) : (
         <p className="rounded-lg border p-4 text-sm text-muted-foreground">
@@ -148,8 +195,7 @@ export function ProviderConnectionDetail({
           the provider's official CLI and check again.
         </p>
       )}
-      <section className="space-y-3">
-        <h3 className="text-sm font-semibold">Account and sign-in</h3>
+      <section aria-label="Account identity" className="space-y-3">
         <div className="text-xs">
           {readiness.account === "verified" && provider.auth.email ? (
             <RedactedSensitiveText
@@ -159,17 +205,22 @@ export function ProviderConnectionDetail({
               revealTooltip="Reveal account"
               hideTooltip="Hide account"
             />
+          ) : readiness.account === "verified" ? (
+            "Account identity verified; details not reported"
           ) : (
             "Account not reported"
           )}
         </div>
       </section>
-      <section data-provider-connection-readiness>
+      <section
+        data-provider-connection-readiness
+        tabIndex={-1}
+        className="outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
         {readiness.modelAvailability === "unknown" ? (
           <p className="mb-3 text-xs text-muted-foreground">
-            Model access is not verified. Static catalogs, custom models, stale checks and a missing
-            selection do not prove account access. Select a model in the existing picker and check
-            again.
+            Model access is not verified. Select a model in the model picker and check again. A
+            listed model alone does not confirm account access.
           </p>
         ) : null}
         <h3 className="mb-2 text-sm font-semibold">Readiness</h3>
@@ -199,7 +250,7 @@ export function ProviderConnectionDetail({
       </section>
       <details className="rounded-xl border p-4">
         <summary className="cursor-pointer text-sm font-medium">Diagnostics</summary>
-        <pre className="mt-3 whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground">
+        <pre className="mt-3 whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
           {diagnostics}
         </pre>
         {attempt.status ? (
