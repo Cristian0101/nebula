@@ -1,3 +1,5 @@
+import { ProviderConnectionsLink } from "../providerConnections/ProviderConnectionsContext";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { type ServerProvider } from "@t3tools/contracts";
 import { memo } from "react";
 import { InfoIcon, XIcon } from "lucide-react";
@@ -23,9 +25,11 @@ export function shouldShowProviderStatusBanner(
 export const ProviderStatusBanner = memo(function ProviderStatusBanner({
   onDismiss,
   status,
+  environmentId,
 }: {
   onDismiss: () => void;
   status: ServerProvider | null;
+  environmentId?: EnvironmentId | undefined;
 }) {
   if (!status || status.status === "ready" || status.status === "disabled") {
     return null;
@@ -37,7 +41,7 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
     ? `${providerName} is unauthenticated`
     : `${providerName} provider status`;
   const message = isUnauthenticated
-    ? "Sign in via the CLI to authenticate again."
+    ? "Open Provider Connections to inspect this host and its official sign-in options."
     : (status.message ??
       (status.status === "error"
         ? `${providerName} provider is unavailable.`
@@ -66,6 +70,9 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
               {message}
             </TooltipPopup>
           </Tooltip>
+          <ProviderConnectionsLink environmentId={environmentId} instanceId={status.instanceId}>
+            Open Provider Connections
+          </ProviderConnectionsLink>
         </div>
         <Button
           aria-label={`Dismiss ${providerName} provider ${status.status}`}
