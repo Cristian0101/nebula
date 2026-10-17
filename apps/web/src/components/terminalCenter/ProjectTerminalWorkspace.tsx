@@ -1395,6 +1395,7 @@ const RepositoryDiffPane = memo(function RepositoryDiffPane({
 });
 
 const CanonicalPreviewSurface = memo(function CanonicalPreviewSurface({
+  restoreOnly = false,
   threadRef,
   annotationThreadRef,
   url,
@@ -1405,6 +1406,7 @@ const CanonicalPreviewSurface = memo(function CanonicalPreviewSurface({
   onSendAnnotation,
   persistAnnotationToDraft,
 }: {
+  readonly restoreOnly?: boolean;
   readonly threadRef: ScopedThreadRef;
   readonly annotationThreadRef?: ScopedThreadRef;
   readonly url: string;
@@ -1426,7 +1428,7 @@ const CanonicalPreviewSurface = memo(function CanonicalPreviewSurface({
     activeSnapshot?.navStatus._tag === "Idle" ? null : activeSnapshot?.navStatus.url;
 
   useEffect(() => {
-    if (!url) return;
+    if (!url || (restoreOnly && refreshKey === 0)) return;
     const requestKey = `${url}:${refreshKey}`;
     if (requestedKeyRef.current === requestKey) return;
     if (refreshKey === 0 && activeUrl === url) {
@@ -1442,7 +1444,14 @@ const CanonicalPreviewSurface = memo(function CanonicalPreviewSurface({
     return () => {
       disposed = true;
     };
-  }, [activeUrl, openPreview, refreshKey, threadRef, url]);
+  }, [activeUrl, openPreview, refreshKey, restoreOnly, threadRef, url]);
+
+  if (restoreOnly && refreshKey === 0 && activeUrl !== url)
+    return (
+      <p role="status" className="p-4 text-sm text-muted-foreground">
+        Existing Preview unavailable. Inspection does not start a browser or service.
+      </p>
+    );
 
   if (openFailed)
     return (
@@ -1480,6 +1489,7 @@ const CanonicalPreviewSurface = memo(function CanonicalPreviewSurface({
 });
 
 const PreviewSurface = memo(function PreviewSurface({
+  restoreOnly = false,
   threadRef,
   annotationThreadRef,
   url,
@@ -1496,6 +1506,7 @@ const PreviewSurface = memo(function PreviewSurface({
   onSendAnnotation,
   persistAnnotationToDraft,
 }: {
+  readonly restoreOnly?: boolean;
   readonly threadRef: ScopedThreadRef;
   readonly annotationThreadRef?: ScopedThreadRef;
   readonly url: string;
@@ -1518,6 +1529,13 @@ const PreviewSurface = memo(function PreviewSurface({
   useEffect(() => {
     setFrameState(state === "ready" ? "connecting" : "failed");
   }, [refreshKey, state, url]);
+
+  if (restoreOnly && state !== "ready")
+    return (
+      <p role="status" className="p-4 text-sm text-muted-foreground">
+        Existing Preview unavailable. Inspection does not start a browser or service.
+      </p>
+    );
 
   if (!url || state === "idle")
     return (
@@ -1601,6 +1619,7 @@ const PreviewSurface = memo(function PreviewSurface({
   if (isPreviewSupportedInRuntime())
     return (
       <CanonicalPreviewSurface
+        restoreOnly={restoreOnly}
         threadRef={threadRef}
         {...(annotationThreadRef ? { annotationThreadRef } : {})}
         url={url}
@@ -1753,12 +1772,14 @@ export function ProjectTerminalWorkspace({
   displayName,
   initialTaskId,
   initialFilesOpen = false,
+  restoreOnly = false,
 }: {
   readonly project: WorkspaceProject;
   readonly projectKey: string;
   readonly displayName: string;
   readonly initialTaskId?: string;
   readonly initialFilesOpen?: boolean;
+  readonly restoreOnly?: boolean;
 }) {
   const allProjects = useProjects();
   const identitiesKnown = useAtomValue(allEnvironmentProjectIdentitiesKnownAtom);
@@ -3627,6 +3648,7 @@ export function ProjectTerminalWorkspace({
       const previewUrl = liveServer?.url ?? pane.previewUrl ?? "";
       return (
         <PreviewSurface
+          restoreOnly={restoreOnly}
           threadRef={previewThreadRef}
           url={previewUrl}
           title={pane.title}
@@ -4287,6 +4309,7 @@ export function ProjectTerminalWorkspace({
   const stagePreview = (
     <div className="h-full min-h-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <PreviewSurface
+        restoreOnly={restoreOnly}
         threadRef={previewThreadRef}
         {...(designMode && designTargetThreadRef
           ? { annotationThreadRef: designTargetThreadRef }

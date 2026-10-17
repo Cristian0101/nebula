@@ -31,7 +31,7 @@ do not affect selection. No provider session or execution authority is added to 
 ## Navigation surfaces
 
 The existing sidebar mounts `SidebarProjectSection`; the active Project exposes
-Overview, Workbench, Tasks, and Settings. Other Projects stay collapsed. Its checkout
+Overview, Workbench, Branches, Tasks, and Settings. Other Projects stay collapsed. Its checkout
 line remains visible when destinations are collapsed. Focus/hover disclosure shows
 hosts and paths; arrow keys move between Project headings or expand/collapse the active
 one. Existing Threads inbox, shortcuts, provider entry points, and the legacy sidebar
@@ -40,9 +40,10 @@ remain available. Project attention composition belongs to the Project Home mile
 `ProjectCheckoutSwitcher` explicitly selects a physical Project and changes only the
 view. The palette offers bounded navigation and checkout choices without new default
 shortcuts. Files opens the existing Workbench file dialog (`files=true`, presentation
-only). Branches and Notes destinations remain hidden. Global Terminal Center keeps its
-name; the project destination is Workbench. No inventory query is required for ordinary
-navigation, so older hosts need no new capability or RPC to support this slice.
+only). Branches opens the [read-only inventory and inspection screen](../user/branches-worktrees.md).
+Notes remains hidden. Global Terminal Center keeps its name; the project destination is
+Workbench. Project selection and the other destinations require no inventory query. Older
+hosts can still navigate; Branches explains when inventory capability is unavailable.
 
 ## Workbench migration and recovery
 
@@ -67,5 +68,7 @@ open/stop operations retain their existing RPC authorization. Navigation never c
 out a branch, changes a Task/Thread binding, starts inference, replaces a terminal,
 stops a session, removes a worktree, or replays a saved command.
 
-This is client presentation state only. E4.S mutation containment, E3 Provider Connections,
-E4.2B Project Home, E4.3 Branches, and E4.4 server coordination remain separate work.
+This is client presentation state only. E4.2B Project Home and E4.3A Branches compose this
+navigation contract. E4.S mutation containment and E3 Provider Connections retain separate
+integration and acceptance gates. Branch/worktree creation and E4.4 server coordination
+remain separate work.

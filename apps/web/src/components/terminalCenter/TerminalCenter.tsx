@@ -6,10 +6,12 @@ export function TerminalCenterPage({
   projectKey,
   initialTaskId,
   initialFilesOpen = false,
+  restoreOnly = false,
 }: {
   readonly projectKey: string;
   readonly initialTaskId?: string;
   readonly initialFilesOpen?: boolean;
+  readonly restoreOnly?: boolean;
 }) {
   const groups = useSettingsProjectGroups();
   const group = groups.find((candidate) => candidate.projectKey === projectKey) ?? null;
@@ -30,6 +32,7 @@ export function TerminalCenterPage({
       key={`${project.environmentId}:${project.id}`}
       project={project}
       initialFilesOpen={initialFilesOpen}
+      restoreOnly={restoreOnly}
       projectKey={projectKey}
       displayName={group.displayName}
       {...(initialTaskId ? { initialTaskId } : {})}

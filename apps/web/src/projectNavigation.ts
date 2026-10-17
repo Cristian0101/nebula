@@ -4,6 +4,7 @@ import type { SidebarProjectSnapshot } from "./sidebarProjectGrouping";
 export const PROJECT_DESTINATIONS = [
   { id: "overview", label: "Overview", to: "/projects/$projectKey" },
   { id: "workbench", label: "Workbench", to: "/projects/$projectKey/terminal-center" },
+  { id: "branches", label: "Branches", to: "/projects/$projectKey/branches" },
   { id: "tasks", label: "Tasks", to: "/projects/$projectKey/command-deck" },
   { id: "settings", label: "Settings", to: "/projects/$projectKey/settings" },
 ] as const;

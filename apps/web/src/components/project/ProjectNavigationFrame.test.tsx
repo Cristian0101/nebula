@@ -150,6 +150,23 @@ describe("project navigation execution boundary", () => {
     ).toContain("Checkout unavailable");
     expect(child).not.toHaveBeenCalled();
   });
+  it("mounts read-only Branches on an offline exact host for labelled cached observations", () => {
+    fixture.phase = "offline";
+    const child = vi.fn(() => <div>Cached Branches</div>);
+    expect(
+      renderToStaticMarkup(
+        <ProjectNavigationFrame
+          projectKey={group.projectKey}
+          checkout={checkout}
+          destination="branches"
+        >
+          {child}
+        </ProjectNavigationFrame>,
+      ),
+    ).toContain("Cached Branches");
+    expect(child).toHaveBeenCalledWith(group.projectKey);
+    expect(fixture.navigate).not.toHaveBeenCalled();
+  });
   it("mounts the existing destination only for its exact canonical checkout", () => {
     const child = vi.fn(() => <div>Existing destination</div>);
     expect(
