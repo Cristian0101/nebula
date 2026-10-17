@@ -137,6 +137,16 @@ export function createProjectEnvironmentAtoms<R, E>(
       JSON.stringify([environmentId, input.runId]),
   };
   return {
+    inventory: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:inventory",
+      tag: WS_METHODS.vcsGetProjectInventory,
+      staleTimeMs: 0,
+    }),
+    workspaceContext: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:workspace-context",
+      tag: ORCHESTRATION_WS_METHODS.getProjectWorkspaceContext,
+      staleTimeMs: 0,
+    }),
     searchEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:projects:search-entries",
       tag: WS_METHODS.projectsSearchEntries,
