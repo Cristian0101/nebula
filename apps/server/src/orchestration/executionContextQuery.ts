@@ -9,6 +9,11 @@ import { ProviderService } from "../provider/Services/ProviderService.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 import { resolveThreadWorkspaceCwd } from "../checkpointing/Utils.ts";
 
+export const canonicalWorkspacePath = (
+  fs: FileSystem.FileSystem,
+  path: string | null | undefined,
+) => (path ? fs.realPath(path).pipe(Effect.orElseSucceed(() => null)) : Effect.succeed(null));
+
 /** Composes existing read services. The result never authorizes or retargets execution. */
 export const makeExecutionContextQuery = Effect.gen(function* () {
   const projections = yield* ProjectionSnapshotQuery;
@@ -16,8 +21,7 @@ export const makeExecutionContextQuery = Effect.gen(function* () {
   const git = yield* GitWorkflowService;
   const providers = yield* ProviderService;
   const fs = yield* FileSystem.FileSystem;
-  const realPath = (path: string | null | undefined) =>
-    path ? fs.realPath(path).pipe(Effect.orElseSucceed(() => null)) : Effect.succeed(null);
+  const realPath = (path: string | null | undefined) => canonicalWorkspacePath(fs, path);
 
   return (input: { readonly threadId: ThreadId }) =>
     Effect.gen(function* () {

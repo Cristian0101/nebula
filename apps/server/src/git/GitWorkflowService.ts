@@ -60,6 +60,8 @@ export class GitWorkflowService extends Context.Service<
     readonly preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+    readonly observeProjectInventory: GitVcsDriver.GitVcsDriver["Service"]["observeProjectInventory"];
+    readonly inspectProjectWorkspace: GitVcsDriver.GitVcsDriver["Service"]["inspectProjectWorkspace"];
     readonly listRefs: (
       input: VcsListRefsInput,
     ) => Effect.Effect<VcsListRefsResult, GitCommandError>;
@@ -295,6 +297,8 @@ export const make = Effect.gen(function* () {
       "GitWorkflowService.preparePullRequestThread",
       gitManager.preparePullRequestThread,
     ),
+    observeProjectInventory: (input) => git.observeProjectInventory(input),
+    inspectProjectWorkspace: (input) => git.inspectProjectWorkspace(input),
     listRefs: (input) =>
       detectGitRepositoryForCommand("GitWorkflowService.listRefs", input.cwd).pipe(
         Effect.flatMap((isGitRepository) =>

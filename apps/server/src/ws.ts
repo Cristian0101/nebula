@@ -1,3 +1,4 @@
+import { makeProjectInventoryQuery } from "./orchestration/projectInventoryQuery.ts";
 import { makeExecutionContextQuery } from "./orchestration/executionContextQuery.ts";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -368,6 +369,7 @@ const makeWsRpcLayer = (
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const taskChangeSetQuery = yield* TaskChangeSetQuery.TaskChangeSetQuery;
       const getExecutionContext = yield* makeExecutionContextQuery;
+      const projectInventoryQuery = yield* makeProjectInventoryQuery;
       const keybindings = yield* Keybindings.Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
@@ -1335,6 +1337,18 @@ const makeWsRpcLayer = (
                   }),
               ),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [WS_METHODS.vcsGetProjectInventory]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsGetProjectInventory,
+            projectInventoryQuery.getProjectInventory(input),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getProjectWorkspaceContext]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getProjectWorkspaceContext,
+            projectInventoryQuery.getProjectWorkspaceContext(input),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.getExecutionContext]: (input) =>

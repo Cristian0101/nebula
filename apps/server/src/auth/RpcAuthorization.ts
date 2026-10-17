@@ -28,6 +28,8 @@ export const RPC_REQUIRED_SCOPES = {
   [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.getTaskChanges]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.getExecutionContext]: AuthOrchestrationReadScope,
+  [ORCHESTRATION_WS_METHODS.getProjectWorkspaceContext]: AuthOrchestrationReadScope,
+  [WS_METHODS.vcsGetProjectInventory]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.getTaskFileDiff]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.getIntegrationChanges]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.getIntegrationFileDiff]: AuthOrchestrationReadScope,

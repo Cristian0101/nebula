@@ -870,6 +870,13 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       const sessions = yield* provider.listSessions();
       assert.equal(sessions.length, 1);
+      const beforeFiltered = routing.codex.stopSession.mock.calls.length;
+      assert.deepEqual(yield* provider.listSessions([]), []);
+      assert.deepEqual(
+        (yield* provider.listSessions([session.threadId])).map((entry) => entry.threadId),
+        [session.threadId],
+      );
+      assert.equal(routing.codex.stopSession.mock.calls.length, beforeFiltered);
 
       yield* provider.sendTurn({
         threadId: session.threadId,
