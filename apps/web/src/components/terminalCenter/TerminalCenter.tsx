@@ -5,9 +5,11 @@ import { ProjectTerminalWorkspace } from "./ProjectTerminalWorkspace";
 export function TerminalCenterPage({
   projectKey,
   initialTaskId,
+  initialFilesOpen = false,
 }: {
   readonly projectKey: string;
   readonly initialTaskId?: string;
+  readonly initialFilesOpen?: boolean;
 }) {
   const groups = useSettingsProjectGroups();
   const group = groups.find((candidate) => candidate.projectKey === projectKey) ?? null;
@@ -25,7 +27,9 @@ export function TerminalCenterPage({
 
   return (
     <ProjectTerminalWorkspace
+      key={`${project.environmentId}:${project.id}`}
       project={project}
+      initialFilesOpen={initialFilesOpen}
       projectKey={projectKey}
       displayName={group.displayName}
       {...(initialTaskId ? { initialTaskId } : {})}

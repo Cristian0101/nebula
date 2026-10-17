@@ -1,5 +1,8 @@
 "use client";
 
+import { useProjectNavigate } from "../hooks/useProjectNavigate";
+import { PROJECT_DESTINATIONS } from "../projectNavigation";
+
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
@@ -33,7 +36,7 @@ import {
   type SourceControlRepositoryInfo,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
 } from "@t3tools/contracts";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useLocation, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
@@ -119,6 +122,7 @@ import {
   buildBrowseGroups,
   buildProjectActionItems,
   buildRootGroups,
+  buildProjectNavigationGroups,
   buildThreadActionItems,
   enumerateCommandPaletteItems,
   type CommandPaletteActionItem,
@@ -565,7 +569,7 @@ function OpenCommandPaletteDialog(props: {
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly clearOpenIntent: () => void;
 }) {
-  const navigate = useNavigate();
+  const navigate = useProjectNavigate();
   const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -1735,9 +1739,15 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
-  // There is no projects listing page; the action targets the contextual
-  // project (active thread/draft, falling back to the first sidebar group).
+  const activeNavigation = useUiStateStore((state) => state.activeProjectNavigation);
+  const rememberedNavigation = useUiStateStore((state) => state.projectNavigationByKey);
+  const routeProjectKey = useParams({ strict: false, select: (params) => params.projectKey });
+  const routeCheckout = useLocation({ select: (location) => location.search.checkout });
+  // Project navigation follows the route or persisted Project selection.
   const contextualProjectGroup =
+    projectGroups.find(
+      (group) => group.projectKey === (routeProjectKey ?? activeNavigation?.projectKey),
+    ) ??
     (contextualProjectRef
       ? projectGroupByTargetKey.get(
           `${contextualProjectRef.environmentId}:${contextualProjectRef.projectId}`,
@@ -1757,51 +1767,36 @@ function OpenCommandPaletteDialog(props: {
         await navigate({
           to: "/projects/$projectKey/command-deck",
           params: { projectKey: contextualProjectGroup.projectKey },
-          search: { mode: "swarm", stage: "brief" },
-        });
-      },
-    });
-    actionItems.push({
-      kind: "action",
-      value: "action:terminal-center",
-      searchTerms: [
-        "terminal center",
-        "agent canvas",
-        "provider sessions",
-        "codex",
-        "antigravity",
-        "claude",
-        "cursor",
-        "grok",
-        "opencode",
-      ],
-      title: "Open Terminal Center",
-      description: contextualProjectGroup.displayName,
-      icon: <TerminalIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        await navigate({
-          to: "/projects/$projectKey/terminal-center",
-          params: { projectKey: contextualProjectGroup.projectKey },
-        });
-      },
-    });
-    actionItems.push({
-      kind: "action",
-      value: "action:project-settings",
-      searchTerms: ["project", "settings", "scripts", "model", "grouping", "checkout"],
-      title: "Project settings",
-      description: contextualProjectGroup.displayName,
-      icon: <FolderIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        await navigate({
-          to: "/projects/$projectKey/settings",
-          params: { projectKey: contextualProjectGroup.projectKey },
+          search: {
+            mode: "swarm",
+            stage: "brief",
+            ...(rememberedNavigation?.[contextualProjectGroup.projectKey]?.checkout !== undefined
+              ? { checkout: rememberedNavigation[contextualProjectGroup.projectKey]!.checkout }
+              : {}),
+          },
         });
       },
     });
   }
 
-  const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
+  const navigationGroups = buildProjectNavigationGroups({
+    groups: projectGroups,
+    activeProjectKey: routeProjectKey ?? activeNavigation?.projectKey,
+    activeCheckout: routeProjectKey
+      ? (routeCheckout ?? rememberedNavigation?.[routeProjectKey]?.checkout)
+      : activeNavigation?.checkout,
+    remembered: rememberedNavigation ?? {},
+    icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+    open: async (projectKey, destination, checkout) => {
+      const target = PROJECT_DESTINATIONS.find((entry) => entry.id === destination)!;
+      await navigate({
+        to: target.to,
+        params: { projectKey },
+        search: checkout !== undefined ? { checkout } : {},
+      });
+    },
+  });
+  const rootGroups = [...navigationGroups, ...buildRootGroups({ actionItems, recentThreadItems })];
   const sourceSelectionViewValue =
     addProjectEnvironmentId === null ? null : `sources:${addProjectEnvironmentId}`;
   const activeGroups =

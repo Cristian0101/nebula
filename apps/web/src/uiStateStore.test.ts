@@ -491,6 +491,8 @@ describe("parsePersistedState", () => {
     });
 
     expect(parsed).toEqual({
+      activeProjectNavigation: null,
+      projectNavigationByKey: {},
       projectExpandedById: {
         logical: false,
       },
@@ -612,6 +614,8 @@ describe("uiStateStore persistence", () => {
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
     expect(persisted).toEqual({
+      activeProjectNavigation: null,
+      projectNavigationByKey: {},
       projectExpandedById: {
         logical: false,
       },
@@ -632,6 +636,8 @@ describe("uiStateStore persistence", () => {
     });
     expect(parsePersistedState(persisted)).toEqual({
       ...state,
+      activeProjectNavigation: null,
+      projectNavigationByKey: {},
     });
   });
 

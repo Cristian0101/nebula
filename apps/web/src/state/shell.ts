@@ -22,6 +22,17 @@ export const environmentShellSummaryAtom = createEnvironmentShellSummaryAtom({
   shellStateValueAtom: environmentShell.stateValueAtom,
 });
 
+// Identity migration needs every known host's snapshot, including cached offline
+// hosts. A settled connection attempt alone does not establish uniqueness.
+export const allEnvironmentProjectIdentitiesKnownAtom = Atom.make((get) => {
+  const catalog = AsyncResult.value(get(environmentCatalog.catalogAtom));
+  if (Option.isNone(catalog)) return false;
+  for (const environmentId of catalog.value.entries.keys()) {
+    if (Option.isNone(get(environmentShell.stateValueAtom(environmentId)).snapshot)) return false;
+  }
+  return true;
+}).pipe(Atom.withLabel("web-all-environment-project-identities-known"));
+
 export const allEnvironmentShellsBootstrappedAtom = Atom.make((get) => {
   const catalog = AsyncResult.value(get(environmentCatalog.catalogAtom));
   if (Option.isNone(catalog)) {

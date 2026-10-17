@@ -1,3 +1,4 @@
+import { decodeProjectCheckout } from "../projectNavigation";
 import { useAtomValue } from "@effect/atom-react";
 import {
   scopedProjectKey,
@@ -5,7 +6,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
-import { useParams, useRouter } from "@tanstack/react-router";
+import { useLocation, useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
   composerDraftHasUserContent,
@@ -435,6 +436,14 @@ export function useNewThreadHandler() {
 }
 
 export function useHandleNewThread() {
+  const routeProjectKey = useParams({ strict: false, select: (params) => params.projectKey });
+  const routeCheckout = useLocation({ select: (location) => location.search.checkout });
+  const navigationSelection = useUiStateStore((state) =>
+    routeProjectKey
+      ? state.projectNavigationByKey?.[routeProjectKey]
+      : state.activeProjectNavigation,
+  );
+  const groupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const routeTarget = useParams({
     strict: false,
@@ -463,12 +472,28 @@ export function useHandleNewThread() {
     });
   }, [projectOrder, projects]);
   const handleNewThread = useNewThreadHandler();
+  const hasNavigationSelection = routeProjectKey !== undefined || navigationSelection != null;
+  const selectedRef = decodeProjectCheckout(
+    routeProjectKey
+      ? (routeCheckout ?? navigationSelection?.checkout ?? "")
+      : (navigationSelection?.checkout ?? ""),
+  );
+  const selectedProject = selectedRef
+    ? projects.find(
+        (project) =>
+          project.environmentId === selectedRef.environmentId &&
+          project.id === selectedRef.projectId &&
+          deriveLogicalProjectKeyFromSettings(project, groupingSettings) ===
+            (routeProjectKey ?? navigationSelection?.projectKey),
+      )
+    : null;
+  const defaultProject = hasNavigationSelection ? selectedProject : orderedProjects[0];
 
   return {
     activeDraftThread,
     activeThread,
-    defaultProjectRef: orderedProjects[0]
-      ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
+    defaultProjectRef: defaultProject
+      ? scopeProjectRef(defaultProject.environmentId, defaultProject.id)
       : null,
     handleNewThread,
     routeThreadRef,

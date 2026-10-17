@@ -1,3 +1,5 @@
+import { ProjectNavigationFrame } from "../components/project/ProjectNavigationFrame";
+import { parseProjectNavigationSearch } from "../projectNavigation";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 
@@ -14,6 +16,7 @@ const SwarmWorkspacePage = lazy(() =>
 );
 
 export interface CommandDeckSearch {
+  readonly checkout?: string;
   readonly mode?: "swarm";
   readonly stage?: "brief" | "plan" | "war-room" | "review";
   readonly proposalId?: string;
@@ -23,7 +26,7 @@ export interface CommandDeckSearch {
 
 export const Route = createFileRoute("/projects/$projectKey_/command-deck")({
   validateSearch: (search: Record<string, unknown>): CommandDeckSearch => {
-    if (search.mode !== "swarm") return {};
+    if (search.mode !== "swarm") return parseProjectNavigationSearch(search);
     const stage: NonNullable<CommandDeckSearch["stage"]> = [
       "brief",
       "plan",
@@ -33,6 +36,7 @@ export const Route = createFileRoute("/projects/$projectKey_/command-deck")({
       ? (search.stage as NonNullable<CommandDeckSearch["stage"]>)
       : "brief";
     return {
+      ...parseProjectNavigationSearch(search),
       mode: "swarm",
       stage,
       ...(typeof search.proposalId === "string" ? { proposalId: search.proposalId } : {}),
@@ -55,18 +59,22 @@ function CommandDeckRoute() {
   const { projectKey } = Route.useParams();
   const search = Route.useSearch();
   return (
-    <Suspense
-      fallback={
-        <div className="flex h-dvh items-center justify-center bg-background text-sm text-muted-foreground">
-          Loading Command Deck…
-        </div>
-      }
-    >
-      {search.mode === "swarm" ? (
-        <SwarmWorkspacePage projectKey={projectKey} search={search} />
-      ) : (
-        <CommandDeckPage projectKey={projectKey} />
+    <ProjectNavigationFrame projectKey={projectKey} checkout={search.checkout} destination="tasks">
+      {(resolvedKey) => (
+        <Suspense
+          fallback={
+            <div className="flex h-dvh items-center justify-center bg-background text-sm text-muted-foreground">
+              Loading Command Deck…
+            </div>
+          }
+        >
+          {search.mode === "swarm" ? (
+            <SwarmWorkspacePage projectKey={resolvedKey} search={search} />
+          ) : (
+            <CommandDeckPage projectKey={resolvedKey} />
+          )}
+        </Suspense>
       )}
-    </Suspense>
+    </ProjectNavigationFrame>
   );
 }

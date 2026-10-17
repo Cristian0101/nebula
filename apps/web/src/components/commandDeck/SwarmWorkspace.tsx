@@ -1,3 +1,5 @@
+import { encodeProjectCheckout } from "../../projectNavigation";
+import { useProjectNavigate } from "../../hooks/useProjectNavigate";
 import { useAtomValue } from "@effect/atom-react";
 import {
   ArchitectPlanProposalId,
@@ -29,7 +31,6 @@ import {
   resolveMissionCheckpointState,
   summarizeMissionReviewCoverage,
 } from "@t3tools/shared/missionRunner";
-import { useNavigate } from "@tanstack/react-router";
 import {
   ActivityIcon,
   AlertCircleIcon,
@@ -206,7 +207,7 @@ function SwarmHeader({
   runAvailable: boolean;
   reviewAvailable: boolean;
 }) {
-  const navigate = useNavigate();
+  const navigate = useProjectNavigate();
   const entries: ReadonlyArray<{
     stage: SwarmStage;
     label: string;
@@ -1720,7 +1721,7 @@ function WarRoomView({
   onApproveCheckpoint: (checkpointKey: string) => void;
   onOpenReview: () => void;
 }) {
-  const navigate = useNavigate();
+  const navigate = useProjectNavigate();
   const setTerminalSelection = useUiStateStore((state) => state.setTerminalCenterSelection);
   const elapsed = useElapsedSeconds(
     run.startedAt,
@@ -1750,7 +1751,10 @@ function WarRoomView({
     ),
   ).length;
   const openTerminal = (thread: OrchestrationThreadShell, taskId: TaskId) => {
-    setTerminalSelection(project.id, thread.id);
+    setTerminalSelection(
+      encodeProjectCheckout({ environmentId, projectId: project.id }),
+      thread.id,
+    );
     void navigate({
       to: "/projects/$projectKey/terminal-center",
       params: { projectKey },
@@ -2301,7 +2305,7 @@ function SwarmWorkspace({
   projectRef: ReturnType<typeof useSettingsProjectGroups>[number]["memberProjects"][number];
   search: CommandDeckSearch;
 }) {
-  const navigate = useNavigate();
+  const navigate = useProjectNavigate();
   const snapshot = useAtomValue(environmentSnapshotAtom(projectRef.environmentId));
   const serverConfig = useServerConfigs().get(projectRef.environmentId) ?? null;
   const settings = usePrimarySettings();
