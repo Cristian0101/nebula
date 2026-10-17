@@ -10,10 +10,9 @@ import {
   type ProviderInstanceConfig,
 } from "@t3tools/contracts";
 import { deriveProviderReadiness } from "@t3tools/shared/providerReadiness";
-import { useActiveEnvironmentId } from "../../state/entities";
+import { useProviderConnectionsEnvironment } from "./useProviderConnectionsEnvironment";
 import {
   useEnvironments,
-  usePrimaryEnvironmentId,
   useEnvironmentConnectionState,
   type EnvironmentPresentation,
 } from "../../state/environments";
@@ -49,8 +48,7 @@ export function ProviderConnectionsHost({ children }: { children: ReactNode }) {
   const search = useLocation({ select: (l) => l.search });
   const params = parseProviderConnectionsSearch(search);
   const navigate = useNavigate();
-  const active = useActiveEnvironmentId();
-  const primary = usePrimaryEnvironmentId();
+  const selectedEnvironment = useProviderConnectionsEnvironment();
   const { environments } = useEnvironments();
   const origin = useRef<HTMLElement | null>(null);
   const [initialFilter, setInitialFilter] = useState("all");
@@ -67,7 +65,8 @@ export function ProviderConnectionsHost({ children }: { children: ReactNode }) {
       filter?: "attention",
     ) => {
       if (!params.connections) setInitialFilter(filter ?? "all");
-      const hostId = environmentId ?? active ?? primary;
+      const hostId = environmentId ?? selectedEnvironment;
+      if (!hostId) return;
       if (instanceId && hostId && selectedModel)
         setModelSelection({ instanceId, environmentId: hostId, model: selectedModel });
       else if (!params.connections) setModelSelection(null);
@@ -79,13 +78,11 @@ export function ProviderConnectionsHost({ children }: { children: ReactNode }) {
         search: (previous) => ({
           ...previous,
           connections: instanceId ?? "all",
-          ...((environmentId ?? active ?? primary)
-            ? { connectionsEnv: (environmentId ?? active ?? primary)! }
-            : {}),
+          connectionsEnv: hostId,
         }),
       });
     },
-    [navigate, active, primary, params.connections],
+    [navigate, selectedEnvironment, params.connections],
   );
   const close = useCallback(() => {
     void navigate({
@@ -97,7 +94,7 @@ export function ProviderConnectionsHost({ children }: { children: ReactNode }) {
       replace: true,
     });
   }, [navigate]);
-  const environmentId = params.connectionsEnv ?? active ?? primary;
+  const environmentId = params.connectionsEnv ?? selectedEnvironment;
   const environment = environments.find((e) => e.environmentId === environmentId);
   return (
     <ProviderConnectionsContext value={open}>

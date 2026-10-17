@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
 import { deriveProviderReadiness } from "@t3tools/shared/providerReadiness";
-import { useActiveEnvironmentId } from "../../state/entities";
-import { usePrimaryEnvironmentId, useEnvironmentConnectionState } from "../../state/environments";
+import { useEnvironmentConnectionState } from "../../state/environments";
+import { useProviderConnectionsEnvironment } from "./useProviderConnectionsEnvironment";
 import { useEnvironmentSessionState } from "../../state/session";
 import { serverEnvironment, EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { ProviderConnectionsLink } from "./ProviderConnectionsContext";
@@ -17,9 +17,8 @@ export function ProviderConnectionEntry({
   environmentId?: EnvironmentId | undefined;
   mode?: "summary" | "toolbar";
 }) {
-  const active = useActiveEnvironmentId();
-  const primary = usePrimaryEnvironmentId();
-  const id = environmentId ?? active ?? primary;
+  const selectedEnvironment = useProviderConnectionsEnvironment();
+  const id = environmentId ?? selectedEnvironment;
   return id ? <ScopedEntry environmentId={id} mode={mode} /> : null;
 }
 function ScopedEntry({

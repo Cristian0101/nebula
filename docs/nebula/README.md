@@ -11,6 +11,10 @@ This directory is the durable product and architecture source of truth for Nebul
 
 ## Document map
 
+The [Super ADE capability reconciliation](SUPER_ADE_INTEGRATION.md) distinguishes
+the integrated E3/E4 candidate from proposed creation, coordinated switching,
+Notes, Ion and outstanding human acceptance.
+
 | Document                                    | Purpose                                                                                 |
 | ------------------------------------------- | --------------------------------------------------------------------------------------- |
 | [PRD](PRD.md)                               | Product identity, boundaries, principles, and release sequence.                         |

@@ -13,6 +13,11 @@ const fixture = vi.hoisted(() => ({
   remember: vi.fn(),
   navigate: vi.fn(),
 }));
+vi.mock("../providerConnections/ProviderConnectionEntry", () => ({
+  ProviderConnectionEntry: ({ environmentId }: { environmentId: string }) => (
+    <span data-provider-environment={environmentId}>Provider entry</span>
+  ),
+}));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => true }));
 vi.mock("../../state/shell", () => ({
   allEnvironmentProjectIdentitiesKnownAtom: "known-identities",

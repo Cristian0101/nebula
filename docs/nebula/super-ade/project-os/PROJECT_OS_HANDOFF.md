@@ -1,6 +1,9 @@
 # Project OS V2 engineering handoff (E4)
 
-**Status:** Proposed (D4). Design authority for E4.1–E4.4. Codex owns implementation choices inside these boundaries.
+**Status:** D4 handoff, including proposed work. The [capability reconciliation](../../SUPER_ADE_INTEGRATION.md)
+records implemented E4.1/E4.2A/E4.2B/E4.3A. E4.3B creation and E4.4 coordination
+remain proposed; Notes and Ion default migration remain deferred. The founder's
+I1 instruction preserves D4 P1–P10 without approving foundation F1–F16.
 
 Read [PROJECT_OS_DESIGN.md](PROJECT_OS_DESIGN.md) first. Code paths resolve at `main` `784473fb5` unless marked **E3** (`131085ff8`). Every "proposed" name below is a design name for something that does not exist yet; Codex may rename it, but must keep its contract.
 

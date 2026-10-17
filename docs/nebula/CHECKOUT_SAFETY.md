@@ -86,5 +86,6 @@ Before restoring these mutations, extend the existing server runtime to:
    process startup races, remote disconnects and preserved files/session/history
    with disposable worktrees and synthetic provider/process fixtures.
 
-No E4.1 navigation or Project OS redesign is implemented here. E4.1 still depends
-on its separate design and E3 acceptance/integration decisions.
+E4.1 read-only inventory and Project OS navigation compose this policy in I1.
+They grant no mutation authority. See [capability reconciliation](SUPER_ADE_INTEGRATION.md)
+for implemented slices and separate E3/design/human acceptance boundaries.

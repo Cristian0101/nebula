@@ -1,5 +1,9 @@
 # Nebula Super ADE design foundation
 
+See [I1 capability reconciliation](../SUPER_ADE_INTEGRATION.md) for implemented
+slices and deferred creation, coordination, Notes and Ion. Foundation F1–F16
+remain founder-pending. Historical design evidence is not runtime acceptance.
+
 **Status:** Proposed (design D0, Provider Connections updated in D0.2), pending founder approval. These documents do not change runtime behavior.
 
 **D0.2** reconciles Provider Connections with delivered E1 provider readiness (PR #37, merged) and E2 authentication lifecycle (PR #40, locally accepted) and hands E3 an implementation-ready specification. Delivered behavior and proposed E3 behavior are labelled separately.

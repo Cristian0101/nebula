@@ -94,8 +94,9 @@ and offer retry. Delayed queries expose
 a loading explanation and retry. Real macOS VoiceOver and founder/design acceptance remain
 separate from automated DOM, keyboard, responsive and Electron checks.
 
-Provider recovery uses environment-scoped Provider Settings at this dependency base; E3
-Provider Connections is not imported. [Branches & Worktrees inspection](branches-worktrees.md)
+Provider recovery uses environment-scoped Provider Settings. I1 also exposes E3
+Provider Connections for the selected physical Project, preserving the Project URL
+and checkout when closing the sheet. [Branches & Worktrees inspection](branches-worktrees.md)
 is available from the Project sidebar. Checkout creation, switching/removal, Git coordination,
 Notes and Ion migration remain separate milestones. No deployment, integration merge,
 Git mutation, provider stop, process termination or paid inference belongs to Home.

@@ -14,6 +14,7 @@ import { useSettingsProjectGroups } from "../settings/ProjectSettingsPanel";
 import { ProjectNavigationContext } from "./projectNavigationContext";
 import { ProjectCheckoutSwitcher } from "./ProjectCheckoutSwitcher";
 import { Button } from "../ui/button";
+import { ProviderConnectionEntry } from "../providerConnections/ProviderConnectionEntry";
 
 export function ProjectNavigationFrame({
   projectKey,
@@ -125,6 +126,9 @@ export function ProjectNavigationFrame({
           >
             Files
           </Button>
+        ) : null}
+        {member ? (
+          <ProviderConnectionEntry environmentId={member.environmentId} mode="toolbar" />
         ) : null}
         {member ? (
           <span

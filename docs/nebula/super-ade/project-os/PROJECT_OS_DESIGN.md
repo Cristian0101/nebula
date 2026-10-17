@@ -1,6 +1,10 @@
 # Project OS V2 design
 
-**Status:** Proposed (D4), pending founder approval. Design only; no runtime change.
+**Status:** D4 design reference; P1–P10 preserved as approved under the founder's
+I1 instruction. This document includes future behavior. Consult
+[capability reconciliation](../../SUPER_ADE_INTEGRATION.md) for implemented
+slices, deferred features, temporary refusals and outstanding human acceptance.
+The original audit and proposed source maps below remain historical.
 
 **Companion documents:** [package README](README.md) · [engineering handoff](PROJECT_OS_HANDOFF.md) · [visual reference](reference/project-os.html) · foundation [contract](../SUPER_ADE_DESIGN_CONTRACT.md), [tokens](../DESIGN_TOKENS.md), [states](../INTERACTION_STATES.md), [components](../COMPONENT_SPECIFICATIONS.md), [screens](../SCREEN_BLUEPRINTS.md), [QA](../VISUAL_QA_CHECKLIST.md).
 

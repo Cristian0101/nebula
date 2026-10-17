@@ -1,6 +1,10 @@
 # Project OS V2 design package (D4 for E4)
 
-**Status:** Proposed design (D4), pending founder approval. These documents do not change runtime behavior.
+**Status:** D4 design reference. The founder's I1 instruction preserves approved
+P1–P10 decisions. Visual/runtime and human accessibility acceptance remain
+separate. See [capability reconciliation](../../SUPER_ADE_INTEGRATION.md) for
+implemented E4.1/E4.2A/E4.2B/E4.3A and proposed E4.3B/E4.4. Historical baseline
+and audit observations below describe the original design package.
 
 **North Star:** One project. Every branch. Every agent. One workspace.
 
