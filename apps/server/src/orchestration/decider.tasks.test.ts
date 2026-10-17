@@ -987,3 +987,67 @@ it.layer(NodeServices.layer)("Nebula Task decider", (it) => {
     }),
   );
 });
+
+it.effect(
+  "refuses generic Task Thread retargeting while preserving ordinary metadata and exact identity repeats",
+  () =>
+    Effect.gen(function* () {
+      let model = yield* seedReadModel;
+      model = yield* applyCommand(model, {
+        type: "task.create",
+        commandId: CommandId.make("safety-create"),
+        taskId,
+        projectId: projectA,
+        title: "Safety",
+        objective: "Preserve identity",
+        role: "reviewer",
+        createdAt: now,
+      });
+      model = yield* applyCommand(model, {
+        type: "task.bind-thread",
+        commandId: CommandId.make("safety-bind"),
+        taskId,
+        threadId: threadA,
+        createdAt: now,
+      });
+      for (const update of [
+        { branch: "another" },
+        { worktreePath: "/another-repository" },
+        { branch: "another", worktreePath: null },
+      ]) {
+        const failure = yield* decideOrchestrationCommand({
+          readModel: model,
+          command: {
+            type: "thread.meta.update",
+            commandId: CommandId.make("safety-retarget"),
+            threadId: threadA,
+            ...update,
+          },
+        }).pipe(Effect.flip);
+        expect(failure.message).toContain("belongs to a Task");
+      }
+      model = yield* applyCommand(model, {
+        type: "thread.meta.update",
+        commandId: CommandId.make("safety-same"),
+        threadId: threadA,
+        branch: null,
+        worktreePath: null,
+        title: "Renamed",
+      });
+      expect(model.threads.find((thread) => thread.id === threadA)).toMatchObject({
+        title: "Renamed",
+        branch: null,
+        worktreePath: null,
+      });
+      const failure = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.meta.update",
+          commandId: CommandId.make("safety-unbound"),
+          threadId: threadB,
+          worktreePath: "/another",
+        },
+      }).pipe(Effect.flip);
+      expect(failure.message).toContain("cannot be moved");
+    }).pipe(Effect.provide(NodeServices.layer)),
+);

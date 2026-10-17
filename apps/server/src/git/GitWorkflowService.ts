@@ -28,6 +28,7 @@ import {
   type VcsStatusResult,
 } from "@t3tools/contracts";
 
+import { refuseCheckoutMutation, WORKTREE_REMOVAL_UNAVAILABLE } from "./checkoutSafety.ts";
 import * as GitManager from "./GitManager.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -281,10 +282,7 @@ export const make = Effect.gen(function* () {
     invalidateLocalStatus: gitManager.invalidateLocalStatus,
     invalidateRemoteStatus: gitManager.invalidateRemoteStatus,
     invalidateStatus: gitManager.invalidateStatus,
-    pullCurrentBranch: (cwd) =>
-      ensureGitCommand("GitWorkflowService.pullCurrentBranch", cwd).pipe(
-        Effect.andThen(git.pullCurrentBranch(cwd)),
-      ),
+    pullCurrentBranch: (cwd) => refuseCheckoutMutation("GitWorkflowService.pullCurrentBranch", cwd),
     runStackedAction: (input, options) =>
       ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(
         Effect.andThen(gitManager.runStackedAction(input, options)),
@@ -324,17 +322,18 @@ export const make = Effect.gen(function* () {
         Effect.andThen(git.resolveRemoteTrackingCommit(input)),
       ),
     removeWorktree: (input) =>
-      ensureGitCommand("GitWorkflowService.removeWorktree", input.cwd).pipe(
-        Effect.andThen(git.removeWorktree(input)),
+      refuseCheckoutMutation(
+        "GitWorkflowService.removeWorktree",
+        input.cwd,
+        WORKTREE_REMOVAL_UNAVAILABLE,
       ),
     createRef: (input) =>
-      ensureGitCommand("GitWorkflowService.createRef", input.cwd).pipe(
-        Effect.andThen(git.createRef(input)),
-      ),
-    switchRef: (input) =>
-      ensureGitCommand("GitWorkflowService.switchRef", input.cwd).pipe(
-        Effect.andThen(Effect.scoped(git.switchRef(input))),
-      ),
+      input.switchRef
+        ? refuseCheckoutMutation("GitWorkflowService.createRef", input.cwd)
+        : ensureGitCommand("GitWorkflowService.createRef", input.cwd).pipe(
+            Effect.andThen(git.createRef(input)),
+          ),
+    switchRef: (input) => refuseCheckoutMutation("GitWorkflowService.switchRef", input.cwd),
     renameBranch: (input) =>
       ensureGit("GitWorkflowService.renameBranch", input.cwd).pipe(
         Effect.andThen(git.renameBranch(input)),

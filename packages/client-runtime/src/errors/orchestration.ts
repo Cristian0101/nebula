@@ -5,6 +5,8 @@ const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchComma
 
 export function wasBootstrapThreadDeleted(error: unknown): boolean {
   return (
-    isOrchestrationDispatchCommandError(error) && error.bootstrapThreadDisposition === "deleted"
+    isOrchestrationDispatchCommandError(error) &&
+    (error.bootstrapThreadDisposition === "deleted" ||
+      error.bootstrapThreadDisposition === "not-created")
   );
 }

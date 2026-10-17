@@ -14,6 +14,7 @@ import {
   TerminalCwdStatError,
   TerminalError,
   TerminalHistoryError,
+  TerminalLaunchContextError,
   TerminalNotRunningError,
   TerminalResizeError,
   TerminalSessionLookupError,
@@ -2217,25 +2218,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       liveSession.worktreePath !== nextWorktreePath;
 
     if (launchContextChanged) {
-      yield* stopProcess(liveSession);
-      liveSession.cwd = input.cwd;
-      liveSession.worktreePath = nextWorktreePath;
-      liveSession.runtimeEnv = nextRuntimeEnv;
-      liveSession.history = "";
-      liveSession.pendingHistoryControlSequence = "";
-      liveSession.pendingProcessEvents = [];
-      liveSession.pendingProcessEventIndex = 0;
-      liveSession.processEventDrainRunning = false;
-      yield* persistHistory(liveSession.threadId, liveSession.terminalId, liveSession.history);
-    } else if (liveSession.status === "exited" || liveSession.status === "error") {
-      liveSession.runtimeEnv = nextRuntimeEnv;
-      liveSession.worktreePath = nextWorktreePath;
-      liveSession.history = "";
-      liveSession.pendingHistoryControlSequence = "";
-      liveSession.pendingProcessEvents = [];
-      liveSession.pendingProcessEventIndex = 0;
-      liveSession.processEventDrainRunning = false;
-      yield* persistHistory(liveSession.threadId, liveSession.terminalId, liveSession.history);
+      return yield* new TerminalLaunchContextError({ threadId: input.threadId, terminalId });
     }
 
     if (!liveSession.process) {

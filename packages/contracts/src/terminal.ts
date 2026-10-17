@@ -341,7 +341,17 @@ export class TerminalResizeError extends Schema.TaggedErrorClass<TerminalResizeE
   }
 }
 
+export class TerminalLaunchContextError extends Schema.TaggedErrorClass<TerminalLaunchContextError>()(
+  "TerminalLaunchContextError",
+  { threadId: Schema.String, terminalId: Schema.String },
+) {
+  override get message() {
+    return "This terminal belongs to another launch context. Open a new terminal there, or explicitly restart this terminal. Its process and history have been preserved.";
+  }
+}
+
 export const TerminalError = Schema.Union([
+  TerminalLaunchContextError,
   TerminalCwdError,
   TerminalHistoryError,
   TerminalSessionLookupError,

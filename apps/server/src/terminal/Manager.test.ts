@@ -404,12 +404,7 @@ it.layer(
       const attachEvents = yield* Ref.make<ReadonlyArray<TerminalAttachStreamEvent>>([]);
       const unsubscribe = yield* manager.attachStream(
         {
-          ...openInput({
-            env: {
-              T3CODE_WORKTREE_PATH: "/tmp/restart-requested",
-            },
-            worktreePath: "/tmp/restart-requested",
-          }),
+          ...openInput(),
           restartIfNotRunning: true,
         },
         (event) => Ref.update(attachEvents, (events) => [...events, event]),
@@ -420,7 +415,7 @@ it.layer(
       expect(snapshot).toBeDefined();
       if (!snapshot || snapshot.type !== "snapshot") return;
       assert.equal(snapshot.snapshot.status, "running");
-      assert.equal(snapshot.snapshot.worktreePath, "/tmp/restart-requested");
+      assert.equal(snapshot.snapshot.worktreePath, null);
       expect(ptyAdapter.spawnInputs).toHaveLength(2);
     }),
   );
@@ -724,7 +719,7 @@ it.layer(
     }),
   );
 
-  it.effect("restarts a running session when open is called with a different cwd", () =>
+  it.effect("refuses a different cwd on open and preserves process and history", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter, logsDir, baseDir } = yield* createManager();
       const path = yield* Path.Path;
@@ -742,13 +737,19 @@ it.layer(
       const logPath = yield* historyLogPath(logsDir);
       yield* waitFor(pathExists(logPath));
 
-      const reopened = yield* manager.open(openInput({ cwd: differentCwd }));
-
-      expect(ptyAdapter.spawnInputs).toHaveLength(2);
-      assert.equal(firstProcess.killed, true);
-      assert.equal(reopened.cwd, differentCwd);
-      assert.equal(reopened.history, "");
-      yield* waitFor(Effect.map(readFileString(logPath), (text) => text === ""));
+      const failures = yield* Effect.all(
+        Array.from({ length: 8 }, () =>
+          manager.open(openInput({ cwd: differentCwd })).pipe(Effect.flip),
+        ),
+        { concurrency: "unbounded" },
+      );
+      expect(failures.every((failure) => failure._tag === "TerminalLaunchContextError")).toBe(true);
+      const reopened = yield* manager.open(openInput({ cwd: originalCwd }));
+      expect(ptyAdapter.spawnInputs).toHaveLength(1);
+      assert.equal(firstProcess.killed, false);
+      assert.equal(reopened.cwd, originalCwd);
+      expect(reopened.history).toContain("before reopen");
+      yield* waitFor(Effect.map(readFileString(logPath), (text) => text.includes("before reopen")));
     }),
   );
 
@@ -833,7 +834,7 @@ it.layer(
     }),
   );
 
-  it.effect("emits exited event and reopens with clean transcript after exit", () =>
+  it.effect("emits exited event and preserves transcript when reopening after exit", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter, logsDir, getEvents } = yield* createManager();
       const path = yield* Path.Path;
@@ -855,14 +856,14 @@ it.layer(
       );
       const reopened = yield* manager.open(openInput());
 
-      assert.equal(reopened.history, "");
+      assert.equal(reopened.history, "old data\n");
       expect(ptyAdapter.spawnInputs).toHaveLength(2);
       expect(
         yield* historyLogPath(logsDir).pipe(
           Effect.provideService(Path.Path, path),
           Effect.flatMap(readFileString),
         ),
-      ).toBe("");
+      ).toBe("old data\n");
     }),
   );
 
@@ -1377,7 +1378,7 @@ it.layer(
       const reopenedFirst = yield* manager.open(openInput({ threadId: "thread-1" }));
 
       assert.equal(reopenedFirst.history, "first-history\n");
-      assert.equal(reopenedSecond.history, "");
+      assert.equal(reopenedSecond.history, "second-history\n");
     }),
   );
 
