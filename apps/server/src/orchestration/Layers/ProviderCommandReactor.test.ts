@@ -145,6 +145,8 @@ describe("ProviderCommandReactor", () => {
 
   async function createHarness(input?: {
     readonly baseDir?: string;
+    readonly initialWorktreePath?: string;
+    readonly initialBranch?: string;
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
     readonly requiresNewThreadForModelChange?: boolean;
@@ -446,8 +448,8 @@ describe("ProviderCommandReactor", () => {
         modelSelection: modelSelection,
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
-        branch: null,
-        worktreePath: null,
+        branch: input?.initialBranch ?? null,
+        worktreePath: input?.initialWorktreePath ?? null,
         createdAt: now,
       }),
     );
@@ -1492,18 +1494,11 @@ describe("ProviderCommandReactor", () => {
   });
 
   it("generates a worktree branch name for the first turn", async () => {
-    const harness = await createHarness();
+    const harness = await createHarness({
+      initialBranch: "t3code/1234abcd",
+      initialWorktreePath: "/tmp/provider-project-worktree",
+    });
     const now = "2026-01-01T00:00:00.000Z";
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.meta.update",
-        commandId: CommandId.make("cmd-thread-branch"),
-        threadId: ThreadId.make("thread-1"),
-        branch: "t3code/1234abcd",
-        worktreePath: "/tmp/provider-project-worktree",
-      }),
-    );
 
     harness.generateBranchName.mockImplementation((input: unknown) =>
       Effect.succeed({
@@ -2006,7 +2001,7 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex_work"));
   });
 
-  it("restarts the provider session when the thread workspace changes", async () => {
+  it("refuses a Thread workspace change and resumes its original provider session", async () => {
     const harness = await createHarness({
       threadModelSelection: {
         instanceId: ProviderInstanceId.make("claudeAgent"),
@@ -2038,14 +2033,17 @@ describe("ProviderCommandReactor", () => {
       cwd: "/tmp/provider-project",
     });
 
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.meta.update",
-        commandId: CommandId.make("cmd-thread-worktree-change"),
-        threadId: ThreadId.make("thread-1"),
-        worktreePath: "/tmp/provider-project-worktree",
-      }),
+    const failure = await harness.runEffect(
+      harness.engine
+        .dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.make("cmd-thread-worktree-change"),
+          threadId: ThreadId.make("thread-1"),
+          worktreePath: "/tmp/provider-project-worktree",
+        })
+        .pipe(Effect.flip),
     );
+    expect(failure.message).toContain("cannot be moved");
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -2064,19 +2062,12 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await waitFor(() => harness.startSession.mock.calls.length === 2);
     await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.startSession.mock.calls.length).toBe(1);
     expect(harness.stopSession.mock.calls.length).toBe(0);
-    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
-      threadId: ThreadId.make("thread-1"),
-      cwd: "/tmp/provider-project-worktree",
-      resumeCursor: { opaque: "resume-1" },
-      modelSelection: {
-        instanceId: ProviderInstanceId.make("claudeAgent"),
-        model: "claude-sonnet-4-6",
-      },
-      runtimeMode: "approval-required",
-    });
+    expect(
+      (await harness.readModel()).threads.find((thread) => thread.id === "thread-1")?.worktreePath,
+    ).toBeNull();
   });
 
   it("restarts claude sessions when claude effort changes", async () => {

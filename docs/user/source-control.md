@@ -149,3 +149,13 @@ Control settings**.
 - [GitHub CLI](https://cli.github.com/)
 - [GitLab CLI](https://gitlab.com/gitlab-org/cli)
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/)
+
+## Checkout safety
+
+Checkout switching, pull, local PR checkout, automatic feature-branch checkout and
+worktree removal are temporarily unavailable while shared workspace coordination
+is completed. Open the branch in a new worktree instead. Selecting a branch in a
+new composer draft records that intent without changing an existing checkout.
+Opening an existing PR worktree preserves its current files and HEAD; it does
+not update it to the latest remote PR head. Deleting a Thread preserves its
+worktree. Existing Threads and terminals keep their original launch context.

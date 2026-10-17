@@ -1,3 +1,4 @@
+import { CHECKOUT_SWITCH_UNAVAILABLE, WORKTREE_REMOVAL_UNAVAILABLE } from "./git/checkoutSafety.ts";
 import { ProviderService } from "./provider/Services/ProviderService.ts";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
@@ -5376,9 +5377,19 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const wsUrl = yield* getWsServerUrl("/ws");
 
       const pull = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.vcsPull]({ cwd: "/tmp/repo" })),
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.vcsPull]({ cwd: "/tmp/repo" })).pipe(
+          Effect.result,
+        ),
       );
-      assert.equal(pull.status, "pulled");
+      assertFailure(
+        pull,
+        new GitCommandError({
+          operation: "GitWorkflowService.pullCurrentBranch",
+          command: "checkout-safety",
+          cwd: "/tmp/repo",
+          detail: CHECKOUT_SWITCH_UNAVAILABLE,
+        }),
+      );
 
       const refreshedStatus = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
@@ -5442,13 +5453,22 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
       assert.equal(worktree.worktree.refName, "feature/demo");
 
-      yield* Effect.scoped(
+      const removeWorktreeResult = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
           client[WS_METHODS.vcsRemoveWorktree]({
             cwd: "/tmp/repo",
             path: "/tmp/wt",
           }),
-        ),
+        ).pipe(Effect.result),
+      );
+      assertFailure(
+        removeWorktreeResult,
+        new GitCommandError({
+          operation: "GitWorkflowService.removeWorktree",
+          command: "checkout-safety",
+          cwd: "/tmp/repo",
+          detail: WORKTREE_REMOVAL_UNAVAILABLE,
+        }),
       );
 
       yield* Effect.scoped(
@@ -5460,13 +5480,22 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
 
-      yield* Effect.scoped(
+      const switchRefResult = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
           client[WS_METHODS.vcsSwitchRef]({
             cwd: "/tmp/repo",
             refName: "main",
           }),
-        ),
+        ).pipe(Effect.result),
+      );
+      assertFailure(
+        switchRefResult,
+        new GitCommandError({
+          operation: "GitWorkflowService.switchRef",
+          command: "checkout-safety",
+          cwd: "/tmp/repo",
+          detail: CHECKOUT_SWITCH_UNAVAILABLE,
+        }),
       );
 
       yield* Effect.scoped(
@@ -5576,7 +5605,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
 
-      assertFailure(result, gitError);
+      assertFailure(
+        result,
+        new GitCommandError({
+          operation: "GitWorkflowService.pullCurrentBranch",
+          command: "checkout-safety",
+          cwd: "/tmp/repo",
+          detail: CHECKOUT_SWITCH_UNAVAILABLE,
+        }),
+      );
       assert.equal(invalidationCalls, 0);
       assert.equal(statusCalls, 0);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
@@ -5705,11 +5742,21 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const wsUrl = yield* getWsServerUrl("/ws");
       const startedAt = yield* Clock.currentTimeMillis;
       const result = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.vcsPull]({ cwd: "/tmp/repo" })),
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.vcsPull]({ cwd: "/tmp/repo" })).pipe(
+          Effect.result,
+        ),
       );
       const elapsedMs = (yield* Clock.currentTimeMillis) - startedAt;
 
-      assert.equal(result.status, "pulled");
+      assertFailure(
+        result,
+        new GitCommandError({
+          operation: "GitWorkflowService.pullCurrentBranch",
+          command: "checkout-safety",
+          cwd: "/tmp/repo",
+          detail: CHECKOUT_SWITCH_UNAVAILABLE,
+        }),
+      );
       assertTrue(elapsedMs < 1_000);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -7474,7 +7521,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   createdAt,
                 },
                 prepareWorktree: {
-                  projectCwd: "/tmp/project",
+                  projectCwd: "/tmp/default-project",
                   baseBranch: "main",
                   branch: "t3code/bootstrap-refName",
                   startFromOrigin: true,
@@ -7486,30 +7533,34 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           ),
         );
 
-        assert.equal(response.sequence, 5);
+        assert.equal(response.sequence, 4);
         assert.deepEqual(
           dispatchedCommands.map((command) => command.type),
           [
             "thread.create",
-            "thread.meta.update",
             "thread.activity.append",
             "thread.activity.append",
             "thread.turn.start",
           ],
         );
+        assertTrue(dispatchedCommands[0]?.type === "thread.create");
+        if (dispatchedCommands[0]?.type === "thread.create") {
+          assert.equal(dispatchedCommands[0].worktreePath, "/tmp/bootstrap-worktree");
+          assert.equal(dispatchedCommands[0].branch, "t3code/bootstrap-refName");
+        }
         assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
+          cwd: "/tmp/default-project",
           refName: fetchedOriginCommit,
           newRefName: "t3code/bootstrap-refName",
           baseRefName: "main",
           path: null,
         });
         assert.deepEqual(fetchRemote.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
+          cwd: "/tmp/default-project",
           remoteName: "origin",
         });
         assert.deepEqual(resolveRemoteTrackingCommit.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
+          cwd: "/tmp/default-project",
           refName: "main",
           fallbackRemoteName: "origin",
         });
@@ -7522,7 +7573,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(runForThread.mock.calls[0]?.[0], {
           threadId: ThreadId.make("thread-bootstrap"),
           projectId: defaultProjectId,
-          projectCwd: "/tmp/project",
+          projectCwd: "/tmp/default-project",
           worktreePath: "/tmp/bootstrap-worktree",
         });
         assert.deepEqual(refreshStatus.mock.calls[0]?.[0], "/tmp/bootstrap-worktree");
@@ -7535,7 +7586,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           setupActivities.map((command) => command.activity.kind),
           ["setup-script.requested", "setup-script.started"],
         );
-        const finalCommand = dispatchedCommands[4];
+        const finalCommand = dispatchedCommands[3];
         assertTrue(finalCommand?.type === "thread.turn.start");
         if (finalCommand?.type === "thread.turn.start") {
           assert.equal(finalCommand.bootstrap, undefined);
@@ -7620,7 +7671,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   createdAt,
                 },
                 prepareWorktree: {
-                  projectCwd: "/tmp/project",
+                  projectCwd: "/tmp/default-project",
                   baseBranch: "main",
                   branch: "t3code/bootstrap-refName",
                   startFromOrigin: true,
@@ -7632,13 +7683,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         );
 
         assert.deepEqual(remoteExists.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
+          cwd: "/tmp/default-project",
           remoteName: "origin",
         });
         assert.equal(fetchRemote.mock.calls.length, 0);
         assert.equal(resolveRemoteTrackingCommit.mock.calls.length, 0);
         assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
+          cwd: "/tmp/default-project",
           refName: "main",
           newRefName: "t3code/bootstrap-refName",
           baseRefName: "main",
@@ -7723,7 +7774,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 createdAt,
               },
               prepareWorktree: {
-                projectCwd: "/tmp/project",
+                projectCwd: "/tmp/default-project",
                 baseBranch: "main",
                 branch: "t3code/bootstrap-refName",
               },
@@ -7734,10 +7785,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
 
-      assert.equal(response.sequence, 4);
+      assert.equal(response.sequence, 3);
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
-        ["thread.create", "thread.meta.update", "thread.activity.append", "thread.turn.start"],
+        ["thread.create", "thread.activity.append", "thread.turn.start"],
       );
       const setupFailureActivity = dispatchedCommands.find(
         (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
@@ -7844,7 +7895,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 createdAt,
               },
               prepareWorktree: {
-                projectCwd: "/tmp/project",
+                projectCwd: "/tmp/default-project",
                 baseBranch: "main",
                 branch: "t3code/bootstrap-refName",
               },
@@ -7855,10 +7906,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
 
-      assert.equal(response.sequence, 4);
+      assert.equal(response.sequence, 3);
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
-        ["thread.create", "thread.meta.update", "thread.activity.append", "thread.turn.start"],
+        ["thread.create", "thread.activity.append", "thread.turn.start"],
       );
       const setupActivities = dispatchedCommands.filter(
         (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
@@ -7875,7 +7926,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("cleans up created bootstrap threads when worktree creation defects", () =>
+  it.effect("creates no Thread when worktree creation defects", () =>
     Effect.gen(function* () {
       const dispatchedCommands: Array<OrchestrationCommand> = [];
       const createWorktree = vi.fn(
@@ -7928,7 +7979,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 createdAt,
               },
               prepareWorktree: {
-                projectCwd: "/tmp/project",
+                projectCwd: "/tmp/default-project",
                 baseBranch: "main",
                 branch: "t3code/bootstrap-refName",
               },
@@ -7942,20 +7993,22 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertTrue(result._tag === "Failure");
       assertTrue(result.failure._tag === "OrchestrationDispatchCommandError");
       assert.include(result.failure.message, "worktree exploded");
-      assert.strictEqual(result.failure.bootstrapThreadDisposition, "deleted");
+      assert.strictEqual(result.failure.bootstrapThreadDisposition, "not-created");
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
-        ["thread.create", "thread.delete"],
+        [],
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("does not report a deleted bootstrap thread when cleanup fails", () =>
+  it.effect("retains a newly created worktree when later Thread cleanup fails", () =>
     Effect.gen(function* () {
       const dispatchedCommands: Array<OrchestrationCommand> = [];
       const createWorktree = vi.fn(
         (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
-          Effect.die(new Error("worktree exploded")),
+          Effect.succeed({
+            worktree: { refName: "t3code/bootstrap-refName", path: "/tmp/bootstrap-worktree" },
+          }),
       );
 
       yield* buildAppUnderTest({
@@ -7966,6 +8019,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           orchestrationEngine: {
             dispatch: (command) => {
               dispatchedCommands.push(command);
+              if (command.type === "thread.turn.start")
+                return Effect.die(new Error("turn start exploded"));
               if (command.type === "thread.delete") {
                 return Effect.fail(
                   new OrchestrationListenerCallbackError({
@@ -8010,7 +8065,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 createdAt,
               },
               prepareWorktree: {
-                projectCwd: "/tmp/project",
+                projectCwd: "/tmp/default-project",
                 baseBranch: "main",
                 branch: "t3code/bootstrap-refName",
               },
@@ -8023,13 +8078,99 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assertTrue(result._tag === "Failure");
       assertTrue(result.failure._tag === "OrchestrationDispatchCommandError");
-      assert.include(result.failure.message, "worktree exploded");
+      assert.include(result.failure.message, "turn start exploded");
       assert.strictEqual(result.failure.bootstrapThreadDisposition, undefined);
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
-        ["thread.create", "thread.delete"],
+        ["thread.create", "thread.turn.start", "thread.delete"],
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "rejects foreign renderer paths and existing Thread bootstrap without Git or session side effects",
+    () =>
+      Effect.gen(function* () {
+        let gitCalls = 0;
+        let dispatchCalls = 0;
+        yield* buildAppUnderTest({
+          layers: {
+            gitVcsDriver: {
+              createWorktree: () =>
+                Effect.sync(() => {
+                  gitCalls++;
+                  return { worktree: { path: "/must-not-exist", refName: "unsafe" } };
+                }),
+            },
+            orchestrationEngine: {
+              dispatch: () =>
+                Effect.sync(() => {
+                  dispatchCalls++;
+                  return { sequence: 1 };
+                }),
+            },
+          },
+        });
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const createdAt = "2026-01-01T00:00:00.000Z";
+        for (const scenario of [
+          "foreign-path",
+          "missing-project",
+          "existing-thread",
+          "retarget",
+        ] as const) {
+          const result = yield* Effect.scoped(
+            withWsRpcClient(wsUrl, (client) =>
+              client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+                type: "thread.turn.start",
+                commandId: CommandId.make(`safety-bootstrap-${scenario}`),
+                threadId:
+                  scenario === "existing-thread"
+                    ? defaultThreadId
+                    : ThreadId.make(`safety-${scenario}`),
+                message: {
+                  messageId: MessageId.make(`safety-message-${scenario}`),
+                  role: "user",
+                  text: "fixture",
+                  attachments: [],
+                },
+                modelSelection: defaultModelSelection,
+                runtimeMode: "approval-required",
+                interactionMode: "default",
+                createdAt,
+                bootstrap: {
+                  ...(scenario === "retarget"
+                    ? {}
+                    : {
+                        createThread: {
+                          projectId:
+                            scenario === "missing-project"
+                              ? ProjectId.make("missing")
+                              : defaultProjectId,
+                          title: "Safety",
+                          modelSelection: defaultModelSelection,
+                          runtimeMode: "approval-required" as const,
+                          interactionMode: "default" as const,
+                          branch: "main",
+                          worktreePath: null,
+                          createdAt,
+                        },
+                      }),
+                  prepareWorktree: {
+                    projectCwd:
+                      scenario === "foreign-path" ? "/another-repository" : "/tmp/default-project",
+                    baseBranch: "main",
+                    branch: "fixture/new",
+                  },
+                },
+              }),
+            ).pipe(Effect.result),
+          );
+          assertTrue(result._tag === "Failure");
+        }
+        assert.equal(gitCalls, 0);
+        assert.equal(dispatchCalls, 0);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc terminal methods", () =>

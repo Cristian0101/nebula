@@ -569,7 +569,7 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 
-  it("allows authoritative worktree bootstrap to assign a temporary branch", async () => {
+  it("refuses repeated and concurrent generic worktree retargeting", async () => {
     const system = await createOrchestrationSystem();
     const { engine } = system;
     const createdAt = now();
@@ -606,19 +606,25 @@ describe("OrchestrationEngine", () => {
         createdAt,
       }),
     );
-    await system.run(
-      engine.dispatch({
-        type: "thread.meta.update",
-        commandId: CommandId.make("cmd-authoritative-worktree-bootstrap"),
-        threadId: ThreadId.make("thread-worktree-bootstrap"),
-        branch: "t3code/1234abcd",
-        worktreePath: "/tmp/project-worktree-bootstrap-worktree",
-      }),
+    const failures = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        system.run(
+          engine
+            .dispatch({
+              type: "thread.meta.update",
+              commandId: CommandId.make(`cmd-retarget-${index}`),
+              threadId: ThreadId.make("thread-worktree-bootstrap"),
+              branch: "t3code/1234abcd",
+              worktreePath: "/tmp/project-worktree-bootstrap-worktree",
+            })
+            .pipe(Effect.flip),
+        ),
+      ),
     );
-
+    expect(failures.every((failure) => failure.message.includes("cannot be moved"))).toBe(true);
     const snapshot = await system.readModel();
-    expect(snapshot.threads[0]?.branch).toBe("t3code/1234abcd");
-    expect(snapshot.threads[0]?.worktreePath).toBe("/tmp/project-worktree-bootstrap-worktree");
+    expect(snapshot.threads[0]?.branch).toBe("main");
+    expect(snapshot.threads[0]?.worktreePath).toBeNull();
     await system.dispose();
   });
 

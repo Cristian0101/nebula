@@ -841,6 +841,8 @@ const makeWsRpcLayer = (
           const bootstrap = command.bootstrap;
           const { bootstrap: _bootstrap, ...finalTurnStartCommand } = command;
           let createdThread = false;
+          let threadCreationAttempted = false;
+          let targetBranch = bootstrap?.createThread?.branch ?? null;
           let targetProjectId = bootstrap?.createThread?.projectId;
           let targetProjectCwd = bootstrap?.prepareWorktree?.projectCwd;
           let targetWorktreePath = bootstrap?.createThread?.worktreePath ?? null;
@@ -975,7 +977,68 @@ const makeWsRpcLayer = (
             });
 
           const bootstrapProgram = Effect.gen(function* () {
+            if (bootstrap?.prepareWorktree) {
+              if (!bootstrap.createThread) {
+                return yield* new OrchestrationDispatchCommandError({
+                  message:
+                    "An existing Thread cannot be moved to another worktree. Open a new Thread in a new worktree instead.",
+                });
+              }
+              const readModel = yield* projectionSnapshotQuery.getCommandReadModel();
+              const project = readModel.projects.find(
+                (candidate) =>
+                  candidate.id === bootstrap.createThread?.projectId &&
+                  candidate.deletedAt === null,
+              );
+              if (!project || project.workspaceRoot !== bootstrap.prepareWorktree.projectCwd) {
+                return yield* new OrchestrationDispatchCommandError({
+                  message:
+                    "The requested source checkout does not match the canonical Project. Refresh the Project and select its checkout again.",
+                });
+              }
+              if (readModel.threads.some((thread) => thread.id === command.threadId)) {
+                return yield* new OrchestrationDispatchCommandError({
+                  message:
+                    "This Thread already exists. Resume its original checkout or open a new Thread.",
+                });
+              }
+              targetProjectCwd = project.workspaceRoot;
+              let worktreeBaseRef = bootstrap.prepareWorktree.baseBranch;
+              // "Start from origin" is a stored default; repos without an
+              // origin remote fall back to the local base branch instead of
+              // failing the whole bootstrap on `git fetch origin`.
+              const startFromOrigin =
+                bootstrap.prepareWorktree.startFromOrigin === true &&
+                (yield* gitWorkflow.remoteExists({
+                  cwd: project.workspaceRoot,
+                  remoteName: "origin",
+                }));
+              if (startFromOrigin) {
+                yield* gitWorkflow.fetchRemote({
+                  cwd: project.workspaceRoot,
+                  remoteName: "origin",
+                });
+                const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
+                  cwd: project.workspaceRoot,
+                  refName: bootstrap.prepareWorktree.baseBranch,
+                  fallbackRemoteName: "origin",
+                });
+                worktreeBaseRef = resolvedRemoteBase.commitSha;
+              }
+              const worktree = yield* gitWorkflow.createWorktree({
+                cwd: project.workspaceRoot,
+                refName: worktreeBaseRef,
+                newRefName: bootstrap.prepareWorktree.branch,
+                baseRefName: bootstrap.prepareWorktree.baseBranch,
+                path: null,
+              });
+              targetWorktreePath = worktree.worktree.path;
+              targetBranch = worktree.worktree.refName;
+              yield* refreshGitStatus(targetWorktreePath);
+            }
+
             if (bootstrap?.createThread) {
+              threadCreationAttempted = true;
               yield* orchestrationEngine.dispatch({
                 type: "thread.create",
                 commandId: yield* serverCommandId("bootstrap-thread-create"),
@@ -985,52 +1048,11 @@ const makeWsRpcLayer = (
                 modelSelection: bootstrap.createThread.modelSelection,
                 runtimeMode: bootstrap.createThread.runtimeMode,
                 interactionMode: bootstrap.createThread.interactionMode,
-                branch: bootstrap.createThread.branch,
-                worktreePath: bootstrap.createThread.worktreePath,
+                branch: targetBranch,
+                worktreePath: targetWorktreePath,
                 createdAt: bootstrap.createThread.createdAt,
               });
               createdThread = true;
-            }
-
-            if (bootstrap?.prepareWorktree) {
-              let worktreeBaseRef = bootstrap.prepareWorktree.baseBranch;
-              // "Start from origin" is a stored default; repos without an
-              // origin remote fall back to the local base branch instead of
-              // failing the whole bootstrap on `git fetch origin`.
-              const startFromOrigin =
-                bootstrap.prepareWorktree.startFromOrigin === true &&
-                (yield* gitWorkflow.remoteExists({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  remoteName: "origin",
-                }));
-              if (startFromOrigin) {
-                yield* gitWorkflow.fetchRemote({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  remoteName: "origin",
-                });
-                const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  refName: bootstrap.prepareWorktree.baseBranch,
-                  fallbackRemoteName: "origin",
-                });
-                worktreeBaseRef = resolvedRemoteBase.commitSha;
-              }
-              const worktree = yield* gitWorkflow.createWorktree({
-                cwd: bootstrap.prepareWorktree.projectCwd,
-                refName: worktreeBaseRef,
-                newRefName: bootstrap.prepareWorktree.branch,
-                baseRefName: bootstrap.prepareWorktree.baseBranch,
-                path: null,
-              });
-              targetWorktreePath = worktree.worktree.path;
-              yield* orchestrationEngine.dispatch({
-                type: "thread.meta.update",
-                commandId: yield* serverCommandId("bootstrap-thread-meta-update"),
-                threadId: command.threadId,
-                branch: worktree.worktree.refName,
-                worktreePath: targetWorktreePath,
-              });
-              yield* refreshGitStatus(targetWorktreePath);
             }
 
             yield* runSetupProgram();
@@ -1040,7 +1062,14 @@ const makeWsRpcLayer = (
 
           return yield* bootstrapProgram.pipe(
             Effect.catchCause((cause) => {
-              const dispatchError = toBootstrapDispatchCommandCauseError(cause);
+              const originalError = toBootstrapDispatchCommandCauseError(cause);
+              const dispatchError =
+                bootstrap?.createThread && !threadCreationAttempted
+                  ? new OrchestrationDispatchCommandError({
+                      message: originalError.message,
+                      bootstrapThreadDisposition: "not-created",
+                    })
+                  : originalError;
               if (Cause.hasInterruptsOnly(cause)) {
                 return Effect.fail(dispatchError);
               }
