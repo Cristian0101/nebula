@@ -17,6 +17,7 @@ This directory is the durable product and architecture source of truth for Nebul
 | [Runtime map](RUNTIME_MAP.md)               | Evidence-based map of the inherited T3 Code repository.                                 |
 | [Extension contract](EXTENSION_CONTRACT.md) | Canonical attachment points, implemented boundaries, divergence budget, and ADR review. |
 | [Design system](DESIGN_SYSTEM.md)           | Canonical visual identity, palette, theme behavior, accessibility, and asset status.    |
+| [Super ADE design](super-ade/README.md)     | Proposed design foundation: shell, screens, states, tokens, and visual QA contract.     |
 | [Providers](PROVIDERS.md)                   | Implemented provider transports, authentication boundaries, and current limitations.    |
 | [Changelog](CHANGELOG.md)                   | Shipped and unreleased Nebula product behavior changes.                                 |
 | [ADRs](../adr/)                             | Accepted architecture decisions.                                                        |

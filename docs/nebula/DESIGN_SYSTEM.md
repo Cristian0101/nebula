@@ -2,6 +2,8 @@
 
 This document is the canonical visual source of truth for Nebula. It supersedes older Nebula violet and blue palette proposals where they conflict, while leaving product and architecture requirements unchanged.
 
+> **Proposed revision under review:** the [Super ADE design foundation](super-ade/README.md) proposes an additive violet/ion-blue built-in theme (`nebula-ion`) as the new fresh-client default, keeping this coral palette selectable. Until the founder approves it, this document remains canonical.
+
 ## Brand thesis
 
 Nebula is a calm engineering command center for coordinating coding agents. The product should feel technical, precise, trustworthy, and dense enough for sustained work. Warm orbital energy identifies primary actions and the brand mark; navy, graphite, white, and cool neutral surfaces carry the interface.
