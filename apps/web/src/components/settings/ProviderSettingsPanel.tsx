@@ -1,4 +1,3 @@
-import { useSearch } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
@@ -190,8 +189,9 @@ function EnvironmentUnavailableRow({
   );
 }
 
-export function ProviderSettingsPanel() {
-  const search = useSearch({ strict: false });
+export function ProviderSettingsPanel({
+  requestedEnvironmentId,
+}: { requestedEnvironmentId?: string | undefined } = {}) {
   const { environments, isReady } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const options = useMemo(
@@ -202,13 +202,12 @@ export function ProviderSettingsPanel() {
   // device that drops out of the catalog falls back without erasing the pick —
   // if it reappears (e.g. after a reconnect) the selection is restored.
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
-    search.environment ?? primaryEnvironmentId,
+    (requestedEnvironmentId as EnvironmentId) ?? primaryEnvironmentId,
   );
-  const effectiveEnvironmentId = resolveSelectedProviderEnvironmentId(
-    options,
-    selectedEnvironmentId,
-    primaryEnvironmentId,
-  );
+  const effectiveEnvironmentId =
+    requestedEnvironmentId && selectedEnvironmentId === requestedEnvironmentId
+      ? selectedEnvironmentId
+      : resolveSelectedProviderEnvironmentId(options, selectedEnvironmentId, primaryEnvironmentId);
   const selectedEnvironment =
     options.find((environment) => environment.environmentId === effectiveEnvironmentId) ?? null;
   const onlyPrimaryDevice =

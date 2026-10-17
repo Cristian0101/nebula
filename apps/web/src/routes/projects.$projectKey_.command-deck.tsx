@@ -1,5 +1,6 @@
 import { ProjectNavigationFrame } from "../components/project/ProjectNavigationFrame";
-import { parseProjectNavigationSearch } from "../projectNavigation";
+import { parseCommandDeckSearch } from "../commandDeckSearch";
+export type { CommandDeckSearch } from "../commandDeckSearch";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 
@@ -15,35 +16,8 @@ const SwarmWorkspacePage = lazy(() =>
   })),
 );
 
-export interface CommandDeckSearch {
-  readonly checkout?: string;
-  readonly mode?: "swarm";
-  readonly stage?: "brief" | "plan" | "war-room" | "review";
-  readonly proposalId?: string;
-  readonly missionId?: string;
-  readonly selectedTask?: string;
-}
-
 export const Route = createFileRoute("/projects/$projectKey_/command-deck")({
-  validateSearch: (search: Record<string, unknown>): CommandDeckSearch => {
-    if (search.mode !== "swarm") return parseProjectNavigationSearch(search);
-    const stage: NonNullable<CommandDeckSearch["stage"]> = [
-      "brief",
-      "plan",
-      "war-room",
-      "review",
-    ].includes(String(search.stage))
-      ? (search.stage as NonNullable<CommandDeckSearch["stage"]>)
-      : "brief";
-    return {
-      ...parseProjectNavigationSearch(search),
-      mode: "swarm",
-      stage,
-      ...(typeof search.proposalId === "string" ? { proposalId: search.proposalId } : {}),
-      ...(typeof search.missionId === "string" ? { missionId: search.missionId } : {}),
-      ...(typeof search.selectedTask === "string" ? { selectedTask: search.selectedTask } : {}),
-    };
-  },
+  validateSearch: parseCommandDeckSearch,
   beforeLoad: async ({ context }) => {
     if (
       context.authGateState.status !== "authenticated" &&
@@ -71,7 +45,7 @@ function CommandDeckRoute() {
           {search.mode === "swarm" ? (
             <SwarmWorkspacePage projectKey={resolvedKey} search={search} />
           ) : (
-            <CommandDeckPage projectKey={resolvedKey} />
+            <CommandDeckPage projectKey={resolvedKey} search={search} />
           )}
         </Suspense>
       )}

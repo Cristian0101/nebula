@@ -159,7 +159,7 @@ export function ProjectNavigationFrame({
           ))}
         </nav>
       ) : null}
-      {!scopedGroup || !connected ? (
+      {!scopedGroup || (!connected && destination !== "overview") ? (
         <div
           className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-auto p-6 text-center"
           role="status"
