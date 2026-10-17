@@ -10,6 +10,7 @@ import {
 } from "~/lib/sourceControlActions";
 import { cn } from "~/lib/utils";
 import { parsePullRequestReference } from "~/pullRequestReference";
+import { CHECKOUT_SWITCH_UNAVAILABLE } from "~/lib/checkoutSafety";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
 import { useEnvironmentQuery } from "~/state/query";
 import { vcsEnvironment } from "~/state/vcs";
@@ -48,7 +49,7 @@ export function PullRequestThreadDialog({
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const [reference, setReference] = useState(initialReference ?? "");
   const [referenceDirty, setReferenceDirty] = useState(false);
-  const [preparingMode, setPreparingMode] = useState<"local" | "worktree" | null>(null);
+  const [preparing, setPreparing] = useState(false);
   const [debouncedReference, referenceDebouncer] = useDebouncedValue(
     reference,
     { wait: 450 },
@@ -129,44 +130,41 @@ export function PullRequestThreadDialog({
     }
   }, [resolvedPullRequest?.state]);
 
-  const handleConfirm = useCallback(
-    async (mode: "local" | "worktree") => {
-      if (!parsedReference) {
-        setReferenceDirty(true);
-        return;
-      }
-      if (!parsedReference || !resolvedPullRequest || !cwd) {
-        return;
-      }
-      setPreparingMode(mode);
-      const result = await preparePullRequestThreadAction.run({
-        reference: parsedReference,
-        mode,
-        ...(mode === "worktree" ? { threadId } : {}),
-      });
-      setPreparingMode(null);
-      if (result._tag === "Failure") {
-        if (isAtomCommandInterrupted(result)) {
-          preparePullRequestThreadAction.resetError();
-        }
-        return;
-      }
-      await onPrepared({
-        branch: result.value.branch,
-        worktreePath: result.value.worktreePath,
-      });
-      onOpenChange(false);
-    },
-    [
-      cwd,
-      onOpenChange,
-      onPrepared,
-      parsedReference,
-      preparePullRequestThreadAction,
-      resolvedPullRequest,
+  const handleConfirm = useCallback(async () => {
+    if (!parsedReference) {
+      setReferenceDirty(true);
+      return;
+    }
+    if (!parsedReference || !resolvedPullRequest || !cwd) {
+      return;
+    }
+    setPreparing(true);
+    const result = await preparePullRequestThreadAction.run({
+      reference: parsedReference,
+      mode: "worktree",
       threadId,
-    ],
-  );
+    });
+    setPreparing(false);
+    if (result._tag === "Failure") {
+      if (isAtomCommandInterrupted(result)) {
+        preparePullRequestThreadAction.resetError();
+      }
+      return;
+    }
+    await onPrepared({
+      branch: result.value.branch,
+      worktreePath: result.value.worktreePath,
+    });
+    onOpenChange(false);
+  }, [
+    cwd,
+    onOpenChange,
+    onPrepared,
+    parsedReference,
+    preparePullRequestThreadAction,
+    resolvedPullRequest,
+    threadId,
+  ]);
 
   const validationMessage = !referenceDirty
     ? null
@@ -201,8 +199,8 @@ export function PullRequestThreadDialog({
             Checkout {terminology.singular}
           </DialogTitle>
           <DialogDescription>
-            Resolve a {sourceControlPresentation.providerName} {terminology.singular}, then create
-            the draft thread in the main repo or in a dedicated worktree.
+            Resolve a {sourceControlPresentation.providerName} {terminology.singular}, then
+            explicitly choose Worktree to create the draft thread in a dedicated worktree.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
@@ -223,9 +221,6 @@ export function PullRequestThreadDialog({
                   return;
                 }
                 event.preventDefault();
-                if (!isResolving && !preparePullRequestThreadAction.isPending) {
-                  void handleConfirm("local");
-                }
               }}
             />
           </label>
@@ -254,6 +249,9 @@ export function PullRequestThreadDialog({
             </div>
           ) : null}
 
+          <p id="pr-local-checkout-unavailable" className="text-muted-foreground text-xs">
+            Local PR checkout is temporarily unavailable. {CHECKOUT_SWITCH_UNAVAILABLE}
+          </p>
           {errorMessage ? <p className="text-destructive text-xs">{errorMessage}</p> : null}
         </DialogPanel>
         <DialogFooter>
@@ -270,23 +268,16 @@ export function PullRequestThreadDialog({
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => {
-              void handleConfirm("local");
-            }}
-            disabled={
-              !cwd ||
-              !resolvedPullRequest ||
-              isResolving ||
-              preparePullRequestThreadAction.isPending
-            }
+            disabled
+            aria-describedby="pr-local-checkout-unavailable"
           >
-            {preparingMode === "local" ? "Preparing local..." : "Local"}
+            Local unavailable
           </Button>
           <Button
             type="button"
             size="sm"
             onClick={() => {
-              void handleConfirm("worktree");
+              void handleConfirm();
             }}
             disabled={
               !cwd ||
@@ -295,7 +286,7 @@ export function PullRequestThreadDialog({
               preparePullRequestThreadAction.isPending
             }
           >
-            {preparingMode === "worktree" ? "Preparing worktree..." : "Worktree"}
+            {preparing ? "Preparing worktree..." : "Worktree"}
           </Button>
         </DialogFooter>
       </DialogPopup>
