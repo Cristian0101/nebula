@@ -9,7 +9,15 @@ import {
   TriangleAlertIcon,
   WorkflowIcon,
 } from "lucide-react";
-import { Component, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  Component,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import type { ProjectWorkspaceContext } from "@t3tools/contracts";
 import { Button } from "../../ui/button";
 import type {
@@ -470,6 +478,26 @@ export function ProjectLaunchBar({
   text: string;
   setText: (value: string) => void;
 }) {
+  const sectionRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const bar = sectionRef.current;
+    const scrollHost = bar?.closest<HTMLElement>("[data-project-checkout]");
+    if (!bar || !scrollHost) return;
+    const previousPadding = scrollHost.style.scrollPaddingBottom;
+    const updatePadding = () => {
+      scrollHost.style.scrollPaddingBottom =
+        getComputedStyle(bar).position === "sticky"
+          ? `${bar.getBoundingClientRect().height + 16}px`
+          : previousPadding;
+    };
+    updatePadding();
+    const observer = new ResizeObserver(updatePadding);
+    observer.observe(bar);
+    return () => {
+      observer.disconnect();
+      scrollHost.style.scrollPaddingBottom = previousPadding;
+    };
+  }, []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submit = async (kind: "chat" | "task" | "mission") => {
@@ -486,6 +514,7 @@ export function ProjectLaunchBar({
   };
   return (
     <section
+      ref={sectionRef}
       aria-label="Start new work"
       className="z-10 mt-6 bg-background/95 pb-3 pt-2 backdrop-blur-sm md:sticky md:bottom-0"
     >

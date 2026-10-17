@@ -88,7 +88,8 @@ Attention and Resume rows support Tab/Enter and Up/Down. Resume filters form a r
 with Left/Right and Home/End. Returning from a Home row restores focus when that row is
 still available. Status is text as well as color; each section has a semantic heading.
 Below 768px the launch bar stays in the content flow so enlarged text cannot cover attention
-rows. Desktop retains the docked bar. Independent card failures retain the other sections
+rows. Desktop retains the docked bar and reserves its measured height when scrolling
+focused controls into view. Independent card failures retain the other sections
 and offer retry. Delayed queries expose
 a loading explanation and retry. Real macOS VoiceOver and founder/design acceptance remain
 separate from automated DOM, keyboard, responsive and Electron checks.
