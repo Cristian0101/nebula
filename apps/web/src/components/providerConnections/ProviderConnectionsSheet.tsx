@@ -336,6 +336,20 @@ function ConnectionsEnvironment({
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
+  useEffect(() => {
+    if (!open) return;
+    // Responsive detail portals can remove the focused heading. Recover inside
+    // the existing modal after its children finish moving, without restarting it.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        const popup = title.current?.closest('[role="dialog"]');
+        if (popup && !popup.contains(document.activeElement)) {
+          title.current?.focus({ preventScroll: true });
+        }
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, wide]);
   const lastDetail = useRef<string | null>(null);
   const previouslyOpen = useRef(false);
   useEffect(() => {
