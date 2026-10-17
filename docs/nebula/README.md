@@ -1,5 +1,7 @@
 # Nebula source of truth
 
+For the read-only Project OS query foundation, see [Canonical Project inventory](PROJECT_INVENTORY.md).
+
 ## Architect Plan Proposal
 
 Nebula can ask a selected provider for a bounded, strict-schema engineering plan against an exact clean Git baseline. The output remains a durable `ArchitectPlanProposal` until a human edits, assigns providers, and explicitly approves it. Approval atomically emits canonical draft Mission/Task/ownership/dependency state and no execution state. See [Architect plans](../user/architect-plans.md).

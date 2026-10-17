@@ -1,3 +1,9 @@
+import {
+  GetProjectInventoryInput,
+  GetProjectWorkspaceContextInput,
+  ProjectInventory,
+  ProjectWorkspaceContext,
+} from "./projectInventory.ts";
 import { ExecutionContext, GetExecutionContextInput } from "./executionContext.ts";
 import {
   ProviderAuthenticationInput,
@@ -224,6 +230,7 @@ export const WS_METHODS = {
   vcsPull: "vcs.pull",
   vcsRefreshStatus: "vcs.refreshStatus",
   vcsListRefs: "vcs.listRefs",
+  vcsGetProjectInventory: "vcs.getProjectInventory",
   vcsCreateWorktree: "vcs.createWorktree",
   vcsRemoveWorktree: "vcs.removeWorktree",
   vcsCreateRef: "vcs.createRef",
@@ -923,6 +930,20 @@ export const WsOrchestrationGetFullThreadDiffRpc = Rpc.make(
   },
 );
 
+export const WsVcsGetProjectInventoryRpc = Rpc.make(WS_METHODS.vcsGetProjectInventory, {
+  payload: GetProjectInventoryInput,
+  success: ProjectInventory,
+  error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+});
+export const WsOrchestrationGetProjectWorkspaceContextRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getProjectWorkspaceContext,
+  {
+    payload: GetProjectWorkspaceContextInput,
+    success: ProjectWorkspaceContext,
+    error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+  },
+);
+
 export const WsOrchestrationGetExecutionContextRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.getExecutionContext,
   {
@@ -1146,6 +1167,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationGetTaskChangesRpc,
   WsOrchestrationGetExecutionContextRpc,
+  WsVcsGetProjectInventoryRpc,
+  WsOrchestrationGetProjectWorkspaceContextRpc,
   WsOrchestrationGetTaskFileDiffRpc,
   WsOrchestrationGetIntegrationChangesRpc,
   WsOrchestrationGetIntegrationFileDiffRpc,

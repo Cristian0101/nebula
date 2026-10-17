@@ -3415,6 +3415,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 }),
               );
               assert.equal(contextError, "EnvironmentAuthorizationError");
+              const inventoryError = yield* client[WS_METHODS.vcsGetProjectInventory]({
+                projectId: ProjectId.make("missing-project"),
+              }).pipe(
+                Effect.match({
+                  onFailure: (error) => error._tag,
+                  onSuccess: () => "unexpected-success",
+                }),
+              );
+              assert.equal(inventoryError, "EnvironmentAuthorizationError");
               return yield* client[WS_METHODS.serverGetConfig]({});
             }),
           ),
@@ -3425,6 +3434,46 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(rpcError.requiredScope, "orchestration:read");
       }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "serves canonical Project reads over restricted RPC without granting terminal access",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+        const { body: tokenBody } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+          scope: "orchestration:read",
+        });
+        const response = yield* HttpClient.post("/api/auth/websocket-ticket", {
+          headers: { authorization: `Bearer ${tokenBody.access_token ?? ""}` },
+        });
+        const ticket = (yield* response.json) as { ticket: string };
+        const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket.ticket)}`;
+        yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            Effect.gen(function* () {
+              const result = yield* client[WS_METHODS.vcsGetProjectInventory]({
+                projectId: ProjectId.make("missing-project"),
+              });
+              assert.equal(result.state, "unavailable");
+              assert.deepEqual(result.issues, ["project-unavailable"]);
+              const workspace = yield* client[ORCHESTRATION_WS_METHODS.getProjectWorkspaceContext]({
+                projectId: ProjectId.make("missing-project"),
+                workspaceKey: "a".repeat(64),
+              });
+              assert.equal(workspace.terminalActivity, "requires-terminal-api");
+              assert.deepEqual(workspace.providerSessions, []);
+              const denied = yield* client[WS_METHODS.subscribeTerminalMetadata]({}).pipe(
+                Stream.runHead,
+                Effect.flip,
+              );
+              assert.equal(denied._tag, "EnvironmentAuthorizationError");
+              if (denied._tag === "EnvironmentAuthorizationError")
+                assert.equal(denied.requiredScope, "terminal:operate");
+            }),
+          ),
+        );
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("denies provider authentication to an ordinary execution credential", () =>

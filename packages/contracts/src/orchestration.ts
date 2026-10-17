@@ -66,6 +66,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   getTaskChanges: "orchestration.getTaskChanges",
   getExecutionContext: "orchestration.getExecutionContext",
+  getProjectWorkspaceContext: "orchestration.getProjectWorkspaceContext",
   getTaskFileDiff: "orchestration.getTaskFileDiff",
   getIntegrationChanges: "orchestration.getIntegrationChanges",
   getIntegrationFileDiff: "orchestration.getIntegrationFileDiff",

@@ -84,7 +84,9 @@ export interface ProviderServiceShape {
    *
    * Aggregates runtime session lists from all registered adapters.
    */
-  readonly listSessions: () => Effect.Effect<ReadonlyArray<ProviderSession>>;
+  readonly listSessions: (
+    threadIds?: ReadonlyArray<ThreadId>,
+  ) => Effect.Effect<ReadonlyArray<ProviderSession>>;
 
   /**
    * Read capabilities for the adapter bound to a configured provider instance.
