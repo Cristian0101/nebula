@@ -1,6 +1,6 @@
+import { useProjectNavigate } from "../../hooks/useProjectNavigate";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowRightIcon,
   BotIcon,
@@ -64,7 +64,7 @@ function ProjectLaunchpad({
   readonly group: ReturnType<typeof useSettingsProjectGroups>[number];
   readonly project: ReturnType<typeof useSettingsProjectGroups>[number]["memberProjects"][number];
 }) {
-  const navigate = useNavigate();
+  const navigate = useProjectNavigate();
   const createQuickThread = useNewThreadHandler();
   const snapshot = useAtomValue(environmentSnapshotAtom(project.environmentId));
   const projectThreads = useMemo(
@@ -109,7 +109,7 @@ function ProjectLaunchpad({
               <WorkspaceBreadcrumbSeparator />
               <WorkspaceBreadcrumbItem>{group.displayName}</WorkspaceBreadcrumbItem>
               <WorkspaceBreadcrumbSeparator />
-              <WorkspaceBreadcrumbItem current>Project Home</WorkspaceBreadcrumbItem>
+              <WorkspaceBreadcrumbItem current>Overview</WorkspaceBreadcrumbItem>
             </WorkspaceBreadcrumb>
             <Button
               size="icon-xs"
@@ -136,8 +136,8 @@ function ProjectLaunchpad({
                   How do you want to work?
                 </h1>
                 <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-                  Stay hands-on in Terminal Center or give Architect an objective and let a reviewed
-                  Swarm coordinate the work.
+                  Stay hands-on in Workbench or give Architect an objective and let a reviewed Swarm
+                  coordinate the work.
                 </p>
               </div>
               <Button variant="outline" onClick={() => void navigate({ to: "/terminal-center" })}>
@@ -157,13 +157,13 @@ function ProjectLaunchpad({
                 <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
                   <LayoutDashboardIcon className="size-5" aria-hidden />
                 </span>
-                <h2 className="mt-8 text-xl font-semibold">Terminal Center</h2>
+                <h2 className="mt-8 text-xl font-semibold">Workbench</h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
                   Work manually with Codex, Antigravity, and your configured providers in a spatial
                   engineering canvas.
                 </p>
                 <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-primary">
-                  Open Terminal Center{" "}
+                  Open Workbench{" "}
                   <ArrowRightIcon className="size-4 transition group-hover:translate-x-0.5" />
                 </span>
               </button>

@@ -1,3 +1,4 @@
+import { useProjectNavigate } from "../../hooks/useProjectNavigate";
 import { useAtomValue } from "@effect/atom-react";
 import {
   squashAtomCommandFailure,
@@ -18,10 +19,8 @@ import type {
   SharedResourceDefinition,
   ResourceLease,
 } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
 import {
   ActivityIcon,
-  ArrowLeftIcon,
   BotIcon,
   CheckCircle2Icon,
   ChevronRightIcon,
@@ -32,7 +31,6 @@ import {
   PlayIcon,
   PlusIcon,
   RotateCcwIcon,
-  Settings2Icon,
   ShieldCheckIcon,
   SquareIcon,
   Trash2Icon,
@@ -200,17 +198,10 @@ function AttentionList({ items }: { readonly items: ReadonlyArray<CommandDeckAtt
   );
 }
 
-function CommandDeckHeader({
-  projectKey,
-  title,
-}: {
-  readonly projectKey: string;
-  readonly title: string;
-}) {
-  const navigate = useNavigate();
+function CommandDeckHeader({ title }: { readonly title: string }) {
   return (
-    <WorkspacePageHeader electron={isElectron}>
-      <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+    <WorkspacePageHeader electron={isElectron} className="h-auto flex-wrap py-2">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-3">
         <WorkspaceBreadcrumb ariaLabel="Command Deck breadcrumb">
           <WorkspaceBreadcrumbItem>Projects</WorkspaceBreadcrumbItem>
           <WorkspaceBreadcrumbSeparator />
@@ -218,25 +209,6 @@ function CommandDeckHeader({
           <WorkspaceBreadcrumbSeparator />
           <WorkspaceBreadcrumbItem current>Command Deck</WorkspaceBreadcrumbItem>
         </WorkspaceBreadcrumb>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Button
-            size="xs"
-            variant="ghost"
-            aria-label="Back to Project Home"
-            onClick={() => void navigate({ to: "/projects/$projectKey", params: { projectKey } })}
-          >
-            <ArrowLeftIcon /> Project Home
-          </Button>
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() =>
-              void navigate({ to: "/projects/$projectKey/settings", params: { projectKey } })
-            }
-          >
-            <Settings2Icon /> Project settings
-          </Button>
-        </div>
       </div>
     </WorkspacePageHeader>
   );
@@ -265,7 +237,7 @@ export function CommandDeckPage({
   return (
     <SidebarInset className="h-dvh min-h-0 w-auto overflow-hidden bg-background text-foreground isolate">
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <CommandDeckHeader projectKey={projectKey} title={group.displayName} />
+        <CommandDeckHeader title={group.displayName} />
         <CommandDeck
           project={representative}
           projectKey={projectKey}
@@ -288,7 +260,7 @@ export function CommandDeck({
   readonly displayName: string;
   readonly initialSection?: CommandDeckSection;
 }) {
-  const navigate = useNavigate();
+  const navigate = useProjectNavigate();
   const snapshot = useAtomValue(environmentSnapshotAtom(project.environmentId));
   const serverConfig = useServerConfigs().get(project.environmentId) ?? null;
   const settings = usePrimarySettings();

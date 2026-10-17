@@ -11,6 +11,101 @@ import { type ReactNode } from "react";
 import { sortThreads } from "../lib/threadSort";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
+import {
+  PROJECT_DESTINATIONS,
+  type ProjectDestination,
+  type ProjectNavigationSelection,
+} from "../projectNavigation";
+import type { SidebarProjectSnapshot } from "../sidebarProjectGrouping";
+import { encodeProjectCheckout } from "../projectNavigation";
+
+export function buildProjectNavigationGroups(input: {
+  groups: readonly SidebarProjectSnapshot[];
+  activeProjectKey: string | undefined;
+  activeCheckout: string | undefined;
+  remembered: Readonly<Record<string, ProjectNavigationSelection>>;
+  icon: ReactNode;
+  open: (
+    projectKey: string,
+    destination: ProjectDestination,
+    checkout: string | undefined,
+  ) => Promise<void>;
+}): CommandPaletteGroup[] {
+  const active = input.groups.find((group) => group.projectKey === input.activeProjectKey);
+  const items: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  if (active) {
+    for (const destination of PROJECT_DESTINATIONS)
+      items.push({
+        kind: "action",
+        value: `project-navigation:${destination.id}`,
+        title: `Open Project ${destination.label}`,
+        description: active.displayName,
+        searchTerms: ["project", destination.label, "go to"],
+        icon: input.icon,
+        run: () => input.open(active.projectKey, destination.id, input.activeCheckout),
+      });
+    items.push({
+      kind: "submenu",
+      value: "project-navigation:checkout",
+      title: "Select checkout",
+      searchTerms: ["checkout", "host", "environment"],
+      icon: input.icon,
+      addonIcon: input.icon,
+      groups: [
+        {
+          value: "project-checkouts",
+          label: "Select checkout · navigation only",
+          items: active.memberProjects.slice(0, 100).map((member) => ({
+            kind: "action",
+            value: `checkout:${encodeProjectCheckout({ environmentId: member.environmentId, projectId: member.id })}`,
+            title: `${member.environmentLabel ?? member.environmentId} · ${member.title}`,
+            description: member.workspaceRoot,
+            icon: input.icon,
+            searchTerms: [member.id, member.environmentId, member.workspaceRoot],
+            run: () =>
+              input.open(
+                active.projectKey,
+                input.remembered[active.projectKey]?.destination ?? "overview",
+                encodeProjectCheckout({
+                  environmentId: member.environmentId,
+                  projectId: member.id,
+                }),
+              ),
+          })),
+        },
+      ],
+    });
+  }
+  if (input.groups.length)
+    items.push({
+      kind: "submenu",
+      value: "project-navigation:switch",
+      title: "Switch Project",
+      searchTerms: ["project", "switch"],
+      icon: input.icon,
+      addonIcon: input.icon,
+      groups: [
+        {
+          value: "project-navigation-projects",
+          label: "Projects (up to 100)",
+          items: input.groups.slice(0, 100).map((group) => ({
+            kind: "action",
+            value: `navigate-project:${group.projectKey}`,
+            title: group.displayName,
+            icon: input.icon,
+            searchTerms: [group.displayName, group.projectKey],
+            run: () =>
+              input.open(
+                group.projectKey,
+                input.remembered[group.projectKey]?.destination ?? "overview",
+                input.remembered[group.projectKey]?.checkout,
+              ),
+          })),
+        },
+      ],
+    });
+  return items.length ? [{ value: "project-navigation", label: "Go to Project", items }] : [];
+}
 
 export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-icon-muted";

@@ -1,3 +1,4 @@
+import { sanitizeProjectNavigation, type ProjectNavigationSelection } from "./projectNavigation";
 import { Debouncer } from "@tanstack/react-pacer";
 import { create } from "zustand";
 import { normalizeProjectPathForComparison } from "./lib/projectPaths";
@@ -43,6 +44,8 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 ] as const;
 
 export interface PersistedUiState {
+  activeProjectNavigation?: ProjectNavigationSelection | null;
+  projectNavigationByKey?: Record<string, ProjectNavigationSelection>;
   projectExpandedById?: Record<string, boolean>;
   projectOrder?: string[];
   threadLastVisitedAtById?: Record<string, string>;
@@ -57,6 +60,8 @@ export interface PersistedUiState {
 }
 
 export interface UiProjectState {
+  activeProjectNavigation?: ProjectNavigationSelection | null;
+  projectNavigationByKey?: Record<string, ProjectNavigationSelection>;
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
 }
@@ -287,14 +292,13 @@ function sanitizeTerminalWorkspaces(value: unknown): Record<string, TerminalWork
         ];
       },
     );
-    if (workspaces.length === 0) continue;
+    if (workspaces.length === 0 && candidate.initialized !== true) continue;
     result[projectId] = {
       initialized: true,
       activeWorkspaceId:
-        typeof candidate.activeWorkspaceId === "string" &&
-        workspaces.some((workspace) => workspace.id === candidate.activeWorkspaceId)
+        typeof candidate.activeWorkspaceId === "string"
           ? candidate.activeWorkspaceId
-          : workspaces[0]!.id,
+          : (workspaces[0]?.id ?? "unavailable"),
       workspaces,
     };
   }
@@ -424,6 +428,13 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
       : sanitizeStringArray(parsed.projectOrder);
 
   return {
+    activeProjectNavigation: sanitizeProjectNavigation(parsed.activeProjectNavigation),
+    projectNavigationByKey: Object.fromEntries(
+      Object.entries(parsed.projectNavigationByKey ?? {}).flatMap(([key, value]) => {
+        const selection = sanitizeProjectNavigation(value);
+        return selection && key === selection.projectKey ? [[key, selection]] : [];
+      }),
+    ),
     projectExpandedById,
     projectOrder,
     threadLastVisitedAtById: sanitizeTimestampRecord(parsed.threadLastVisitedAtById),
@@ -504,6 +515,8 @@ export function persistState(state: UiState): void {
     window.localStorage.setItem(
       PERSISTED_STATE_KEY,
       JSON.stringify({
+        activeProjectNavigation: state.activeProjectNavigation ?? null,
+        projectNavigationByKey: state.projectNavigationByKey ?? {},
         projectExpandedById,
         projectOrder: state.projectOrder,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
@@ -687,6 +700,7 @@ export function reorderProjects(
 }
 
 interface UiStateStore extends UiState {
+  rememberProjectNavigation: (selection: ProjectNavigationSelection) => void;
   markThreadVisited: (threadId: string, visitedAt: string) => void;
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
@@ -724,6 +738,31 @@ function projectTerminalState(state: UiState, projectId: string): TerminalCenter
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
   ...readPersistedState(),
+  rememberProjectNavigation: (selection) =>
+    set((state) => {
+      const previousResolved =
+        selection.lastResolvedCheckout ??
+        state.projectNavigationByKey?.[selection.projectKey]?.lastResolvedCheckout;
+      const nextSelection = {
+        ...selection,
+        ...(previousResolved ? { lastResolvedCheckout: previousResolved } : {}),
+      };
+      const last = state.activeProjectNavigation;
+      if (
+        last?.projectKey === selection.projectKey &&
+        last.checkout === selection.checkout &&
+        last.destination === selection.destination &&
+        last.lastResolvedCheckout === nextSelection.lastResolvedCheckout
+      )
+        return state;
+      return {
+        activeProjectNavigation: nextSelection,
+        projectNavigationByKey: {
+          ...state.projectNavigationByKey,
+          [selection.projectKey]: nextSelection,
+        },
+      };
+    }),
   markThreadVisited: (threadId, visitedAt) =>
     set((state) => markThreadVisited(state, threadId, visitedAt)),
   markThreadUnread: (threadId, latestTurnCompletedAt) =>

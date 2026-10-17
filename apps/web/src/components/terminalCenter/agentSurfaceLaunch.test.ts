@@ -133,11 +133,12 @@ it.each(["terminal", "chat"])(
         pane,
         surface,
         project: { id: "project", workspaceRoot: "/source" },
+        workspaceKey: "scoped-project",
         activeWorkspace: { id: "workspace" },
         useUiStateStore: {
           getState: () => ({
             terminalWorkspacesByProjectId: {
-              project: { workspaces: [{ id: "workspace", panes }] },
+              "scoped-project": { workspaces: [{ id: "workspace", panes }] },
             },
           }),
         },
@@ -178,8 +179,11 @@ it("publishes an added pane before returning it to a surface launcher", () => {
   const values = {
     input: { type: "shell", workspacePath: "/chat-worktree" },
     activeWorkspace: state.workspaces[0],
-    useUiStateStore: { getState: () => ({ terminalWorkspacesByProjectId: { project: state } }) },
+    useUiStateStore: {
+      getState: () => ({ terminalWorkspacesByProjectId: { "scoped-project": state } }),
+    },
     project: { id: "project", workspaceRoot: "/source" },
+    workspaceKey: "scoped-project",
     taskById: new Map(),
     TaskId: { make: (id: string) => id },
     reportError: vi.fn(),
