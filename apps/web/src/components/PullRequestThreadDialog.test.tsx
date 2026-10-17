@@ -82,16 +82,18 @@ describe("PR checkout containment", () => {
       render(),
       (element) => typeof element.props.onKeyDown === "function",
     );
+    if (!input) throw new Error("PR reference input is missing");
     const preventDefault = vi.fn();
-    (input?.props.onKeyDown as (event: unknown) => void)({ key: "Enter", preventDefault });
+    (input.props.onKeyDown as (event: unknown) => void)({ key: "Enter", preventDefault });
     expect(preventDefault).toHaveBeenCalledOnce();
     expect(action.run).not.toHaveBeenCalled();
   });
 
   it("requires an explicit Worktree action and preserves the Thread identity", async () => {
     const worktree = visitElements(render(), (element) => element.props.children === "Worktree");
-    expect(worktree?.props.disabled).toBe(false);
-    (worktree?.props.onClick as () => void)();
+    if (!worktree) throw new Error("Explicit Worktree action is missing");
+    expect(worktree.props.disabled).toBe(false);
+    (worktree.props.onClick as () => void)();
     await vi.waitFor(() => expect(action.run).toHaveBeenCalledOnce());
     expect(action.run).toHaveBeenCalledWith({
       reference: "42",
