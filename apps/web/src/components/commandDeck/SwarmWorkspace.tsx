@@ -1,3 +1,4 @@
+import { readProjectHomePrefill } from "../project/home/projectHomeDraft";
 import { encodeProjectCheckout } from "../../projectNavigation";
 import { useProjectNavigate } from "../../hooks/useProjectNavigate";
 import { useAtomValue } from "@effect/atom-react";
@@ -2378,7 +2379,16 @@ function SwarmWorkspace({
       return null;
     }
   }, [storageKey]);
-  const [objective, setObjective] = useState(saved?.objective ?? selectedPlan?.objective ?? "");
+  const homePrefill = readProjectHomePrefill(
+    { environmentId: projectRef.environmentId, projectId: projectRef.id },
+    search.workDraft,
+  );
+  const [objective, setObjective] = useState(
+    homePrefill ?? saved?.objective ?? selectedPlan?.objective ?? "",
+  );
+  useEffect(() => {
+    if (homePrefill !== null) setObjective(homePrefill);
+  }, [homePrefill, search.workDraft]);
   const [constraints, setConstraints] = useState(
     saved?.constraints ?? selectedPlan?.constraints ?? "",
   );

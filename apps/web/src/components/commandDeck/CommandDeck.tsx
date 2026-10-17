@@ -1,3 +1,5 @@
+import type { CommandDeckSearch } from "../../commandDeckSearch";
+import { readProjectHomePrefill } from "../project/home/projectHomeDraft";
 import { useProjectNavigate } from "../../hooks/useProjectNavigate";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -217,9 +219,11 @@ function CommandDeckHeader({ title }: { readonly title: string }) {
 export function CommandDeckPage({
   projectKey,
   initialSection = "tasks",
+  search,
 }: {
   readonly projectKey: string;
   readonly initialSection?: CommandDeckSection;
+  readonly search?: CommandDeckSearch;
 }) {
   const groups = useSettingsProjectGroups();
   const group = groups.find((candidate) => candidate.projectKey === projectKey) ?? null;
@@ -243,6 +247,7 @@ export function CommandDeckPage({
           projectKey={projectKey}
           displayName={group.displayName}
           initialSection={initialSection}
+          {...(search ? { search } : {})}
         />
       </div>
     </SidebarInset>
@@ -254,11 +259,13 @@ export function CommandDeck({
   projectKey,
   displayName,
   initialSection = "tasks",
+  search,
 }: {
   readonly project: CommandDeckProject;
   readonly projectKey: string;
   readonly displayName: string;
   readonly initialSection?: CommandDeckSection;
+  readonly search?: CommandDeckSearch;
 }) {
   const navigate = useProjectNavigate();
   const snapshot = useAtomValue(environmentSnapshotAtom(project.environmentId));
@@ -298,15 +305,26 @@ export function CommandDeck({
     () => new Map((snapshot?.threads ?? []).map((thread) => [thread.id, thread] as const)),
     [snapshot?.threads],
   );
-  const [selectedTaskId, setSelectedTaskId] = useState<TaskId | null>(null);
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null;
-  const selectedThread =
-    selectedTask?.threadId === null || selectedTask?.threadId === undefined
-      ? null
-      : (threadById.get(selectedTask.threadId) ?? null);
-  useEffect(() => {
-    if (selectedTask && selectedTask.id !== selectedTaskId) setSelectedTaskId(selectedTask.id);
-  }, [selectedTask, selectedTaskId]);
+  const selectedTaskId = search?.selectedTask;
+  const selectedTask = selectedTaskId
+    ? (tasks.find((task) => task.id === selectedTaskId) ?? null)
+    : (tasks[0] ?? null);
+  const setSelectedTaskId = useCallback(
+    (taskId: TaskId) => {
+      void navigate({
+        to: "/projects/$projectKey/command-deck",
+        params: { projectKey },
+        search: (previous) => ({
+          ...(previous.checkout !== undefined ? { checkout: previous.checkout } : {}),
+          selectedTask: taskId,
+        }),
+      });
+    },
+    [navigate, projectKey],
+  );
+  const selectedThread = selectedTask?.threadId
+    ? (threadById.get(selectedTask.threadId) ?? null)
+    : null;
 
   const modelSelectionByTaskId = useMemo(
     () =>
@@ -431,11 +449,27 @@ export function CommandDeck({
     reportFailure: false,
   });
 
-  const [createOpen, setCreateOpen] = useState(false);
+  const prefill = readProjectHomePrefill(
+    { environmentId: project.environmentId, projectId: project.id },
+    search?.workDraft,
+  );
+  const [createOpen, setCreateOpen] = useState(search?.createTask === true);
+  useEffect(() => {
+    if (search?.createTask) setCreateOpen(true);
+    if (prefill !== null) {
+      setCreateTitle(prefill.split("\n")[0]?.slice(0, 200) ?? "");
+      setCreateObjective(prefill);
+    }
+  }, [search?.createTask, search?.workDraft, prefill]);
+  useEffect(() => {
+    if (search?.section) setDeckSection(search.section);
+  }, [search?.section]);
   const [createMissionId, setCreateMissionId] = useState<MissionId | null>(null);
-  const [deckSection, setDeckSection] = useState<CommandDeckSection>(initialSection);
-  const [createTitle, setCreateTitle] = useState("");
-  const [createObjective, setCreateObjective] = useState("");
+  const [deckSection, setDeckSection] = useState<CommandDeckSection>(
+    search?.section ?? initialSection,
+  );
+  const [createTitle, setCreateTitle] = useState(prefill?.split("\n")[0]?.slice(0, 200) ?? "");
+  const [createObjective, setCreateObjective] = useState(prefill ?? "");
   const [createCriteria, setCreateCriteria] = useState<string[]>([]);
   const [createResourceIds, setCreateResourceIds] = useState<ReadonlySet<SharedResourceId>>(
     () => new Set(),
@@ -936,6 +970,14 @@ export function CommandDeck({
   return (
     <main className="min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_top_right,color-mix(in_srgb,var(--primary)_8%,transparent),transparent_32%)] p-3 sm:p-4">
       <div className="mx-auto flex min-h-full w-full max-w-[1800px] flex-col gap-3">
+        {selectedTaskId && !selectedTask ? (
+          <p
+            role="status"
+            className="rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground"
+          >
+            This Task is unavailable in the selected Project checkout.
+          </p>
+        ) : null}
         <section
           className="rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm"
           aria-label="Command Deck summary"

@@ -46,6 +46,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 export interface PersistedUiState {
   activeProjectNavigation?: ProjectNavigationSelection | null;
   projectNavigationByKey?: Record<string, ProjectNavigationSelection>;
+  projectHomeResumeFilterByCheckout?: Record<string, "All" | "Threads" | "Tasks" | "Missions">;
   projectExpandedById?: Record<string, boolean>;
   projectOrder?: string[];
   threadLastVisitedAtById?: Record<string, string>;
@@ -62,6 +63,7 @@ export interface PersistedUiState {
 export interface UiProjectState {
   activeProjectNavigation?: ProjectNavigationSelection | null;
   projectNavigationByKey?: Record<string, ProjectNavigationSelection>;
+  projectHomeResumeFilterByCheckout?: Record<string, "All" | "Threads" | "Tasks" | "Missions">;
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
 }
@@ -435,6 +437,11 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
         return selection && key === selection.projectKey ? [[key, selection]] : [];
       }),
     ),
+    projectHomeResumeFilterByCheckout: Object.fromEntries(
+      Object.entries(parsed.projectHomeResumeFilterByCheckout ?? {}).filter(([, value]) =>
+        ["All", "Threads", "Tasks", "Missions"].includes(value),
+      ),
+    ),
     projectExpandedById,
     projectOrder,
     threadLastVisitedAtById: sanitizeTimestampRecord(parsed.threadLastVisitedAtById),
@@ -517,6 +524,7 @@ export function persistState(state: UiState): void {
       JSON.stringify({
         activeProjectNavigation: state.activeProjectNavigation ?? null,
         projectNavigationByKey: state.projectNavigationByKey ?? {},
+        projectHomeResumeFilterByCheckout: state.projectHomeResumeFilterByCheckout ?? {},
         projectExpandedById,
         projectOrder: state.projectOrder,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
@@ -700,6 +708,10 @@ export function reorderProjects(
 }
 
 interface UiStateStore extends UiState {
+  setProjectHomeResumeFilter: (
+    checkout: string,
+    filter: "All" | "Threads" | "Tasks" | "Missions",
+  ) => void;
   rememberProjectNavigation: (selection: ProjectNavigationSelection) => void;
   markThreadVisited: (threadId: string, visitedAt: string) => void;
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
@@ -738,6 +750,13 @@ function projectTerminalState(state: UiState, projectId: string): TerminalCenter
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
   ...readPersistedState(),
+  setProjectHomeResumeFilter: (checkout, filter) =>
+    set((state) => ({
+      projectHomeResumeFilterByCheckout: {
+        ...state.projectHomeResumeFilterByCheckout,
+        [checkout]: filter,
+      },
+    })),
   rememberProjectNavigation: (selection) =>
     set((state) => {
       const previousResolved =
