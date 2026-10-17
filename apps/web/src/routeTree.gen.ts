@@ -31,6 +31,7 @@ import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-reques
 import { Route as ProjectsProjectKeyTerminalCenterRouteImport } from './routes/projects.$projectKey_.terminal-center'
 import { Route as ProjectsProjectKeySettingsRouteImport } from './routes/projects.$projectKey_.settings'
 import { Route as ProjectsProjectKeyCommandDeckRouteImport } from './routes/projects.$projectKey_.command-deck'
+import { Route as ProjectsProjectKeyBranchesRouteImport } from './routes/projects.$projectKey_.branches'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
@@ -146,6 +147,12 @@ const ProjectsProjectKeyCommandDeckRoute =
     path: '/projects/$projectKey/command-deck',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ProjectsProjectKeyBranchesRoute =
+  ProjectsProjectKeyBranchesRouteImport.update({
+    id: '/projects/$projectKey_/branches',
+    path: '/projects/$projectKey/branches',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -179,6 +186,7 @@ export interface FileRoutesByFullPath {
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/projects/$projectKey/branches': typeof ProjectsProjectKeyBranchesRoute
   '/projects/$projectKey/command-deck': typeof ProjectsProjectKeyCommandDeckRoute
   '/projects/$projectKey/settings': typeof ProjectsProjectKeySettingsRoute
   '/projects/$projectKey/terminal-center': typeof ProjectsProjectKeyTerminalCenterRoute
@@ -204,6 +212,7 @@ export interface FileRoutesByTo {
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/projects/$projectKey/branches': typeof ProjectsProjectKeyBranchesRoute
   '/projects/$projectKey/command-deck': typeof ProjectsProjectKeyCommandDeckRoute
   '/projects/$projectKey/settings': typeof ProjectsProjectKeySettingsRoute
   '/projects/$projectKey/terminal-center': typeof ProjectsProjectKeyTerminalCenterRoute
@@ -231,6 +240,7 @@ export interface FileRoutesById {
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/projects/$projectKey_/branches': typeof ProjectsProjectKeyBranchesRoute
   '/projects/$projectKey_/command-deck': typeof ProjectsProjectKeyCommandDeckRoute
   '/projects/$projectKey_/settings': typeof ProjectsProjectKeySettingsRoute
   '/projects/$projectKey_/terminal-center': typeof ProjectsProjectKeyTerminalCenterRoute
@@ -258,6 +268,7 @@ export interface FileRouteTypes {
     | '/settings/source-control'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/projects/$projectKey/branches'
     | '/projects/$projectKey/command-deck'
     | '/projects/$projectKey/settings'
     | '/projects/$projectKey/terminal-center'
@@ -283,6 +294,7 @@ export interface FileRouteTypes {
     | '/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/projects/$projectKey/branches'
     | '/projects/$projectKey/command-deck'
     | '/projects/$projectKey/settings'
     | '/projects/$projectKey/terminal-center'
@@ -309,6 +321,7 @@ export interface FileRouteTypes {
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
+    | '/projects/$projectKey_/branches'
     | '/projects/$projectKey_/command-deck'
     | '/projects/$projectKey_/settings'
     | '/projects/$projectKey_/terminal-center'
@@ -323,6 +336,7 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   ConnectCallbackRoute: typeof ConnectCallbackRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
+  ProjectsProjectKeyBranchesRoute: typeof ProjectsProjectKeyBranchesRoute
   ProjectsProjectKeyCommandDeckRoute: typeof ProjectsProjectKeyCommandDeckRoute
   ProjectsProjectKeySettingsRoute: typeof ProjectsProjectKeySettingsRoute
   ProjectsProjectKeyTerminalCenterRoute: typeof ProjectsProjectKeyTerminalCenterRoute
@@ -484,6 +498,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectKeyCommandDeckRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/$projectKey_/branches': {
+      id: '/projects/$projectKey_/branches'
+      path: '/projects/$projectKey/branches'
+      fullPath: '/projects/$projectKey/branches'
+      preLoaderRoute: typeof ProjectsProjectKeyBranchesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -554,6 +575,7 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   ConnectCallbackRoute: ConnectCallbackRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
+  ProjectsProjectKeyBranchesRoute: ProjectsProjectKeyBranchesRoute,
   ProjectsProjectKeyCommandDeckRoute: ProjectsProjectKeyCommandDeckRoute,
   ProjectsProjectKeySettingsRoute: ProjectsProjectKeySettingsRoute,
   ProjectsProjectKeyTerminalCenterRoute: ProjectsProjectKeyTerminalCenterRoute,

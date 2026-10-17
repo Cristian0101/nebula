@@ -42,6 +42,7 @@ function TerminalCenterRoute() {
         >
           <TerminalCenterPage
             projectKey={resolvedKey}
+            restoreOnly={search.inspect === true}
             initialFilesOpen={search.files === true}
             {...(search.taskId ? { initialTaskId: search.taskId } : {})}
           />

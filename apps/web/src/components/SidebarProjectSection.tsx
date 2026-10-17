@@ -217,7 +217,9 @@ export function SidebarProjectSection({ groups }: { groups: readonly SidebarProj
                     const current =
                       params.projectKey === group.projectKey &&
                       (entry.id === "overview"
-                        ? !/\/(terminal-center|command-deck|settings)$/.test(location.pathname)
+                        ? !/\/(terminal-center|command-deck|branches|settings)$/.test(
+                            location.pathname,
+                          )
                         : location.pathname.endsWith(entry.to.split("/").at(-1)!));
                     return (
                       <button

@@ -11,13 +11,24 @@ import { useMemo } from "react";
 
 import { useEnvironmentQuery } from "./query";
 import { terminalEnvironment } from "./terminal";
+import { useEnvironmentSessionState } from "./session";
+
+function useTerminalReadPermission(environmentId: EnvironmentId | null) {
+  const session = useEnvironmentSessionState(environmentId);
+  return (
+    !session.hasError &&
+    session.data?.authenticated === true &&
+    session.data.scopes?.includes("terminal:operate") === true
+  );
+}
 
 export function useAttachedTerminalSession(input: {
   readonly environmentId: EnvironmentId | null;
   readonly terminal: TerminalAttachInput | null;
 }): TerminalSessionState {
+  const allowed = useTerminalReadPermission(input.environmentId);
   const attach = useEnvironmentQuery(
-    input.environmentId !== null && input.terminal !== null
+    allowed && input.environmentId !== null && input.terminal !== null
       ? terminalEnvironment.attach({
           environmentId: input.environmentId,
           input: input.terminal,
@@ -25,7 +36,7 @@ export function useAttachedTerminalSession(input: {
       : null,
   );
   const metadata = useEnvironmentQuery(
-    input.environmentId === null
+    !allowed || input.environmentId === null
       ? null
       : terminalEnvironment.metadata({
           environmentId: input.environmentId,
@@ -34,7 +45,7 @@ export function useAttachedTerminalSession(input: {
   );
 
   return useMemo(() => {
-    if (input.environmentId === null || input.terminal === null) {
+    if (!allowed || input.environmentId === null || input.terminal === null) {
       return EMPTY_TERMINAL_SESSION_STATE;
     }
     const summary =
@@ -45,15 +56,16 @@ export function useAttachedTerminalSession(input: {
       ) ?? null;
     const state = combineTerminalSessionState(summary, attach.data ?? EMPTY_TERMINAL_BUFFER_STATE);
     return attach.error === null ? state : { ...state, error: attach.error, status: "error" };
-  }, [attach.data, attach.error, input.environmentId, input.terminal, metadata.data]);
+  }, [allowed, attach.data, attach.error, input.environmentId, input.terminal, metadata.data]);
 }
 
 export function useKnownTerminalSessions(input: {
   readonly environmentId: EnvironmentId | null;
   readonly threadId: ThreadId | null;
 }): ReadonlyArray<KnownTerminalSession> {
+  const allowed = useTerminalReadPermission(input.environmentId);
   const metadata = useEnvironmentQuery(
-    input.environmentId === null
+    !allowed || input.environmentId === null
       ? null
       : terminalEnvironment.metadata({
           environmentId: input.environmentId,
@@ -61,7 +73,7 @@ export function useKnownTerminalSessions(input: {
         }),
   );
   return useMemo(() => {
-    if (input.environmentId === null) {
+    if (!allowed || input.environmentId === null) {
       return [];
     }
     return (metadata.data ?? [])
@@ -79,7 +91,7 @@ export function useKnownTerminalSessions(input: {
           numeric: true,
         }),
       );
-  }, [input.environmentId, input.threadId, metadata.data]);
+  }, [allowed, input.environmentId, input.threadId, metadata.data]);
 }
 
 export function useThreadRunningTerminalIds(input: {
