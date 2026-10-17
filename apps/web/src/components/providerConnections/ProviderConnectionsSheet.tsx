@@ -482,8 +482,8 @@ function ConnectionsEnvironment({
           aria-label="Provider Connections"
         >
           <SheetHeader className="border-b px-5 py-4 md:px-6">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 space-y-2">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0 flex-1 basis-40 space-y-2">
                 <SheetTitle ref={title} tabIndex={-1} className="text-lg outline-none">
                   Provider connections
                 </SheetTitle>
@@ -491,7 +491,7 @@ function ConnectionsEnvironment({
                   Official accounts. Verified on your execution host.
                 </SheetDescription>
               </div>
-              <div className="flex shrink-0 gap-1">
+              <div className="ml-auto flex shrink-0 gap-1">
                 {canOperate ? (
                   <Button
                     size="xs"
