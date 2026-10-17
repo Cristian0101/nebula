@@ -25,6 +25,7 @@ export const ProjectInventoryIssue = Schema.Literals([
   "stale-cursor",
   "association-limit",
   "association-mismatch",
+  "ambiguous-ownership",
   "session-context-mismatch",
 ]);
 export type ProjectInventoryIssue = typeof ProjectInventoryIssue.Type;

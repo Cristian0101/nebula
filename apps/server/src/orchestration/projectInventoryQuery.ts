@@ -296,6 +296,8 @@ export const makeProjectInventoryQuery = Effect.gen(function* () {
           }),
         { concurrency: 4 },
       )).slice(0, RESULT_ASSOCIATION_LIMIT);
+      if (tasks.length > 1 || batches.length > 1 || (tasks.length > 0 && batches.length > 0))
+        issues.push("ambiguous-ownership");
       const taskIds = tasks.map((entry) => entry.id);
       const missions = (snapshot.missions ?? []).filter(
         (entry) =>

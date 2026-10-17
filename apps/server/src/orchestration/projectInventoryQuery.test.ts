@@ -15,6 +15,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
+  TaskId,
   type ProviderSession,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -608,6 +609,32 @@ describe("canonical Project inventory and context (disposable repositories, no p
             result.observations.find((entry) => entry.subject === "worktrees")?.completeness,
           ).toBe("unsupported");
           expect(encodeInventory(result)).not.toContain("sensitive");
+        }),
+      ).pipe(Effect.provide(infrastructure)),
+  );
+  it.effect(
+    "reports conflicting canonical Task ownership as ambiguous without selecting an owner",
+    () =>
+      withFixture((f) =>
+        Effect.gen(function* () {
+          const task = f.snapshot.tasks![0]!;
+          f.snapshot = {
+            ...f.snapshot,
+            tasks: [task, { ...task, id: TaskId.make("task-conflict") }],
+          };
+          const q = yield* makeQuery(f);
+          const inventory = yield* q.readOnly(q.getProjectInventory({ projectId }));
+          const result = yield* q.readOnly(
+            q.getProjectWorkspaceContext({
+              projectId,
+              workspaceKey: inventory.worktrees.find((entry) => entry.path === f.taskPath)!
+                .workspaceKey,
+            }),
+          );
+          expect(result.state).toBe("partial");
+          expect(result.issues).toContain("ambiguous-ownership");
+          expect(result.taskIds).toEqual(["task-a", "task-conflict"]);
+          expect(result.threadIds).toEqual(["thread-b"]);
         }),
       ).pipe(Effect.provide(infrastructure)),
   );

@@ -98,6 +98,9 @@ selected context composes the existing shell projection and source repository id
   the selected bounded Threads, with directory-read concurrency four. Unfiltered callers remain
   compatible. The query returns only thread/instance/driver/status and the session's own updatedAt.
 
+Multiple Task/Batch ownership claims remain visible as canonical associations but carry
+`ambiguous-ownership` and a partial state; they never establish an exclusive owner.
+
 An assignment, saved role or projected status is not proof of execution. Sampling provider session
 state is separate from proving an OS process exists. Session observation metadata records the
 runtime sample time; each session keeps its own status-update timestamp. A failed sample is typed
