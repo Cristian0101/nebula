@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { GhosttyCell, GhosttyRow } from "./core";
 import {
+  GhosttyTerminalSurface,
   DEFAULT_TERMINAL_FONT_FAMILY,
   DEFAULT_TERMINAL_FONT_SIZE,
   advanceTerminalSelectionClickSequence,
@@ -33,6 +34,55 @@ import {
   terminalWheelArrowData,
   terminalWheelDeltaRows,
 } from "./surface";
+
+describe("modal terminal boundary", () => {
+  function surfaceFixture() {
+    let blocked = false;
+    const focus = vi.fn();
+    const onData = vi.fn();
+    const surface = Object.assign(Object.create(GhosttyTerminalSurface.prototype), {
+      input: { isConnected: true, closest: () => (blocked ? {} : null), focus },
+      core: { encodePaste: (text: string) => text },
+      options: { onData },
+      disposed: false,
+      pasteShortcutToken: 0,
+    }) as GhosttyTerminalSurface;
+    return {
+      surface,
+      focus,
+      onData,
+      block: (value: boolean) => {
+        blocked = value;
+      },
+    };
+  }
+
+  it("does not let delayed terminal autofocus cross an open modal", () => {
+    const fixture = surfaceFixture();
+    fixture.block(true);
+    fixture.surface.focus();
+    expect(fixture.focus).not.toHaveBeenCalled();
+    fixture.block(false);
+    fixture.surface.focus();
+    expect(fixture.focus).toHaveBeenCalledOnce();
+  });
+
+  it("drops a clipboard read if a modal opens before it resolves", async () => {
+    const fixture = surfaceFixture();
+    let resolve!: (text: string) => void;
+    const read = new Promise<string>((done) => {
+      resolve = done;
+    });
+    const paste = fixture.surface.pasteFromClipboard(() => read);
+    fixture.block(true);
+    resolve("must not reach the hidden shell");
+    await paste;
+    expect(fixture.onData).not.toHaveBeenCalled();
+    fixture.block(false);
+    await fixture.surface.pasteFromClipboard(async () => "safe visible paste");
+    expect(fixture.onData).toHaveBeenCalledExactlyOnceWith("safe visible paste");
+  });
+});
 
 const cell = (text: string): GhosttyCell => ({
   text,

@@ -153,9 +153,12 @@ describe("ProjectTaskCard", () => {
     expect(text).toContain("Open Thread");
     expect(findAction(tree, "Complete")).toBeUndefined();
     expect(findAction(tree, "Cancel")).toBeUndefined();
-    findAction(tree, "Remove workspace")?.();
-    expect(onRemoveWorkspace).toHaveBeenCalledOnce();
-    expect(text).toContain("The Task branch and committed work are preserved.");
+    expect(findAction(tree, "Remove workspace")).toBeUndefined();
+    expect(onRemoveWorkspace).not.toHaveBeenCalled();
+    const html = renderToStaticMarkup(tree);
+    expect(html).toContain("disabled");
+    expect(html).toContain("Workspace removal is temporarily unavailable");
+    expect(html).toContain("the branch and committed work are preserved.");
   });
 
   it("shows ownership violations and exposes remediation actions", () => {

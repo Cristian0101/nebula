@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { getTerminalFocusOwner, isTerminalFocused } from "./terminalFocus";
+import {
+  getTerminalFocusOwner,
+  isTerminalFocused,
+  isTerminalInteractionAllowed,
+} from "./terminalFocus";
 
 class MockHTMLElement {
   isConnected = false;
@@ -77,5 +81,26 @@ describe("isTerminalFocused", () => {
 
     expect(getTerminalFocusOwner()).toBe("right-panel");
     expect(isTerminalFocused()).toBe(true);
+  });
+});
+
+describe("isTerminalInteractionAllowed", () => {
+  it("permits a connected terminal and rejects detached or modal-hidden surfaces", () => {
+    let blocked = false;
+    const terminal = {
+      isConnected: true,
+      closest: (selector: string) => {
+        expect(selector).toContain("[data-base-ui-inert]");
+        expect(selector).toContain('[aria-hidden="true"]');
+        expect(selector).toContain("[inert]");
+        return blocked ? {} : null;
+      },
+    } as unknown as HTMLElement;
+    expect(isTerminalInteractionAllowed(terminal)).toBe(true);
+    blocked = true;
+    expect(isTerminalInteractionAllowed(terminal)).toBe(false);
+    blocked = false;
+    Object.assign(terminal, { isConnected: false });
+    expect(isTerminalInteractionAllowed(terminal)).toBe(false);
   });
 });

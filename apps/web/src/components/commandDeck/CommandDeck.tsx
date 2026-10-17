@@ -1,3 +1,4 @@
+import { WorkspaceRemovalUnavailable } from "../WorkspaceRemovalUnavailable";
 import type { CommandDeckSearch } from "../../commandDeckSearch";
 import { readProjectHomePrefill } from "../project/home/projectHomeDraft";
 import { useProjectNavigate } from "../../hooks/useProjectNavigate";
@@ -35,7 +36,6 @@ import {
   RotateCcwIcon,
   ShieldCheckIcon,
   SquareIcon,
-  Trash2Icon,
   TriangleAlertIcon,
   Undo2Icon,
   WorkflowIcon,
@@ -406,7 +406,6 @@ export function CommandDeck({
   const prepareWorkspace = useAtomCommand(taskEnvironment.prepareWorkspace, {
     reportFailure: false,
   });
-  const removeWorkspace = useAtomCommand(taskEnvironment.removeWorkspace, { reportFailure: false });
   const setOwnership = useAtomCommand(taskEnvironment.setOwnership, { reportFailure: false });
   const validateOwnership = useAtomCommand(taskEnvironment.validateOwnership, {
     reportFailure: false,
@@ -1394,24 +1393,7 @@ export function CommandDeck({
                               selectedTask.status === "cancelled") &&
                             selectedTask.workspace &&
                             selectedTask.workspace.status !== "removed" ? (
-                              <Button
-                                size="xs"
-                                variant="outline"
-                                disabled={busyTaskId === selectedTask.id}
-                                onClick={() =>
-                                  void runTaskCommand(
-                                    selectedTask,
-                                    "Could not remove workspace",
-                                    () =>
-                                      removeWorkspace({
-                                        environmentId: project.environmentId,
-                                        input: { taskId: selectedTask.id },
-                                      }),
-                                  )
-                                }
-                              >
-                                <Trash2Icon /> Remove workspace
-                              </Button>
+                              <WorkspaceRemovalUnavailable />
                             ) : null}
                           </div>
                         </div>

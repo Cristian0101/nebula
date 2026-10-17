@@ -1,3 +1,4 @@
+import { CHECKOUT_SWITCH_UNAVAILABLE } from "../lib/checkoutSafety";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
@@ -5,7 +6,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon, GitBranchIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
+import { ChevronDownIcon, GitBranchIcon, LockIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -698,7 +699,8 @@ export function BranchToolbarBranchSelector({
           <ComboboxTrigger
             render={<Button variant="ghost" size="xs" />}
             className="min-w-0 max-w-full text-muted-foreground/70 hover:text-foreground/80"
-            disabled={isInitialBranchesLoadPending || isBranchActionPending}
+            disabled={hasServerThread || isInitialBranchesLoadPending || isBranchActionPending}
+            title={hasServerThread ? CHECKOUT_SWITCH_UNAVAILABLE : undefined}
           >
             <GitBranchIcon className="size-3 shrink-0 opacity-70" />
             <span
@@ -712,9 +714,25 @@ export function BranchToolbarBranchSelector({
                 {triggerLabel}
               </span>
             </span>
-            <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+            {hasServerThread ? (
+              <LockIcon className="size-3 shrink-0 opacity-50" />
+            ) : (
+              <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+            )}
           </ComboboxTrigger>
         </span>
+        {hasServerThread ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button variant="ghost" size="xs" aria-label={CHECKOUT_SWITCH_UNAVAILABLE} />}
+            >
+              Checkout fixed
+            </TooltipTrigger>
+            <TooltipPopup side="top" className="max-w-72 whitespace-normal">
+              {CHECKOUT_SWITCH_UNAVAILABLE}
+            </TooltipPopup>
+          </Tooltip>
+        ) : null}
       </div>
       <ComboboxPopup align="end" side="top" className="flex w-80 flex-col">
         <div className="shrink-0 px-3 pt-2.5">

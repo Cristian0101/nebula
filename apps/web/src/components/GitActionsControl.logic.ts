@@ -1,3 +1,4 @@
+import { CHECKOUT_SWITCH_UNAVAILABLE, PULL_UNAVAILABLE } from "../lib/checkoutSafety";
 import type {
   GitRunStackedActionResult,
   GitStackedAction,
@@ -26,7 +27,7 @@ export interface GitActionMenuItem {
 export interface GitQuickAction {
   label: string;
   disabled: boolean;
-  kind: "run_action" | "run_pull" | "open_pr" | "open_publish" | "show_hint";
+  kind: "run_action" | "open_pr" | "open_publish" | "show_hint";
   action?: GitStackedAction;
   hint?: string;
 }
@@ -197,7 +198,7 @@ export function resolveQuickAction(
       label: "Commit",
       disabled: true,
       kind: "show_hint",
-      hint: `Create and checkout a ref before pushing or opening a ${terminology.singular}.`,
+      hint: `Detached HEAD. ${CHECKOUT_SWITCH_UNAVAILABLE}`,
     };
   }
 
@@ -265,9 +266,10 @@ export function resolveQuickAction(
 
   if (isBehind) {
     return {
-      label: "Pull",
-      disabled: false,
-      kind: "run_pull",
+      label: "Pull unavailable",
+      disabled: true,
+      kind: "show_hint",
+      hint: PULL_UNAVAILABLE,
     };
   }
 
