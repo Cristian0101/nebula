@@ -36,6 +36,8 @@ Quality Gates, independent Reviewer, the deterministic Integration Engine, Share
 
 Antigravity CLI is the implemented Google first-party provider for individual Google accounts. Nebula invokes its official headless CLI, keeps authentication provider-owned, and binds each run to the canonical Task worktree. The preserved Gemini CLI prototype remains experimental and blocked for the individual-account authentication path; it is not a mainline provider.
 
+See [checkout safety containment](CHECKOUT_SAFETY.md) for the temporary E4.S refusal boundary and the coordination required before E4.4 restores checkout mutation and removal.
+
 ## Source hierarchy
 
 For task authority and repository-wide safety, follow [AGENTS.md](../../AGENTS.md). The following order resolves descriptions of architecture and capability status; code behavior does not grant permission to bypass safeguards:

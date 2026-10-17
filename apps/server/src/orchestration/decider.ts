@@ -5070,6 +5070,26 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         thread.branch !== command.expectedBranch
           ? thread.branch
           : command.branch;
+      const changesWorktree =
+        command.worktreePath !== undefined && command.worktreePath !== thread.worktreePath;
+      const changesBranch = branch !== undefined && branch !== thread.branch;
+      const taskBound =
+        (readModel.tasks ?? []).some((task) => task.threadId === thread.id) ||
+        (readModel.missionRuns ?? []).some((run) =>
+          run.taskRecovery?.some((recovery) =>
+            recovery.attempts.some((attempt) => attempt.threadId === thread.id),
+          ),
+        );
+      if (changesWorktree || (taskBound && changesBranch)) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: taskBound
+              ? "This Thread belongs to a Task. Its workspace identity cannot be changed through Thread metadata."
+              : "An existing Thread cannot be moved to another worktree. Open a new Thread in that worktree instead.",
+          }),
+        );
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({

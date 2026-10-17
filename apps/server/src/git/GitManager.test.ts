@@ -2005,7 +2005,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("creates feature branch, commits, and pushes with featureBranch option", () =>
+  it.effect("refuses feature checkout before generation, commit or push", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -2028,47 +2028,20 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
             }),
         },
       });
-      const result = yield* runStackedAction(manager, {
+      const error = yield* runStackedAction(manager, {
         cwd: repoDir,
         action: "commit_push",
         featureBranch: true,
-      });
-
-      expect(result.branch.status).toBe("created");
-      expect(result.branch.name).toBe("feature/implement-stacked-git-actions");
-      expect(result.commit.status).toBe("created");
-      expect(result.push.status).toBe("pushed");
-      expect(result.toast).toMatchObject({
-        description: "Implement stacked git actions",
-        cta: {
-          kind: "run_action",
-          label: "Create PR",
-          action: {
-            kind: "create_pr",
-          },
-        },
-      });
-      expect(result.toast.title).toMatch(
-        /^Pushed [0-9a-f]{7} to origin\/feature\/implement-stacked-git-actions$/,
-      );
-      expect(
-        yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"]).pipe(
-          Effect.map((result) => result.stdout.trim()),
-        ),
-      ).toBe("feature/implement-stacked-git-actions");
-
-      const mainSha = yield* runGit(repoDir, ["rev-parse", "main"]).pipe(
-        Effect.map((r) => r.stdout.trim()),
-      );
-      const mergeBase = yield* runGit(repoDir, ["merge-base", "main", "HEAD"]).pipe(
-        Effect.map((r) => r.stdout.trim()),
-      );
-      expect(mergeBase).toBe(mainSha);
-      expect(generatedCount).toBe(1);
+      }).pipe(Effect.flip);
+      expect(error.message).toContain("Open the branch in a new worktree");
+      expect(generatedCount).toBe(0);
+      expect((yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim()).toBe("main");
+      expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout).toContain("README.md");
+      expect((yield* runGit(repoDir, ["branch", "--list", "feature/*"])).stdout.trim()).toBe("");
     }),
   );
 
-  it.effect("featureBranch uses custom commit message and derives branch name", () =>
+  it.effect("refuses feature checkout even with a custom commit message", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -2088,26 +2061,17 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
             }),
         },
       });
-      const result = yield* runStackedAction(manager, {
+      const error = yield* runStackedAction(manager, {
         cwd: repoDir,
         action: "commit",
         featureBranch: true,
         commitMessage: "feat: custom summary line\n\n- details from user",
-      });
-
-      expect(result.branch.status).toBe("created");
-      expect(result.branch.name).toBe("feature/feat-custom-summary-line");
-      expect(result.commit.status).toBe("created");
-      expect(result.commit.subject).toBe("feat: custom summary line");
+      }).pipe(Effect.flip);
+      expect(error.message).toContain("Open the branch in a new worktree");
       expect(generatedCount).toBe(0);
-
-      const mainSha = yield* runGit(repoDir, ["rev-parse", "main"]).pipe(
-        Effect.map((r) => r.stdout.trim()),
-      );
-      const mergeBase = yield* runGit(repoDir, ["merge-base", "main", result.branch.name!]).pipe(
-        Effect.map((r) => r.stdout.trim()),
-      );
-      expect(mergeBase).toBe(mainSha);
+      expect((yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim()).toBe("main");
+      expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout).toContain("README.md");
+      expect((yield* runGit(repoDir, ["branch", "--list", "feature/*"])).stdout.trim()).toBe("");
     }),
   );
 
@@ -2143,10 +2107,10 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       expect(error).toMatchObject({
         _tag: "GitManagerError",
-        operation: "runFeatureBranchStep",
+        operation: "runStackedAction",
         cwd: repoDir,
       });
-      expect(error.message).toContain("no changes to commit");
+      expect(error.message).toContain("Open the branch in a new worktree");
     }),
   );
 
@@ -3259,7 +3223,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("prepares pull request threads in local mode by checking out the PR branch", () =>
+  it.effect("refuses local PR checkout before hosting commands or force checkout", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -3281,22 +3245,22 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         },
       });
 
-      const result = yield* preparePullRequestThread(manager, {
+      const error = yield* preparePullRequestThread(manager, {
         cwd: repoDir,
         reference: "#64",
         mode: "local",
-      });
+      }).pipe(Effect.flip);
 
-      expect(result.branch).toBe("feature/pr-local");
-      expect(result.worktreePath).toBeNull();
-      const branch = (yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim();
-      expect(branch).toBe("feature/pr-local");
-      expect(ghCalls).toContain("pr checkout 64 --force");
+      expect(error.message).toContain("Open the branch in a new worktree");
+      expect((yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim()).toBe(
+        "feature/pr-local",
+      );
+      expect(ghCalls).toHaveLength(0);
     }),
   );
 
   it.effect(
-    "restores same-repository upstream tracking after local PR checkout without a remote ref",
+    "restores same-repository upstream tracking after new PR worktree creation without a remote ref",
     () =>
       Effect.gen(function* () {
         const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -3342,13 +3306,17 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         const result = yield* preparePullRequestThread(manager, {
           cwd: repoDir,
           reference: "65",
-          mode: "local",
+          mode: "worktree",
         });
 
-        expect(result.worktreePath).toBeNull();
+        expect(result.worktreePath).not.toBeNull();
         expect(result.branch).toBe("feature/pr-local-upstream");
         expect(
-          (yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"])).stdout.trim(),
+          (yield* runGit(result.worktreePath as string, [
+            "rev-parse",
+            "--abbrev-ref",
+            "@{upstream}",
+          ])).stdout.trim(),
         ).toBe("origin/feature/pr-local-upstream");
       }),
   );
@@ -3367,6 +3335,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         yield* runGit(repoDir, ["add", "no-head-repo.txt"]);
         yield* runGit(repoDir, ["commit", "-m", "Local PR branch without repo metadata"]);
         yield* runGit(repoDir, ["push", "-u", "origin", "feature/pr-local-no-head-repo"]);
+        yield* runGit(repoDir, ["push", "origin", "HEAD:refs/pull/66/head"]);
         yield* runGit(repoDir, ["checkout", "main"]);
         yield* runGit(repoDir, ["branch", "-D", "feature/pr-local-no-head-repo"]);
         yield* runGit(repoDir, [
@@ -3391,13 +3360,17 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         const result = yield* preparePullRequestThread(manager, {
           cwd: repoDir,
           reference: "66",
-          mode: "local",
+          mode: "worktree",
         });
 
-        expect(result.worktreePath).toBeNull();
+        expect(result.worktreePath).not.toBeNull();
         expect(result.branch).toBe("feature/pr-local-no-head-repo");
         expect(
-          (yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"])).stdout.trim(),
+          (yield* runGit(result.worktreePath as string, [
+            "rev-parse",
+            "--abbrev-ref",
+            "@{upstream}",
+          ])).stdout.trim(),
         ).toBe("origin/feature/pr-local-no-head-repo");
       }),
   );
@@ -3621,7 +3594,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("preserves fork upstream tracking when preparing a local PR thread", () =>
+  it.effect("preserves fork upstream tracking when preparing a new PR worktree", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -3663,13 +3636,17 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       const result = yield* preparePullRequestThread(manager, {
         cwd: repoDir,
         reference: "82",
-        mode: "local",
+        mode: "worktree",
       });
 
-      expect(result.worktreePath).toBeNull();
-      expect(result.branch).toBe("feature/pr-local-fork");
+      expect(result.worktreePath).not.toBeNull();
+      expect(result.branch).toBe("t3code/pr-82/feature/pr-local-fork");
       expect(
-        (yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"])).stdout.trim(),
+        (yield* runGit(result.worktreePath as string, [
+          "rev-parse",
+          "--abbrev-ref",
+          "@{upstream}",
+        ])).stdout.trim(),
       ).toBe("fork-seed/feature/pr-local-fork");
     }),
   );
@@ -3720,13 +3697,17 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       const result = yield* preparePullRequestThread(manager, {
         cwd: repoDir,
         reference: "642",
-        mode: "local",
+        mode: "worktree",
       });
 
-      expect(result.branch).toBe("fix/git-action-default-without-origin");
-      expect(result.worktreePath).toBeNull();
+      expect(result.branch).toBe("t3code/pr-642/fix/git-action-default-without-origin");
+      expect(result.worktreePath).not.toBeNull();
       expect(
-        (yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"])).stdout.trim(),
+        (yield* runGit(result.worktreePath as string, [
+          "rev-parse",
+          "--abbrev-ref",
+          "@{upstream}",
+        ])).stdout.trim(),
       ).toBe("binbandit-seed/fix/git-action-default-without-origin");
     }),
   );
@@ -3786,7 +3767,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("refreshes a reused PR worktree onto the updated pull request head", () =>
+  it.effect("preserves a reused PR checkout when the remote advances", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -3805,6 +3786,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         `pr-reused-stale-${NodePath.basename(repoDir)}`,
       );
       yield* runGit(repoDir, ["worktree", "add", worktreePath, "feature/pr-reused-stale"]);
+      const originalHead = (yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim();
 
       yield* runGit(repoDir, ["checkout", "-b", "author-push", "origin/feature/pr-reused-stale"]);
       NodeFS.writeFileSync(NodePath.join(repoDir, "authored.txt"), "authored\n");
@@ -3827,6 +3809,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         },
       });
 
+      expect(originalHead).not.toBe(updatedHead);
       const result = yield* preparePullRequestThread(manager, {
         cwd: repoDir,
         reference: "84",
@@ -3837,11 +3820,11 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         NodeFS.realpathSync.native(worktreePath),
       );
       expect(result.branch).toBe("feature/pr-reused-stale");
-      expect((yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim()).toBe(updatedHead);
+      expect((yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim()).toBe(originalHead);
     }),
   );
 
-  it.effect("runs the setup script when a reused PR worktree moves onto the new head", () =>
+  it.effect("never runs setup while opening an existing PR worktree", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -3860,6 +3843,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         `pr-reused-setup-${NodePath.basename(repoDir)}`,
       );
       yield* runGit(repoDir, ["worktree", "add", worktreePath, "feature/pr-reused-setup"]);
+      const originalHead = (yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim();
 
       yield* runGit(repoDir, ["checkout", "-b", "setup-author-push", "feature/pr-reused-setup"]);
       NodeFS.writeFileSync(NodePath.join(repoDir, "reused-setup.txt"), "reused setup again\n");
@@ -3896,13 +3880,9 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         threadId: asThreadId("thread-pr-reused-setup"),
       });
 
-      expect(setupCalls).toHaveLength(1);
-      expect(setupCalls[0]).toEqual({
-        threadId: "thread-pr-reused-setup",
-        projectCwd: repoDir,
-        worktreePath: result.worktreePath as string,
-      });
-      expect(result.isOnPullRequestHead).toBe(true);
+      expect((yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim()).toBe(originalHead);
+      expect(setupCalls).toHaveLength(0);
+      expect(result.isOnPullRequestHead).toBe(false);
     }),
   );
 
@@ -3955,13 +3935,13 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         threadId: asThreadId("thread-pr-reused-current"),
       });
 
-      expect(result.isOnPullRequestHead).toBe(true);
+      expect(result.isOnPullRequestHead).toBe(false);
       expect((yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim()).toBe(currentHead);
       expect(setupCalls).toHaveLength(0);
     }),
   );
 
-  it.effect("resets a clean reused PR worktree onto a force-pushed pull request head", () =>
+  it.effect("preserves a clean reused PR checkout across a force-pushed remote head", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -3980,6 +3960,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         `pr-force-pushed-${NodePath.basename(repoDir)}`,
       );
       yield* runGit(repoDir, ["worktree", "add", worktreePath, "feature/pr-force-pushed"]);
+      const originalHead = (yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim();
       const staleHead = (yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim();
 
       yield* runGit(repoDir, ["checkout", "-b", "author-rewrite", "feature/pr-force-pushed"]);
@@ -4015,6 +3996,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         },
       });
 
+      expect(originalHead).not.toBe(rewrittenHead);
       const result = yield* preparePullRequestThread(manager, {
         cwd: repoDir,
         reference: "86",
@@ -4024,12 +4006,10 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.worktreePath && NodeFS.realpathSync.native(result.worktreePath)).toBe(
         NodeFS.realpathSync.native(worktreePath),
       );
-      expect(result.isOnPullRequestHead).toBe(true);
-      expect((yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim()).toBe(
-        rewrittenHead,
-      );
+      expect(result.isOnPullRequestHead).toBe(false);
+      expect((yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim()).toBe(originalHead);
       expect(NodeFS.readFileSync(NodePath.join(worktreePath, "force-pushed.txt"), "utf8")).toBe(
-        "rewritten\n",
+        "first\n",
       );
     }),
   );
@@ -4190,7 +4170,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("refreshes a reused PR worktree that has no upstream from the pull request ref", () =>
+  it.effect("preserves a reused PR worktree with no upstream", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -4225,6 +4205,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         mode: "worktree",
       });
       const worktreePath = created.worktreePath as string;
+      const originalHead = (yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim();
       expect(
         (yield* runGit(worktreePath, ["rev-parse", "--abbrev-ref", "@{upstream}"], true)).exitCode,
       ).not.toBe(0);
@@ -4238,6 +4219,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       const updatedHead = (yield* runGit(repoDir, ["rev-parse", "ref-only-author"])).stdout.trim();
       yield* runGit(repoDir, ["checkout", "main"]);
 
+      expect(originalHead).not.toBe(updatedHead);
       const result = yield* preparePullRequestThread(manager, {
         cwd: repoDir,
         reference: "90",
@@ -4247,8 +4229,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.worktreePath && NodeFS.realpathSync.native(result.worktreePath)).toBe(
         NodeFS.realpathSync.native(worktreePath),
       );
-      expect(result.isOnPullRequestHead).toBe(true);
-      expect((yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim()).toBe(updatedHead);
+      expect(result.isOnPullRequestHead).toBe(false);
+      expect((yield* runGit(worktreePath, ["rev-parse", "HEAD"])).stdout.trim()).toBe(originalHead);
     }),
   );
 
@@ -4444,7 +4426,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       }),
   );
 
-  it.effect("reuses an existing PR worktree and restores fork upstream tracking", () =>
+  it.effect("opens an existing PR worktree without rewriting its upstream", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -4499,8 +4481,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         NodeFS.realpathSync.native(worktreePath),
       );
       expect(
-        (yield* runGit(worktreePath, ["rev-parse", "--abbrev-ref", "@{upstream}"])).stdout.trim(),
-      ).toBe("fork-seed/feature/pr-reused-fork");
+        (yield* runGit(worktreePath, ["rev-parse", "--abbrev-ref", "@{upstream}"], true)).exitCode,
+      ).not.toBe(0);
     }),
   );
 
