@@ -95,6 +95,7 @@ a loading explanation and retry. Real macOS VoiceOver and founder/design accepta
 separate from automated DOM, keyboard, responsive and Electron checks.
 
 Provider recovery uses environment-scoped Provider Settings at this dependency base; E3
-Provider Connections is not imported. Branches/Worktrees management, Git coordination,
+Provider Connections is not imported. [Branches & Worktrees inspection](branches-worktrees.md)
+is available from the Project sidebar. Checkout creation, switching/removal, Git coordination,
 Notes and Ion migration remain separate milestones. No deployment, integration merge,
 Git mutation, provider stop, process termination or paid inference belongs to Home.
