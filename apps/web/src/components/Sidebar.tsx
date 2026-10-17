@@ -1,3 +1,4 @@
+import { SidebarProjectSection } from "./SidebarProjectSection";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
@@ -45,15 +46,12 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
-  HouseIcon,
-  LayoutDashboardIcon,
   MessageSquareIcon,
   NetworkIcon,
   PinIcon,
   PlusIcon,
   SearchIcon,
   ServerIcon,
-  SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
@@ -2112,91 +2110,6 @@ export default function Sidebar() {
     clearSelection();
   }, [clearSelection, projectScopeKey]);
 
-  const handleProjectSettings = useCallback(
-    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setProjectScopeMenuOpen(false);
-      if (isMobile) {
-        setOpenMobile(false);
-      }
-      void router.navigate({
-        to: "/projects/$projectKey/settings",
-        params: { projectKey: projectGroup.projectKey },
-      });
-    },
-    [isMobile, router, setOpenMobile],
-  );
-
-  const handleProjectHome = useCallback(
-    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setProjectScopeMenuOpen(false);
-      if (isMobile) setOpenMobile(false);
-      void router.navigate({
-        to: "/projects/$projectKey",
-        params: { projectKey: projectGroup.projectKey },
-      });
-    },
-    [isMobile, router, setOpenMobile],
-  );
-
-  const handleCommandDeck = useCallback(
-    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setProjectScopeMenuOpen(false);
-      if (isMobile) {
-        setOpenMobile(false);
-      }
-      void router.navigate({
-        to: "/projects/$projectKey/command-deck",
-        params: { projectKey: projectGroup.projectKey },
-      });
-    },
-    [isMobile, router, setOpenMobile],
-  );
-
-  const handleSwarm = useCallback(
-    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setProjectScopeMenuOpen(false);
-      if (isMobile) setOpenMobile(false);
-      const latestPlan = projects
-        .find(
-          (project) =>
-            project.environmentId === projectGroup.environmentId && project.id === projectGroup.id,
-        )
-        ?.architectPlans?.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-      void router.navigate({
-        to: "/projects/$projectKey/command-deck",
-        params: { projectKey: projectGroup.projectKey },
-        search: {
-          mode: "swarm",
-          stage: latestPlan ? "plan" : "brief",
-          ...(latestPlan ? { proposalId: latestPlan.id } : {}),
-        },
-      });
-    },
-    [isMobile, projects, router, setOpenMobile],
-  );
-
-  const handleTerminalCenter = useCallback(
-    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setProjectScopeMenuOpen(false);
-      if (isMobile) setOpenMobile(false);
-      void router.navigate({
-        to: "/projects/$projectKey/terminal-center",
-        params: { projectKey: projectGroup.projectKey },
-      });
-    },
-    [isMobile, router, setOpenMobile],
-  );
-
   // Settled threads stay in the live shell stream (settled ≠ archived), so
   // the partition works directly off live shells: no archived-snapshot
   // merging, no optimistic holds. Archived threads remain hidden here —
@@ -3754,65 +3667,6 @@ export default function Sidebar() {
                               className="size-4 shrink-0"
                             />
                             <span className="min-w-0 truncate text-sm">{project.displayName}</span>
-                            <Button
-                              size="icon-xs"
-                              variant="ghost-muted"
-                              aria-label={`Open Project Home for ${project.displayName}`}
-                              title={`Project Home for ${project.displayName}`}
-                              className="ml-auto size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
-                              onPointerDown={(event) => event.stopPropagation()}
-                              onClick={(event) => handleProjectHome(event, project)}
-                            >
-                              <HouseIcon className="size-3.5" />
-                            </Button>
-                            <Button
-                              size="icon-xs"
-                              variant="ghost-muted"
-                              aria-label={`Open Swarm for ${project.displayName}`}
-                              title={`Swarm for ${project.displayName}`}
-                              className="size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
-                              onPointerDown={(event) => event.stopPropagation()}
-                              onClick={(event) => handleSwarm(event, project)}
-                            >
-                              <NetworkIcon className="size-3.5" />
-                            </Button>
-                            <Button
-                              size="icon-xs"
-                              variant="ghost-muted"
-                              aria-label={`Open Command Deck for ${project.displayName}`}
-                              title={`Command Deck for ${project.displayName}`}
-                              className="size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
-                              onPointerDown={(event) => event.stopPropagation()}
-                              onClick={(event) => {
-                                handleCommandDeck(event, project);
-                              }}
-                            >
-                              <LayoutDashboardIcon className="size-3.5" />
-                            </Button>
-                            <Button
-                              size="icon-xs"
-                              variant="ghost-muted"
-                              aria-label={`Open Terminal Center for ${project.displayName}`}
-                              title={`Terminal Center for ${project.displayName}`}
-                              className="size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
-                              onPointerDown={(event) => event.stopPropagation()}
-                              onClick={(event) => handleTerminalCenter(event, project)}
-                            >
-                              <TerminalIcon className="size-3.5" />
-                            </Button>
-                            <Button
-                              size="icon-xs"
-                              variant="ghost-muted"
-                              aria-label={`Project settings for ${project.displayName}`}
-                              title={`Project settings for ${project.displayName}`}
-                              className="size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
-                              onPointerDown={(event) => event.stopPropagation()}
-                              onClick={(event) => {
-                                void handleProjectSettings(event, project);
-                              }}
-                            >
-                              <SettingsIcon className="size-3.5" />
-                            </Button>
                           </MenuRadioItem>
                         );
                       })}
@@ -3844,6 +3698,7 @@ export default function Sidebar() {
           </SidebarGroup>
         }
       >
+        <SidebarProjectSection groups={projectGroups} />
         <SidebarGroup className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0">
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (

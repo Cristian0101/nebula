@@ -1,3 +1,6 @@
+import { encodeProjectCheckout } from "../../projectNavigation";
+import { useProjectNavigate } from "../../hooks/useProjectNavigate";
+import { useProjectNavigationGroup } from "../project/projectNavigationContext";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -25,7 +28,7 @@ import { SharedResourceId } from "@t3tools/contracts";
 import { resolveEnvModeLabel } from "../BranchToolbar.logic";
 import { createModelSelection } from "@t3tools/shared/model";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
-import { useCanGoBack, useNavigate } from "@tanstack/react-router";
+import { useCanGoBack } from "@tanstack/react-router";
 import * as Cause from "effect/Cause";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react";
 import {
@@ -125,6 +128,7 @@ export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, st
 
 /** Logical project groups for the settings page, sorted by display name. */
 export function useSettingsProjectGroups(): SidebarProjectSnapshot[] {
+  const selectedGroup = useProjectNavigationGroup();
   const projects = useProjects();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -143,8 +147,10 @@ export function useSettingsProjectGroups(): SidebarProjectSnapshot[] {
         settings: projectGroupingSettings,
         primaryEnvironmentId,
         resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
-      }).sort((a, b) => a.displayName.localeCompare(b.displayName)),
-    [environmentLabelById, primaryEnvironmentId, projectGroupingSettings, projects],
+      })
+        .map((group) => (selectedGroup?.projectKey === group.projectKey ? selectedGroup : group))
+        .sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    [environmentLabelById, primaryEnvironmentId, projectGroupingSettings, projects, selectedGroup],
   );
 }
 
@@ -153,7 +159,7 @@ function memberKey(member: { environmentId: string; id: string }): string {
 }
 
 export function ProjectSettingsPage({ projectKey }: { projectKey: string }) {
-  const navigate = useNavigate();
+  const navigate = useProjectNavigate();
   const canGoBack = useCanGoBack();
   const navigateBackWithinApp = useCallback(() => {
     if (canGoBack) {
@@ -192,7 +198,7 @@ export function ProjectSettingsPage({ projectKey }: { projectKey: string }) {
 
 function ProjectSettingsBreadcrumb({ projectKey }: { projectKey: string }) {
   const groups = useSettingsProjectGroups();
-  const navigate = useNavigate();
+  const navigate = useProjectNavigate();
   const selected = groups.find((group) => group.projectKey === projectKey) ?? null;
   const openProjectMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
     const api = readLocalApi();
@@ -245,39 +251,7 @@ function ProjectSettingsBreadcrumb({ projectKey }: { projectKey: string }) {
 
 export function ProjectSettingsPanel({ projectKey }: { projectKey: string }) {
   const groups = useSettingsProjectGroups();
-  const navigate = useNavigate();
-
   const selected = groups.find((group) => group.projectKey === projectKey) ?? null;
-
-  // Remember the members of the last rendered group so a grouping-rule change
-  // (which changes the group key) can follow the project to its new group.
-  const lastSelectionRef = useRef<{ key: string; memberKeys: string[] } | null>(null);
-  useEffect(() => {
-    if (!selected) return;
-    lastSelectionRef.current = {
-      key: selected.projectKey,
-      memberKeys: selected.memberProjects.map((member) => member.physicalProjectKey),
-    };
-  }, [selected]);
-
-  // A grouping-rule change replaces the group key mid-visit; follow the
-  // project to its new key instead of parking on the not-found state.
-  useEffect(() => {
-    if (selected !== null) return;
-    const last = lastSelectionRef.current;
-    if (last?.key !== projectKey) return;
-    const successor = groups.find((group) =>
-      group.memberProjects.some((member) => last.memberKeys.includes(member.physicalProjectKey)),
-    );
-    if (successor) {
-      void navigate({
-        to: "/projects/$projectKey/settings",
-        params: { projectKey: successor.projectKey },
-        replace: true,
-        hashScrollIntoView: false,
-      });
-    }
-  }, [groups, navigate, projectKey, selected]);
 
   if (!selected) {
     return (
@@ -643,7 +617,7 @@ function ProjectSharedResourcesSettings({ project }: { project: SidebarProjectGr
 }
 
 function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
-  const navigate = useNavigate();
+  const navigate = useProjectNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const settings = usePrimarySettings();
   const updateClientSettings = useUpdateClientSettings();
@@ -813,10 +787,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
   );
 
   // ----- checkout selection and scripts -----
-  const [selectedCheckoutKey, setSelectedCheckoutKey] = useState(representative.physicalProjectKey);
-  const selectedCheckout =
-    group.memberProjects.find((member) => member.physicalProjectKey === selectedCheckoutKey) ??
-    representative;
+  const selectedCheckout = representative;
   const devServerProfiles = settings.devServerProfilesByProject[group.projectKey] ?? [];
   const [devServerName, setDevServerName] = useState("");
   const [devServerCommand, setDevServerCommand] = useState("");
@@ -1195,7 +1166,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
             }
           />
         </SettingsSection>
-        <SettingsSection title="Terminal Center">
+        <SettingsSection title="Workbench">
           <SettingsRow
             title="Spatial provider workspace"
             description="Launch and organize canonical provider Threads without requiring a Task or Mission."
@@ -1209,7 +1180,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
                   })
                 }
               >
-                Open Terminal Center
+                Open Workbench
               </Button>
             }
           />
@@ -1460,7 +1431,22 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
           headerAction={
             <Select
               value={selectedCheckout.physicalProjectKey}
-              onValueChange={(value) => setSelectedCheckoutKey(String(value))}
+              onValueChange={(value) => {
+                const member = group.memberProjects.find(
+                  (member) => member.physicalProjectKey === String(value),
+                );
+                if (member)
+                  void navigate({
+                    to: "/projects/$projectKey/settings",
+                    params: { projectKey: group.projectKey },
+                    search: {
+                      checkout: encodeProjectCheckout({
+                        environmentId: member.environmentId,
+                        projectId: member.id,
+                      }),
+                    },
+                  });
+              }}
             >
               <SelectTrigger className="max-w-64" aria-label="Selected checkout">
                 <SelectValue>{selectedCheckoutLabel}</SelectValue>

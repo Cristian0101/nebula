@@ -311,6 +311,8 @@ export function shouldHandleTerminalExit(
 }
 
 interface TerminalViewportProps {
+  /** Restoring a viewport never creates a shell; explicit open actions own launch. */
+  attachOnly?: boolean;
   advancedTypography: boolean;
   threadRef: ScopedThreadRef;
   threadId: ThreadId;
@@ -335,6 +337,7 @@ interface TerminalLaunchLocation {
 }
 
 export function TerminalViewport({
+  attachOnly = true,
   advancedTypography,
   threadRef,
   threadId,
@@ -407,9 +410,13 @@ export function TerminalViewport({
     terminal: {
       threadId,
       terminalId,
-      cwd,
-      ...(worktreePath !== undefined ? { worktreePath } : {}),
-      ...(runtimeEnv ? { env: runtimeEnv } : {}),
+      ...(!attachOnly
+        ? {
+            cwd,
+            ...(worktreePath !== undefined ? { worktreePath } : {}),
+            ...(runtimeEnv ? { env: runtimeEnv } : {}),
+          }
+        : {}),
     },
   });
   const writeTerminal = useEffectEvent((data: string) =>

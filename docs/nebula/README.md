@@ -1,6 +1,7 @@
 # Nebula source of truth
 
 For the read-only Project OS query foundation, see [Canonical Project inventory](PROJECT_INVENTORY.md).
+For environment-scoped checkout navigation and client layout migration, see [Project navigation](PROJECT_NAVIGATION.md).
 
 ## Architect Plan Proposal
 
