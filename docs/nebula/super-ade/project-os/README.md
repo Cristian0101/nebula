@@ -10,7 +10,7 @@ This package turns the Projects interface into a project-centered operating surf
 
 | Input                         | Reference                                                                                                                                         |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Design foundation             | PR #36, branch `design/super-ade-foundation`, design reference `a275bc244`. **Still an open draft.** This package is stacked on it                |
+| Design foundation             | PR #36, branch `design/super-ade-foundation`, design reference `a275bc244`. **Open draft, unmerged.** This package is stacked on it               |
 | Code inspected                | `main` at `784473fb5` (E1 PR #37 and E2 PR #40 merged)                                                                                            |
 | Provider Connections (E3)     | PR #41 open, head `131085ff8`, not merged. Final human acceptance is separate. D4 links to the E3 sheet only through its search parameters        |
 | Engineering feasibility audit | Referenced by the foundation as "audit PR n / Phase n". It is not committed; D4 names its own required queries instead of depending on audit text |
@@ -25,7 +25,9 @@ Code paths in this package resolve at `784473fb5` unless marked **E3** (resolve 
 | 2   | [Engineering handoff](PROJECT_OS_HANDOFF.md)  | Reuse map, canonical data dependencies, required composite queries, per-screen handoff, bounded E4.1–E4.4 slices with acceptance                                                                                 |
 | 3   | [Visual reference](reference/project-os.html) | Interactive, self-contained high-fidelity reference: every screen, live interaction states, guarded-switch walkthrough, 390–2560px frames, dark and light, Nebula Ion and the shipped theme. Synthetic data only |
 
-Open the reference directly in a browser. It loads Geist from Google Fonts when online and falls back to the platform stack.
+Open the reference directly in a browser. The [single-screen reviewer](reference/project-os.html?review=1) offers every required width, dark/light, both palettes and text scaling. [Design QA](design-qa.md) and `reference/screens/` contain review receipts and rendered visual artifacts.
+
+The reference loads Geist from Google Fonts when online and falls back to the platform stack.
 
 ## What D4 supersedes
 
@@ -48,3 +50,30 @@ Everything else in the foundation stands, including tokens, the seven-fact execu
 - Hiding a view never stops work. Stopping is a separate, labelled action, offered only where Nebula owns the process.
 - Project identity is environment-scoped. Every project screen states which checkout on which environment it is showing.
 - Do not change the default theme. `nebula-ion` remains a D1 decision (founder decision F1).
+
+## Current review boundary
+
+PR #42 is the existing design PR, stacked on PR #36. Live status rechecked October 16, 2026 (America/New_York): #36 OPEN at `a275bc24489dc246e9de1686a23797fbb401e016`; #41 OPEN at `131085ff80d9cd1a189c124b6a77d5d523396b08`, human acceptance pending. These checks do not establish merge, release or founder approval. No application runtime or local configuration is edited by D4.
+
+## Deliverable map
+
+| Deliverable                                   | Reference                                                                               |
+| --------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 1. Design verdict                             | Design §0                                                                               |
+| 2. Information architecture                   | Design §2                                                                               |
+| 3. Project Home blueprint                     | Design §3                                                                               |
+| 4. Branches & Worktrees blueprint             | Design §4                                                                               |
+| 5. Worktree safety flow                       | Design §5; handoff §2.3                                                                 |
+| 6. Workbench navigation                       | Design §6                                                                               |
+| 7. Expanded sidebar navigation                | Design §7                                                                               |
+| 8. Agents and Dev Servers                     | Design §8                                                                               |
+| 9. Notes placement and backend gate           | Design §9; future-only atlas frame                                                      |
+| 10. Responsive designs at seven widths        | Design §10; HTML single-screen reviewer                                                 |
+| 11. Dark/light and shipped-theme designs      | Design §11; visual index                                                                |
+| 12. Four high-fidelity primary screens        | [Visual index](VISUAL_INDEX.md), 17 screen captures and the four-screen board           |
+| 13. Component/reuse map                       | Handoff §1                                                                              |
+| 14. Canonical data and composite dependencies | Handoff §2                                                                              |
+| 15. Accessibility checklist and actual checks | Design §12; [design QA](design-qa.md)                                                   |
+| 16. Founder decisions                         | Design §13, P1–P10; foundation F1–F16 remain separate                                   |
+| 17. Bounded E4.1–E4.4 implementation handoff  | Handoff §4, with per-screen actions/permissions/failure states in §3                    |
+| 18. Design PR and artifact paths              | [PR #42](https://github.com/Cristian0101/nebula/pull/42); this package and visual index |

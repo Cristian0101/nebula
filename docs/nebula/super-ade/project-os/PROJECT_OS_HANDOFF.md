@@ -105,17 +105,17 @@ E4.1 and E4.2 need **no** server change except the Command Deck search parameter
 
 ### 2.3 Required server additions
 
-All are additive. Authorization is registered in `apps/server/src/auth/RpcAuthorization.ts`; schemas in `packages/contracts/src/git.ts` and `rpc.ts`; handlers in `apps/server/src/ws.ts` through `GitWorkflowService`.
+Inventory fields are additive; guarded mutation behavior is an intentional compatibility change in E4.4. Authorization is registered in `apps/server/src/auth/RpcAuthorization.ts`; schemas in `packages/contracts/src/git.ts` and `rpc.ts`; handlers in `apps/server/src/ws.ts` through `GitWorkflowService`.
 
-| Proposed method / field                      | Slice           | Scope                                    | Contract (conceptual)                                                                                                                                                                                                                                                                                                                                                                                                     |
-| -------------------------------------------- | --------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vcs.listWorktrees`                          | E4.3            | `orchestration:read`                     | Input `{ cwd }`. Output `{ isRepo, mainPath, worktrees: [{ path, head, refName \| null, detached, locked, prunable, missing, isMain }] }` from `git worktree list --porcelain -z`. Includes detached and missing entries that `listRefs` filters out                                                                                                                                                                      |
-| `VcsRef.headSha`, `VcsRef.committedAt`       | E4.3            | (existing `listRefs`)                    | Optional fields. `readGitRefsSnapshot` already reads `committerdate:unix`                                                                                                                                                                                                                                                                                                                                                 |
-| `VcsStatusResult.workingTree.untrackedCount` | E4.3            | (existing status)                        | Optional. Absent means unknown; the UI omits it                                                                                                                                                                                                                                                                                                                                                                           |
-| `VcsCreateRefInput.baseRefName`              | E4.3 (optional) | (existing `createRef`)                   | Optional starting point. Without it, the dialog states that the branch starts at the checkout's HEAD                                                                                                                                                                                                                                                                                                                      |
-| `vcs.assessCheckoutSwitch`                   | E4.4            | `orchestration:read`                     | Input `{ cwd, targetRefName }`. Output `{ assessmentId, assessedAt, expiresAt, checkout: { path, refName, head, environmentLabel }, target: { refName, checkedOutAt \| null }, blockers: [{ code, evidence }], notices: [{ code, evidence }] }`. Codes per design §5.3. Joins Git state with the orchestration read model (threads by worktree path, Tasks, Integration batches), `TerminalManager` by cwd, and discovery |
-| `vcs.switchRef` guarded mode                 | E4.4            | existing (`orchestration:operate` class) | Additive `assessmentId`. When present, the server re-runs the assessment inside the same operation and refuses with typed blockers if anything changed. Clients that come from Project OS **must** send it. Unguarded calls remain for draft threads only (decision P5)                                                                                                                                                   |
-| `vcs.assessWorktreeRemoval`                  | E4.4            | `orchestration:read`                     | Input `{ cwd, worktreePath }`. Output `{ eligibility: task-cleanup \| integration-cleanup \| not-eligible \| unmanaged, reasons[], ownerRef?, expiresAt }`. Read-only. No removal method is added in E4                                                                                                                                                                                                                   |
+| Proposed method / field                      | Slice           | Scope                                    | Contract (conceptual)                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------------- | --------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vcs.listWorktrees`                          | E4.3            | `orchestration:read`                     | Input `{ cwd }`. Output `{ isRepo, mainPath, worktrees: [{ path, head, refName \| null, detached, locked, prunable, missing, isMain }] }` from `git worktree list --porcelain -z`. Includes detached and missing entries that `listRefs` filters out. Required composition: attach normalized checkout identity plus related Thread/Task/Integration IDs and `observedAt`/coverage. Resolve paths on the server; the client joins only canonical IDs. Omit unsupported associations |
+| `VcsRef.headSha`, `VcsRef.committedAt`       | E4.3            | (existing `listRefs`)                    | Optional fields. `readGitRefsSnapshot` already reads `committerdate:unix`                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `VcsStatusResult.workingTree.untrackedCount` | E4.3            | (existing status)                        | Optional. Absent means unknown; the UI omits it                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `VcsCreateRefInput.baseRefName`              | E4.3 (optional) | (existing `createRef`)                   | Optional starting point. Without it, the dialog states that the branch starts at the checkout's HEAD                                                                                                                                                                                                                                                                                                                                                                                |
+| `vcs.assessCheckoutSwitch`                   | E4.4            | `orchestration:read`                     | Input `{ cwd, targetRefName }`. Output `{ assessmentId, assessedAt, expiresAt, checkout: { path, refName, head, environmentLabel }, target: { refName, checkedOutAt \| null }, blockers: [{ code, evidence }], notices: [{ code, evidence }] }`. Codes per design §5.3. Joins Git state with the orchestration read model (threads by worktree path, Tasks, Integration batches), `TerminalManager` by cwd, and discovery                                                           |
+| `vcs.switchRef` guarded mode                 | E4.4            | existing (`orchestration:operate` class) | Require a caller/context-bound `assessmentId` for public checkout switches; omission is never a bypass. Revalidate inside the existing coordinated operation and refuse typed blockers if state changes. Cover draft mutations and `createRef` with `switchRef: true` too; selection-only draft changes do not mutate. Older clients get an actionable typed refusal                                                                                                                |
+| `vcs.assessWorktreeRemoval`                  | E4.4            | `orchestration:read`                     | Input `{ cwd, worktreePath }`. Output `{ eligibility: task-cleanup \| integration-cleanup \| not-eligible \| unmanaged, reasons[], ownerRef?, expiresAt }`. Read-only. No removal method is added in E4                                                                                                                                                                                                                                                                             |
 
 Rules for every addition:
 
@@ -132,7 +132,7 @@ Rules for every addition:
 - **URL:** `checkout` search param on `/projects/$projectKey`, `/command-deck`, `/terminal-center`, `/settings`, and later `/branches`. Navigating between project destinations preserves it.
 - **Actions:** navigate, expand/collapse, switch checkout (param only), open palette project switcher. No mutation.
 - **Permissions:** read only (`orchestration:read`).
-- **Failure/recovery:** unknown checkout ref → resolve representative and show "Checkout not found. Showing This Mac." once. Successor key lookup for regrouped projects. Offline environment → row shows offline glyph; navigation allowed.
+- **Failure/recovery:** invalid explicit checkout ref → “Checkout unavailable”, chooser, mutations disabled. Never substitute This Mac or another host. Missing ref may resolve a valid last-used checkout or representative, named visibly. Successor key lookup for regrouped projects. Offline environment → row shows offline glyph; navigation allowed.
 - **Visual acceptance:** active project unmistakable (expanded, checkout line, selected sub-row with 2px bar); other projects collapsed; no layout shift on hover; sidebar at 232–480px stays aligned; `thread.jump.*` hints still render.
 - **Backend dependency:** none.
 
@@ -143,7 +143,7 @@ Rules for every addition:
 - **Actions:** open thread/Task/Mission, answer/approve (by navigating to the existing surface; Overview never approves inline in E4), start draft via launch bar, open Workbench, attach a discovered server (existing attach flow in the Workbench).
 - **Permissions:** read; launch requires the same permissions as creating a thread today.
 - **Failure/recovery:** per-card error with Retry; offline banner; no provider ready → launch bar disabled with reason and E3 link.
-- **Visual acceptance:** no hero when the project has work; exactly one solid-violet control in the main column; context block visible without scrolling at 1280×720; every status icon + text; Needs you sorted by decision class; Live now never lists idle or stopped sessions.
+- **Visual acceptance:** no hero when the project has work; exactly one solid-violet control in the main column; context block visible without scrolling at 1280×720; every status icon + text; Needs you sorted by decision class; Live now distinguishes “Working” from “Idle · session open”; stopped sessions appear only in Resume.
 - **Backend dependency:** Command Deck `validateSearch` change only.
 
 ### 3.3 Branches & Worktrees (Screen B, E4.3)
@@ -186,7 +186,7 @@ Each slice is one reviewable PR against a dedicated branch. None merges to `main
 
 - [ ] Active project shows checkout line and destinations; other projects collapsed; hover/focus popover works by keyboard.
 - [ ] A remote-only project shows its environment label in the sidebar tooltip and every project header.
-- [ ] `?checkout=` round-trips through reload and between project destinations; an invalid value falls back visibly.
+- [ ] `?checkout=` round-trips through reload and between project destinations; an invalid explicit value shows “Checkout unavailable” and never falls back.
 - [ ] Two checkouts of one repository on two environments keep separate Terminal Workspaces; existing workspaces survive migration.
 - [ ] No mutation is reachable from navigation.
 - [ ] Focused tests: `resolveProjectCheckout` table; migration of `terminalWorkspacesByProjectId`; palette group build.
@@ -215,7 +215,7 @@ Each slice is one reviewable PR against a dedicated branch. None merges to `main
 **Acceptance:**
 
 - [ ] Inventory shows detached, missing and locked worktrees from `listWorktrees`; main checkout first.
-- [ ] Owner join is correct for Task, Integration and Thread fixtures, including two threads in one worktree.
+- [ ] Owner join uses canonical server-resolved IDs; fixtures include symlink/case aliases, detached/missing paths, two Threads in one worktree and duplicate ProjectIds on different hosts. Unknown associations remain unavailable.
 - [ ] Facts without a source are omitted (refs without a checkout show no sync or PR).
 - [ ] Creating a branch never switches; creating a worktree then opening a thread there produces a draft whose context strip shows that worktree.
 - [ ] Server tests: porcelain parsing (detached, locked, prunable, missing), additive schema decode with older servers.
@@ -232,7 +232,9 @@ Each slice is one reviewable PR against a dedicated branch. None merges to `main
 - [ ] Task-owned and Integration worktrees never offer Switch.
 - [ ] A running provider session, a running terminal subprocess, a managed dev server, uncommitted or untracked files each block.
 - [ ] Unpublished commits produce a notice, not a blocker.
-- [ ] The composer branch picker on a server thread with an active session cannot change its checkout.
+- [ ] Every public checkout mutation, including a draft and `createRef({ switchRef: true })`, refuses missing/invalid receipts and active ownership. An old client cannot bypass the guard.
+- [ ] Receipts are bound to caller, environment, checkout, source HEAD and target; stale, reused or mismatched receipts are refused.
+- [ ] Incomplete process/ownership/Git evidence blocks; lost responses trigger a status read, never an automatic mutation retry.
 - [ ] Removal eligibility distinguishes Task cleanup, Integration cleanup, not eligible and unmanaged; no delete control renders.
 - [ ] Guard dialog keyboard: Enter never confirms; Escape restores focus.
 
@@ -242,7 +244,7 @@ Each slice is one reviewable PR against a dedicated branch. None merges to `main
 2. Every status maps to a field named in §2.1. No status from a role, registration or label.
 3. Default theme unchanged (`DEFAULT_THEME_SNAPSHOT.theme` stays `nebula` unless D1 is approved).
 4. Breakpoints 390, 768, 980, 1280, 1440, 1920, 2560; dark and light; reduced motion.
-5. Focused tests per §4; repo-wide runs only when the slice touches contracts or server behavior (E4.3, E4.4).
+5. Focused tests per §4; broaden only for affected boundaries or integration readiness; contracts/server slices require focused tests at each affected boundary, not an automatic repo-wide run.
 6. Screenshots for PR evidence use synthetic projects; redact account emails and absolute home paths.
 7. Compare against [the visual reference](reference/project-os.html); the documents win where they differ.
 
@@ -254,3 +256,9 @@ Each slice is one reviewable PR against a dedicated branch. None merges to `main
 - **Remote localhost.** Every Preview and server link for a non-primary environment says whose localhost it is.
 - **Thread deletion removes worktrees with `force: true`** (`useThreadActions.ts`). Out of E4 scope; listed for the future removal workflow.
 - **PR "local" mode uses `gh pr checkout --force`** (`GitHubCli.ts`). Out of E4 scope; the guard should cover it in a later slice.
+
+## 7. Implementation preflight and compatibility
+
+E4.1 requires invalid-explicit-checkout and ambiguous-legacy-layout fixtures. Never migrate a bare ProjectId into an arbitrary environment. E4.2 requires per-card partial failures and independently derived provider readiness; role definitions never create live rows. E4.3 requires the server composition above before ownership/process columns claim completeness. Source permissions remain `orchestration:read`, `orchestration:operate`, `terminal:operate`, `review:write` and E3 `access:write` as enforced by the actual method; a read-only screen does not grant terminal, diff or sign-in rights. Scope denials have a labelled recovery and preserve read access.
+
+E4.4 must extend the existing Git workflow and coordination, not add a parallel Git lock service. Availability/capability negotiation and typed older-host refusal are required before enabling mutable switch controls. Existing PR-checkout and destructive thread-deletion paths are follow-up risks; the E4 UI must not route a guarded action around its checks through those paths. Worktree removal requires a separate, fresh server assessment within its own authorized cleanup flow.
