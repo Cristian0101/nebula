@@ -44,6 +44,13 @@ import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "../ui/empty";
 const lastAutomaticCheck = new Map<string, number>();
 const primaryDrivers = ["codex", "cursor", "claudeAgent"];
 
+function connectionsReturnFocus(origin: React.RefObject<HTMLElement | null>) {
+  // The originating sidebar control can disappear at a responsive breakpoint.
+  return origin.current?.isConnected
+    ? origin.current
+    : document.querySelector<HTMLElement>('button[aria-label="Toggle main sidebar"]');
+}
+
 export function ProviderConnectionsHost({ children }: { children: ReactNode }) {
   const search = useLocation({ select: (l) => l.search });
   const params = parseProviderConnectionsSearch(search);
@@ -120,7 +127,7 @@ export function ProviderConnectionsHost({ children }: { children: ReactNode }) {
             if (!value) close();
           }}
         >
-          <SheetPopup variant="connections" finalFocus={() => origin.current}>
+          <SheetPopup variant="connections" finalFocus={() => connectionsReturnFocus(origin)}>
             <SheetHeader>
               <SheetTitle className="text-lg">Provider connections</SheetTitle>
               <SheetDescription>
@@ -467,7 +474,7 @@ function ConnectionsEnvironment({
         <SheetPopup
           variant="connections"
           showCloseButton={false}
-          finalFocus={() => origin.current}
+          finalFocus={() => connectionsReturnFocus(origin)}
           initialFocus={() =>
             document.querySelector<HTMLElement>("[data-connection-attention]:not(:disabled)") ??
             title.current
