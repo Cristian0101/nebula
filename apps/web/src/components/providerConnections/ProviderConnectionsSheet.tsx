@@ -561,7 +561,7 @@ function ConnectionsEnvironment({
                 <ToggleGroup
                   value={[filter]}
                   onValueChange={(value) => setFilter(value[0] ?? "all")}
-                  className="flex w-full gap-1 overflow-x-auto md:grid md:grid-cols-4"
+                  className="grid w-full grid-cols-[repeat(4,minmax(max-content,1fr))] gap-1 overflow-x-auto"
                   aria-label="Filter providers"
                 >
                   {(
