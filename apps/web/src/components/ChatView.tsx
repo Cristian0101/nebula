@@ -6507,6 +6507,7 @@ function ChatViewContent(props: ChatViewProps) {
             {/* Provider status overlays the timeline without changing its content height. */}
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
               <ProviderStatusBanner
+                environmentId={activeThread.environmentId}
                 status={visibleProviderStatus}
                 onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
               />

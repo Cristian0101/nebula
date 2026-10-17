@@ -1,5 +1,7 @@
 "use client";
 
+import { useOpenProviderConnections } from "./providerConnections/ProviderConnectionsContext";
+
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
@@ -566,6 +568,7 @@ function OpenCommandPaletteDialog(props: {
   readonly clearOpenIntent: () => void;
 }) {
   const navigate = useNavigate();
+  const openProviderConnections = useOpenProviderConnections();
   const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -1721,6 +1724,17 @@ function OpenCommandPaletteDialog(props: {
         themeHalves,
         initialAppearance: resolvedTheme,
       });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "providers.open",
+    searchTerms: ["providers", "connections", "sign in", "accounts", "authentication"],
+    title: "Provider Connections",
+    icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      openProviderConnections();
     },
   });
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { ProviderConnectionsLink } from "../providerConnections/ProviderConnectionsContext";
+
 import type { EnvironmentId } from "@t3tools/contracts";
 import { ProviderReadinessDetails } from "./ProviderReadinessDetails";
 import { ProviderAuthenticationControls } from "./ProviderAuthenticationControls";
@@ -747,8 +749,12 @@ export function ProviderInstanceCard({
       <Collapsible open={isExpanded} onOpenChange={onExpandedChange}>
         <CollapsibleContent>
           <div className="space-y-5 px-3 pb-4 pt-2 sm:px-4">
+            <ProviderConnectionsLink environmentId={environmentId} instanceId={instanceId}>
+              Open in connections →
+            </ProviderConnectionsLink>
             <ProviderReadinessDetails readiness={readiness} />
             <ProviderAuthenticationControls
+              instanceRevision={instance}
               key={`${environmentId}:${instanceId}`}
               environmentId={environmentId}
               instanceId={instanceId}

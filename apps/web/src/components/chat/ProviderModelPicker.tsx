@@ -1,5 +1,7 @@
+import { ProviderConnectionsLink } from "../providerConnections/ProviderConnectionsContext";
 import {
   type ProviderInstanceId,
+  type EnvironmentId,
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
@@ -25,6 +27,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
    * icon, label and the default-highlighted combobox row.
    */
   activeInstanceId: ProviderInstanceId;
+  environmentId?: EnvironmentId | undefined;
   model: string;
   lockedProvider: ProviderDriverKind | null;
   lockedContinuationGroupKey?: string | null;
@@ -204,6 +207,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             : {})}
           onInstanceModelChange={handleInstanceModelChange}
         />
+        <div className="border-t p-2">
+          <ProviderConnectionsLink
+            environmentId={props.environmentId}
+            instanceId={props.environmentId ? activeInstanceId : undefined}
+            selectedModel={props.environmentId ? props.model : undefined}
+            onOpen={() => setIsMenuOpen(false)}
+          >
+            Manage provider connections →
+          </ProviderConnectionsLink>
+        </div>
       </PopoverPopup>
     </Popover>
   );

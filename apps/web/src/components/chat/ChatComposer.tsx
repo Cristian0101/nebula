@@ -1,3 +1,4 @@
+import { ComposerProviderRecovery } from "../providerConnections/ProviderConnectionEntry";
 import type {
   ApprovalRequestId,
   EnvironmentId,
@@ -3284,6 +3285,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </div>
             </div>
 
+            <ComposerProviderRecovery
+              provider={selectedProviderStatus}
+              environmentId={environmentId}
+              instanceId={selectedInstanceId}
+              selectedModel={selectedModel}
+            />
             <ComposerPromptLengthValidation
               message={providerInputSubmissionError ?? composerSubmissionError}
             />
@@ -3315,6 +3322,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     </Button>
                   ) : (
                     <ProviderModelPicker
+                      environmentId={environmentId}
                       compact={isComposerFooterCompact}
                       activeInstanceId={selectedInstanceId}
                       model={selectedModelForPickerWithCustomFallback}
