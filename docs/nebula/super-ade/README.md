@@ -20,6 +20,10 @@ This package turns the approved Super ADE North Star mockup and the October 2026
 | 6   | [Visual QA checklist](VISUAL_QA_CHECKLIST.md)                         | What to verify per implementation step                                                                                                                                                   |
 | 7   | [Provider Connections reference](reference/provider-connections.html) | High-fidelity visual reference for E3: screens, sign-in flows, recovery and interaction states, 1440 / 1280 / 390 / ultrawide, dark and light. Synthetic data only. Open it in a browser |
 
+## Project OS V2 (D4 for E4)
+
+[project-os/](project-os/README.md) is a separate, stacked package for E4: information architecture, Project Home (Overview), Branches & Worktrees, the guarded checkout switch, Workbench navigation, the project sidebar, a bounded E4.1–E4.4 handoff and an [interactive visual reference](project-os/reference/project-os.html). It builds on this foundation and lists the few foundation rules it supersedes.
+
 ## Ground rules for implementers
 
 - Extend existing components and stores. Proposed components compose canonical commands and data; none own execution state.
