@@ -1,3 +1,4 @@
+import { WorkspaceRemovalUnavailable } from "./WorkspaceRemovalUnavailable";
 import { useAtomValue } from "@effect/atom-react";
 import {
   squashAtomCommandFailure,
@@ -23,7 +24,6 @@ import {
   PlusIcon,
   ShieldAlertIcon,
   ShieldCheckIcon,
-  Trash2Icon,
   Undo2Icon,
   XIcon,
 } from "lucide-react";
@@ -83,7 +83,6 @@ export function ProjectTaskCard({
   onRestore,
   onUndoRestore,
   onCancel,
-  onRemoveWorkspace,
   onEditOwnership,
   onValidateOwnership,
 }: {
@@ -173,15 +172,7 @@ export function ProjectTaskCard({
           {(task.status === "completed" || task.status === "cancelled") &&
           task.workspace != null &&
           task.workspace.status !== "removed" ? (
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={busy || task.workspace.status === "removing"}
-              onClick={onRemoveWorkspace}
-            >
-              <Trash2Icon />
-              Remove workspace
-            </Button>
+            <WorkspaceRemovalUnavailable />
           ) : null}
         </div>
       </div>
@@ -335,14 +326,6 @@ export function ProjectTaskCard({
       {task.workspace?.failureReason ? (
         <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {task.workspace.failureReason}
-        </p>
-      ) : null}
-      {(task.status === "completed" || task.status === "cancelled") &&
-      task.workspace != null &&
-      task.workspace.status !== "removed" ? (
-        <p className="text-xs text-muted-foreground">
-          Remove workspace deletes only the local worktree. The Task branch and committed work are
-          preserved.
         </p>
       ) : null}
     </article>

@@ -1,5 +1,8 @@
 # Nebula source of truth
 
+For the read-only Project OS query foundation, see [Canonical Project inventory](PROJECT_INVENTORY.md).
+For environment-scoped checkout navigation and client layout migration, see [Project navigation](PROJECT_NAVIGATION.md).
+
 ## Architect Plan Proposal
 
 Nebula can ask a selected provider for a bounded, strict-schema engineering plan against an exact clean Git baseline. The output remains a durable `ArchitectPlanProposal` until a human edits, assigns providers, and explicitly approves it. Approval atomically emits canonical draft Mission/Task/ownership/dependency state and no execution state. See [Architect plans](../user/architect-plans.md).
@@ -7,6 +10,10 @@ Nebula can ask a selected provider for a bounded, strict-schema engineering plan
 This directory is the durable product and architecture source of truth for Nebula, the Kaizora Labs multi-agent development orchestration platform built on T3 Code.
 
 ## Document map
+
+The [Super ADE capability reconciliation](SUPER_ADE_INTEGRATION.md) distinguishes
+the integrated E3/E4 candidate from proposed creation, coordinated switching,
+Notes, Ion and outstanding human acceptance.
 
 | Document                                    | Purpose                                                                                 |
 | ------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -17,6 +24,7 @@ This directory is the durable product and architecture source of truth for Nebul
 | [Runtime map](RUNTIME_MAP.md)               | Evidence-based map of the inherited T3 Code repository.                                 |
 | [Extension contract](EXTENSION_CONTRACT.md) | Canonical attachment points, implemented boundaries, divergence budget, and ADR review. |
 | [Design system](DESIGN_SYSTEM.md)           | Canonical visual identity, palette, theme behavior, accessibility, and asset status.    |
+| [Super ADE design](super-ade/README.md)     | Proposed design foundation: shell, screens, states, tokens, and visual QA contract.     |
 | [Providers](PROVIDERS.md)                   | Implemented provider transports, authentication boundaries, and current limitations.    |
 | [Changelog](CHANGELOG.md)                   | Shipped and unreleased Nebula product behavior changes.                                 |
 | [ADRs](../adr/)                             | Accepted architecture decisions.                                                        |
@@ -35,6 +43,8 @@ Terminal Center is the implemented freeform complement to Command Deck. It creat
 Quality Gates, independent Reviewer, the deterministic Integration Engine, Shared Resources, Architect proposals, Missions, Supervised Mission Runs, bounded recovery/routing, and Supervised Swarm are implemented. A human approves and activates an Architect Mission, then separately authorizes a Run with a frozen policy. Nebula deterministically advances canonical Tasks under dependency, resource, provider, ownership, and concurrency policy. The configured recovery budget may retry a transient provider failure, request bounded remediation after a gate or review failure, or choose a ready replacement provider. Human judgment remains required for unsafe ownership/resource changes, replanning, path overlap, conflicts, and exhausted recovery. With Automatic Integration enabled, completed Mission results seed an Integration Batch in deterministic DAG order and the Run completes only after final validation reaches Ready. Nebula never approves plans, merges `main`, or opens a PR automatically.
 
 Antigravity CLI is the implemented Google first-party provider for individual Google accounts. Nebula invokes its official headless CLI, keeps authentication provider-owned, and binds each run to the canonical Task worktree. The preserved Gemini CLI prototype remains experimental and blocked for the individual-account authentication path; it is not a mainline provider.
+
+See [checkout safety containment](CHECKOUT_SAFETY.md) for the temporary E4.S refusal boundary and the coordination required before E4.4 restores checkout mutation and removal.
 
 ## Source hierarchy
 

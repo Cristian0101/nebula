@@ -1,0 +1,101 @@
+/* Semantic application roles; E3 never changes the selected theme. */
+.connections-sheet[data-slot="sheet-popup"] {
+  --connections-sheet-width: 600px;
+  --connections-sheet-width-wide: 1000px;
+  width: min(var(--connections-sheet-width), calc(100vw - 48px));
+  max-width: none;
+  border-start-start-radius: var(--radius-xl);
+  border-end-start-radius: var(--radius-xl);
+}
+.connections-detail {
+  display: none;
+}
+.connections-detail-selected > .connections-list {
+  display: none;
+}
+.connections-detail-selected > .connections-detail {
+  display: block;
+}
+@media (min-width: 768px) and (max-width: 1359px) {
+  .connections-sheet[data-slot="sheet-popup"] {
+    --connections-sheet-width: 560px;
+  }
+}
+@media (min-width: 1920px) {
+  .connections-sheet[data-slot="sheet-popup"] {
+    width: var(--connections-sheet-width-wide);
+  }
+  .connections-body {
+    display: grid;
+    grid-template-columns: 360px minmax(0, 1fr);
+    overflow: hidden;
+  }
+  .connections-body > .connections-list,
+  .connections-body > .connections-detail {
+    display: block;
+    min-width: 0;
+    overflow-y: auto;
+  }
+  .connections-detail {
+    border-inline-start: 1px solid var(--border);
+  }
+  .connections-list .connections-facts {
+    display: none;
+  }
+  .connections-list .connections-card > div {
+    padding: 12px;
+  }
+}
+@media (max-width: 767px) {
+  .connections-sheet[data-slot="sheet-popup"] {
+    width: 100vw;
+    height: 100dvh;
+    border-radius: 0;
+    border-inline-start: 0;
+  }
+  .connections-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .connections-sheet[data-slot="sheet-popup"] {
+    transition: none;
+    animation: none;
+    translate: none;
+    transform: none;
+  }
+}
+@media (min-width: 768px) {
+  .connections-scope {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 10px;
+  }
+  .connections-scope > div {
+    margin-top: 0;
+  }
+  .connections-scope > p {
+    grid-column: 1 / -1;
+  }
+}
+.connections-card-list-status {
+  display: none;
+}
+@media (min-width: 1920px) {
+  .connections-list .connections-card-status,
+  .connections-list .connections-card-action,
+  .connections-list .connections-card-meta {
+    display: none;
+  }
+  .connections-list .connections-card-list-status {
+    display: block;
+  }
+  .connections-list .connections-card > div {
+    padding: 8px 12px;
+  }
+  .connections-list .connections-provider-mark {
+    width: 28px;
+    height: 28px;
+  }
+}

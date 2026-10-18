@@ -1,3 +1,4 @@
+import { ProviderConnectionEntry } from "../providerConnections/ProviderConnectionEntry";
 import { ExecutionContextDetails } from "./ExecutionContextDetails";
 import {
   type EnvironmentId,
@@ -374,6 +375,7 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      <ProviderConnectionEntry mode="toolbar" environmentId={activeThreadEnvironmentId} />
       <div
         data-chat-header-actions
         className={cn(

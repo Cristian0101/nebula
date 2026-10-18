@@ -1,3 +1,4 @@
+import { ProjectNavigationFrame } from "../components/project/ProjectNavigationFrame";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 
@@ -26,17 +27,27 @@ function TerminalCenterRoute() {
   const { projectKey } = Route.useParams();
   const search = Route.useSearch();
   return (
-    <Suspense
-      fallback={
-        <div className="flex h-dvh items-center justify-center bg-background text-sm text-muted-foreground">
-          Loading Terminal Center…
-        </div>
-      }
+    <ProjectNavigationFrame
+      projectKey={projectKey}
+      checkout={search.checkout}
+      destination="workbench"
     >
-      <TerminalCenterPage
-        projectKey={projectKey}
-        {...(search.taskId ? { initialTaskId: search.taskId } : {})}
-      />
-    </Suspense>
+      {(resolvedKey) => (
+        <Suspense
+          fallback={
+            <div className="flex h-dvh items-center justify-center bg-background text-sm text-muted-foreground">
+              Loading Workbench…
+            </div>
+          }
+        >
+          <TerminalCenterPage
+            projectKey={resolvedKey}
+            restoreOnly={search.inspect === true}
+            initialFilesOpen={search.files === true}
+            {...(search.taskId ? { initialTaskId: search.taskId } : {})}
+          />
+        </Suspense>
+      )}
+    </ProjectNavigationFrame>
   );
 }

@@ -38,7 +38,7 @@ function SheetViewport({
   ...props
 }: SheetPrimitive.Viewport.Props & {
   side?: "right" | "left" | "top" | "bottom";
-  variant?: "default" | "inset";
+  variant?: "default" | "inset" | "connections";
 }) {
   return (
     <SheetPrimitive.Viewport
@@ -69,7 +69,7 @@ function SheetPopup({
   showCloseButton?: boolean;
   keepMounted?: boolean;
   side?: "right" | "left" | "top" | "bottom";
-  variant?: "default" | "inset";
+  variant?: "default" | "inset" | "connections";
 }) {
   return (
     <SheetPortal keepMounted={keepMounted}>
@@ -88,6 +88,8 @@ function SheetPopup({
               "col-start-2 w-[calc(100%-(--spacing(12)))] max-w-md border-s data-ending-style:translate-x-8 data-starting-style:translate-x-8",
             variant === "inset" &&
               "before:hidden sm:rounded-2xl sm:border sm:before:rounded-[calc(var(--radius-2xl)-1px)] sm:**:data-[slot=sheet-footer]:rounded-b-[calc(var(--radius-2xl)-1px)]",
+            variant === "connections" &&
+              "connections-sheet motion-reduce:transition-none motion-reduce:translate-x-0",
             className,
           )}
           data-slot="sheet-popup"

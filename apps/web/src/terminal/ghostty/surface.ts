@@ -1,3 +1,4 @@
+import { isTerminalInteractionAllowed } from "../../lib/terminalFocus";
 import { isMacPlatform } from "../../lib/utils";
 import { collectWrappedTerminalLinkLine, extractTerminalLinks } from "../../terminal-links";
 import {
@@ -889,7 +890,7 @@ export class GhosttyTerminalSurface {
   }
 
   focus(): void {
-    this.input.focus({ preventScroll: true });
+    if (isTerminalInteractionAllowed(this.input)) this.input.focus({ preventScroll: true });
   }
 
   /**
@@ -903,9 +904,16 @@ export class GhosttyTerminalSurface {
     readText: () => Promise<string>,
     isCurrent: () => boolean = () => true,
   ): Promise<void> {
+    if (!isTerminalInteractionAllowed(this.input)) return;
     const token = ++this.pasteShortcutToken;
     const text = await readText();
-    if (this.disposed || this.pasteShortcutToken !== token || !isCurrent()) return;
+    if (
+      this.disposed ||
+      !isTerminalInteractionAllowed(this.input) ||
+      this.pasteShortcutToken !== token ||
+      !isCurrent()
+    )
+      return;
     // As in every paste path, delivering bumps the token so a clipboard read
     // still in flight cannot land after this text reaches the shell.
     this.pasteShortcutToken += 1;
@@ -1007,6 +1015,10 @@ export class GhosttyTerminalSurface {
   }
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
+    if (!isTerminalInteractionAllowed(this.input)) {
+      event.preventDefault();
+      return;
+    }
     this.updateLinkModifier(event);
     // Presses handled outside the terminal must also swallow their release:
     // beforeKey runs side effects (keybindings, navigation sends), so it cannot
@@ -1083,7 +1095,12 @@ export class GhosttyTerminalSurface {
         const token = ++this.pasteShortcutToken;
         void clipboard.readText().then(
           (text) => {
-            if (this.disposed || this.pasteShortcutToken !== token) return;
+            if (
+              this.disposed ||
+              !isTerminalInteractionAllowed(this.input) ||
+              this.pasteShortcutToken !== token
+            )
+              return;
             this.pasteShortcutToken += 1;
             if (text.length > 0) this.options.onData(this.core.encodePaste(text));
           },
@@ -1110,6 +1127,10 @@ export class GhosttyTerminalSurface {
   };
 
   private readonly onKeyUp = (event: KeyboardEvent) => {
+    if (!isTerminalInteractionAllowed(this.input)) {
+      event.preventDefault();
+      return;
+    }
     this.updateLinkModifier(event);
     if (this.suppressedKeyCodes.delete(event.code)) return;
     if (isTerminalCompositionKey(event, this.composing)) {
@@ -1190,6 +1211,7 @@ export class GhosttyTerminalSurface {
     // would receive (for example an html-only clipboard converted to text)
     // leaks through onInput without bracketed-paste encoding.
     event.preventDefault();
+    if (!isTerminalInteractionAllowed(this.input)) return;
     const data = event.clipboardData?.getData("text/plain") ?? "";
     if (data.length === 0) return;
     // The native paste won the race with actual text; a pending clipboard read
@@ -1206,6 +1228,11 @@ export class GhosttyTerminalSurface {
 
   private readonly onCompositionEnd = (event: CompositionEvent) => {
     this.composing = false;
+    if (!isTerminalInteractionAllowed(this.input)) {
+      this.input.value = "";
+      this.clearCompositionInputSuppression();
+      return;
+    }
     const data = this.input.value || event.data;
     if (data.length > 0) this.options.onData(data);
     this.input.value = "";
@@ -1217,6 +1244,10 @@ export class GhosttyTerminalSurface {
   };
 
   private readonly onInput = (event: Event) => {
+    if (!isTerminalInteractionAllowed(this.input)) {
+      this.input.value = "";
+      return;
+    }
     const inputEvent = event as InputEvent;
     if (this.composing || inputEvent.isComposing) return;
     const data = this.input.value || inputEvent.data || "";

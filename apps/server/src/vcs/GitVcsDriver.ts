@@ -1,3 +1,4 @@
+import type { GitInventory, WorkspaceGitObservation } from "./projectInventory.ts";
 import * as NodeCrypto from "node:crypto";
 
 import * as Context from "effect/Context";
@@ -230,6 +231,24 @@ export class GitVcsDriver extends Context.Service<
   GitVcsDriver,
   {
     readonly execute: (input: ExecuteGitInput) => Effect.Effect<ExecuteGitResult, GitCommandError>;
+    readonly observeProjectInventory: (input: {
+      readonly cwd: string;
+      readonly refresh?: boolean;
+    }) => Effect.Effect<GitInventory | null, GitCommandError>;
+    readonly inspectProjectWorkspace: (input: {
+      readonly cwd: string;
+      readonly commonDir: string;
+    }) => Effect.Effect<
+      {
+        readonly root: string;
+        readonly commonDir: string;
+        readonly gitDir: string;
+        readonly git: WorkspaceGitObservation;
+        readonly observedAt: string;
+      } | null,
+      GitCommandError
+    >;
+
     readonly status: (input: VcsStatusInput) => Effect.Effect<VcsStatusResult, GitCommandError>;
     readonly statusDetails: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
     readonly statusDetailsLocal: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;

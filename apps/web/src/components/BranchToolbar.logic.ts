@@ -291,3 +291,17 @@ export function shouldIncludeBranchPickerItem(input: {
     lowerItemValue.includes(sanitizedQuery)
   );
 }
+
+// Composer drafts describe future execution. They never authorize checkout changes.
+export function resolveDraftBranchContext(input: {
+  projectCwd: string;
+  ref: Pick<VcsRef, "name" | "worktreePath">;
+  selectingBase: boolean;
+}): { branch: string; worktreePath: string | null; envMode: EnvMode } {
+  const existingPath = input.selectingBase ? null : input.ref.worktreePath;
+  return {
+    branch: input.ref.name,
+    worktreePath: existingPath === input.projectCwd ? null : existingPath,
+    envMode: existingPath ? "local" : "worktree",
+  };
+}

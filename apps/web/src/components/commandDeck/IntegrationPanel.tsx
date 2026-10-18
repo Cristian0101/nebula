@@ -1,3 +1,4 @@
+import { WorkspaceRemovalUnavailable } from "../WorkspaceRemovalUnavailable";
 import { IntegrationBatchId } from "@t3tools/contracts";
 import { canRetryIntegrationOperation } from "@t3tools/shared/missionRunner";
 import type {
@@ -217,9 +218,6 @@ export function IntegrationPanel({
   const validateIntegration = useAtomCommand(projectEnvironment.validateIntegration, {
     reportFailure: false,
   });
-  const removeWorkspace = useAtomCommand(projectEnvironment.removeIntegrationWorkspace, {
-    reportFailure: false,
-  });
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, { reportFailure: false });
   const [selected, setSelected] = useState<ReadonlyArray<TaskId>>([]);
   const [acknowledged, setAcknowledged] = useState(false);
@@ -433,21 +431,7 @@ export function IntegrationPanel({
             ) : null}
             {["ready", "failed", "cancelled"].includes(activeBatch.status) &&
             activeBatch.workspacePath ? (
-              <Button
-                size="xs"
-                variant="ghost"
-                disabled={busy}
-                onClick={() =>
-                  void run("Could not remove Integration workspace", () =>
-                    removeWorkspace({
-                      environmentId,
-                      input: { projectId: project.id, batchId: activeBatch.id },
-                    }),
-                  )
-                }
-              >
-                Remove workspace
-              </Button>
+              <WorkspaceRemovalUnavailable />
             ) : null}
           </div>
         </div>

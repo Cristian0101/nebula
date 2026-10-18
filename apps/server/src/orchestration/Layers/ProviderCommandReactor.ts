@@ -662,6 +662,14 @@ const make = Effect.gen(function* () {
     if (existingSessionThreadId) {
       const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
       const cwdChanged = effectiveCwd !== activeSession?.cwd;
+      if (cwdChanged) {
+        return yield* new ProviderAdapterRequestError({
+          provider: preferredProvider,
+          method: "thread.turn.start",
+          detail:
+            "The active agent belongs to its original checkout. Restore that context or open a new Thread in a separate worktree; the existing session has been preserved.",
+        });
+      }
       const sessionModelSwitch = (yield* providerService.getCapabilities(desiredInstanceId))
         .sessionModelSwitch;
       const modelChanged =

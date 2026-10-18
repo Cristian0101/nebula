@@ -1,3 +1,4 @@
+import { useSearch } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
@@ -189,7 +190,9 @@ function EnvironmentUnavailableRow({
   );
 }
 
-export function ProviderSettingsPanel() {
+export function ProviderSettingsPanel({
+  requestedEnvironmentId,
+}: { requestedEnvironmentId?: string | undefined } = {}) {
   const { environments, isReady } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const options = useMemo(
@@ -200,13 +203,12 @@ export function ProviderSettingsPanel() {
   // device that drops out of the catalog falls back without erasing the pick —
   // if it reappears (e.g. after a reconnect) the selection is restored.
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
-    primaryEnvironmentId,
+    (requestedEnvironmentId as EnvironmentId) ?? primaryEnvironmentId,
   );
-  const effectiveEnvironmentId = resolveSelectedProviderEnvironmentId(
-    options,
-    selectedEnvironmentId,
-    primaryEnvironmentId,
-  );
+  const effectiveEnvironmentId =
+    requestedEnvironmentId && selectedEnvironmentId === requestedEnvironmentId
+      ? selectedEnvironmentId
+      : resolveSelectedProviderEnvironmentId(options, selectedEnvironmentId, primaryEnvironmentId);
   const selectedEnvironment =
     options.find((environment) => environment.environmentId === effectiveEnvironmentId) ?? null;
   const onlyPrimaryDevice =
@@ -368,6 +370,7 @@ export function EnvironmentProviderSettings({
    */
   readonly readOnly?: boolean;
 }) {
+  const search = useSearch({ strict: false });
   const settings = useEnvironmentSettings(environmentId);
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const serverProviders =
@@ -840,7 +843,9 @@ export function EnvironmentProviderSettings({
                 instance={row.instance}
                 driverOption={driverOption}
                 liveProvider={liveProvider}
-                isExpanded={openInstanceDetails[row.instanceId] ?? false}
+                isExpanded={
+                  openInstanceDetails[row.instanceId] ?? search.instance === row.instanceId
+                }
                 onExpandedChange={(open) =>
                   setOpenInstanceDetails((existing) => ({
                     ...existing,

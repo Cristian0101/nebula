@@ -984,7 +984,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   );
 
   const listSessions: ProviderServiceMethod<"listSessions"> = Effect.fn("listSessions")(
-    function* () {
+    function* (threadIds) {
       const currentAdapters = yield* getAdapterEntries;
       const sessionsByProvider = yield* Effect.forEach(currentAdapters, ([instanceId, adapter]) =>
         adapter.listSessions().pipe(
@@ -996,8 +996,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ),
         ),
       );
-      const activeSessions = sessionsByProvider.flatMap((sessions) => sessions);
-      const persistedBindings = yield* directory.listThreadIds().pipe(
+      const activeSessions = sessionsByProvider
+        .flatMap((sessions) => sessions)
+        .filter((session) => !threadIds || threadIds.includes(session.threadId));
+      const persistedBindings = yield* (
+        threadIds ? Effect.succeed(threadIds) : directory.listThreadIds()
+      ).pipe(
         Effect.flatMap((threadIds) =>
           Effect.forEach(
             threadIds,
@@ -1009,7 +1013,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                     Option.none<ProviderSessionDirectory.ProviderRuntimeBinding>(),
                   ),
                 ),
-            { concurrency: "unbounded" },
+            { concurrency: 4 },
           ),
         ),
         Effect.orElseSucceed(

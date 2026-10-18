@@ -1,0 +1,96 @@
+import { useEffect, useState } from "react";
+import type { ProviderAuthenticationStatus } from "@t3tools/contracts";
+import { ensureLocalApi } from "../../localApi";
+import { Button } from "../ui/button";
+import { officialHandoffHost } from "./providerSignInCopy";
+
+export function ProviderHandoff({ status }: { status: ProviderAuthenticationStatus }) {
+  // A new attempt gets a new mounted private-code view.
+  return <PrivateHandoff key={status.attemptId} status={status} />;
+}
+function PrivateHandoff({ status }: { status: ProviderAuthenticationStatus }) {
+  const [revealed, setRevealed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  const handoff = status.handoff;
+  const host = handoff ? officialHandoffHost(handoff.url, status.driver) : null;
+  if (!handoff || !host || !status.expiresAt || Date.parse(status.expiresAt) <= Date.now())
+    return null;
+  return (
+    <ol className="list-decimal space-y-3 pl-5">
+      <li>
+        <Button
+          data-handoff-focus="open"
+          onClick={() => {
+            void ensureLocalApi()
+              .shell.openExternal(handoff.url)
+              .catch(() => setFailed(true));
+          }}
+        >
+          {handoff.userCode
+            ? "Open verification page"
+            : status.driver === "codex"
+              ? "Open ChatGPT sign-in"
+              : "Open Cursor sign-in"}{" "}
+          ↗
+        </Button>
+        <p className="text-xs text-muted-foreground">{host}</p>
+        {failed ? <p role="alert">The sign-in page could not open. Try again.</p> : null}
+      </li>
+      {handoff.userCode ? (
+        <li>
+          <div
+            role="group"
+            aria-label="Private device code"
+            className="flex flex-wrap items-center gap-2"
+          >
+            <code className="rounded-lg border bg-muted px-4 py-3 font-mono text-xl tracking-widest">
+              {revealed ? (
+                handoff.userCode
+              ) : (
+                <>
+                  <span aria-hidden="true">••••-••••</span>
+                  <span className="sr-only">Device code hidden</span>
+                </>
+              )}
+            </code>
+            <Button
+              size="sm"
+              variant="outline"
+              data-handoff-focus="code"
+              aria-pressed={revealed}
+              onClick={() => setRevealed(!revealed)}
+            >
+              {revealed ? "Hide code" : "Show code"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                void navigator.clipboard.writeText(handoff.userCode ?? "").then(
+                  () => setCopied(true),
+                  () => setCopied(false),
+                );
+              }}
+            >
+              Copy code
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground" role="status">
+            {copied
+              ? `Copied. Paste it only at ${host}.`
+              : `Enter this code only at ${host}. Don't share it.`}
+          </p>
+        </li>
+      ) : null}
+      <li className="text-sm text-muted-foreground">
+        Finish signing in there. This page updates by itself.
+      </li>
+    </ol>
+  );
+}

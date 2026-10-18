@@ -36,3 +36,5 @@ export * from "./rpc.ts";
 
 export * from "./executionContext.ts";
 export * from "./providerAuthentication.ts";
+
+export * from "./projectInventory.ts";

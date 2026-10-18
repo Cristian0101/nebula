@@ -1,3 +1,7 @@
+import { WorkspaceRemovalUnavailable } from "../WorkspaceRemovalUnavailable";
+import type { CommandDeckSearch } from "../../commandDeckSearch";
+import { readProjectHomePrefill } from "../project/home/projectHomeDraft";
+import { useProjectNavigate } from "../../hooks/useProjectNavigate";
 import { useAtomValue } from "@effect/atom-react";
 import {
   squashAtomCommandFailure,
@@ -18,10 +22,8 @@ import type {
   SharedResourceDefinition,
   ResourceLease,
 } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
 import {
   ActivityIcon,
-  ArrowLeftIcon,
   BotIcon,
   CheckCircle2Icon,
   ChevronRightIcon,
@@ -32,10 +34,8 @@ import {
   PlayIcon,
   PlusIcon,
   RotateCcwIcon,
-  Settings2Icon,
   ShieldCheckIcon,
   SquareIcon,
-  Trash2Icon,
   TriangleAlertIcon,
   Undo2Icon,
   WorkflowIcon,
@@ -200,17 +200,10 @@ function AttentionList({ items }: { readonly items: ReadonlyArray<CommandDeckAtt
   );
 }
 
-function CommandDeckHeader({
-  projectKey,
-  title,
-}: {
-  readonly projectKey: string;
-  readonly title: string;
-}) {
-  const navigate = useNavigate();
+function CommandDeckHeader({ title }: { readonly title: string }) {
   return (
-    <WorkspacePageHeader electron={isElectron}>
-      <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+    <WorkspacePageHeader electron={isElectron} className="h-auto flex-wrap py-2">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-3">
         <WorkspaceBreadcrumb ariaLabel="Command Deck breadcrumb">
           <WorkspaceBreadcrumbItem>Projects</WorkspaceBreadcrumbItem>
           <WorkspaceBreadcrumbSeparator />
@@ -218,25 +211,6 @@ function CommandDeckHeader({
           <WorkspaceBreadcrumbSeparator />
           <WorkspaceBreadcrumbItem current>Command Deck</WorkspaceBreadcrumbItem>
         </WorkspaceBreadcrumb>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Button
-            size="xs"
-            variant="ghost"
-            aria-label="Back to Project Home"
-            onClick={() => void navigate({ to: "/projects/$projectKey", params: { projectKey } })}
-          >
-            <ArrowLeftIcon /> Project Home
-          </Button>
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() =>
-              void navigate({ to: "/projects/$projectKey/settings", params: { projectKey } })
-            }
-          >
-            <Settings2Icon /> Project settings
-          </Button>
-        </div>
       </div>
     </WorkspacePageHeader>
   );
@@ -245,9 +219,11 @@ function CommandDeckHeader({
 export function CommandDeckPage({
   projectKey,
   initialSection = "tasks",
+  search,
 }: {
   readonly projectKey: string;
   readonly initialSection?: CommandDeckSection;
+  readonly search?: CommandDeckSearch;
 }) {
   const groups = useSettingsProjectGroups();
   const group = groups.find((candidate) => candidate.projectKey === projectKey) ?? null;
@@ -265,12 +241,13 @@ export function CommandDeckPage({
   return (
     <SidebarInset className="h-dvh min-h-0 w-auto overflow-hidden bg-background text-foreground isolate">
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <CommandDeckHeader projectKey={projectKey} title={group.displayName} />
+        <CommandDeckHeader title={group.displayName} />
         <CommandDeck
           project={representative}
           projectKey={projectKey}
           displayName={group.displayName}
           initialSection={initialSection}
+          {...(search ? { search } : {})}
         />
       </div>
     </SidebarInset>
@@ -282,13 +259,15 @@ export function CommandDeck({
   projectKey,
   displayName,
   initialSection = "tasks",
+  search,
 }: {
   readonly project: CommandDeckProject;
   readonly projectKey: string;
   readonly displayName: string;
   readonly initialSection?: CommandDeckSection;
+  readonly search?: CommandDeckSearch;
 }) {
-  const navigate = useNavigate();
+  const navigate = useProjectNavigate();
   const snapshot = useAtomValue(environmentSnapshotAtom(project.environmentId));
   const serverConfig = useServerConfigs().get(project.environmentId) ?? null;
   const settings = usePrimarySettings();
@@ -326,15 +305,26 @@ export function CommandDeck({
     () => new Map((snapshot?.threads ?? []).map((thread) => [thread.id, thread] as const)),
     [snapshot?.threads],
   );
-  const [selectedTaskId, setSelectedTaskId] = useState<TaskId | null>(null);
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null;
-  const selectedThread =
-    selectedTask?.threadId === null || selectedTask?.threadId === undefined
-      ? null
-      : (threadById.get(selectedTask.threadId) ?? null);
-  useEffect(() => {
-    if (selectedTask && selectedTask.id !== selectedTaskId) setSelectedTaskId(selectedTask.id);
-  }, [selectedTask, selectedTaskId]);
+  const selectedTaskId = search?.selectedTask;
+  const selectedTask = selectedTaskId
+    ? (tasks.find((task) => task.id === selectedTaskId) ?? null)
+    : (tasks[0] ?? null);
+  const setSelectedTaskId = useCallback(
+    (taskId: TaskId) => {
+      void navigate({
+        to: "/projects/$projectKey/command-deck",
+        params: { projectKey },
+        search: (previous) => ({
+          ...(previous.checkout !== undefined ? { checkout: previous.checkout } : {}),
+          selectedTask: taskId,
+        }),
+      });
+    },
+    [navigate, projectKey],
+  );
+  const selectedThread = selectedTask?.threadId
+    ? (threadById.get(selectedTask.threadId) ?? null)
+    : null;
 
   const modelSelectionByTaskId = useMemo(
     () =>
@@ -416,7 +406,6 @@ export function CommandDeck({
   const prepareWorkspace = useAtomCommand(taskEnvironment.prepareWorkspace, {
     reportFailure: false,
   });
-  const removeWorkspace = useAtomCommand(taskEnvironment.removeWorkspace, { reportFailure: false });
   const setOwnership = useAtomCommand(taskEnvironment.setOwnership, { reportFailure: false });
   const validateOwnership = useAtomCommand(taskEnvironment.validateOwnership, {
     reportFailure: false,
@@ -459,11 +448,27 @@ export function CommandDeck({
     reportFailure: false,
   });
 
-  const [createOpen, setCreateOpen] = useState(false);
+  const prefill = readProjectHomePrefill(
+    { environmentId: project.environmentId, projectId: project.id },
+    search?.workDraft,
+  );
+  const [createOpen, setCreateOpen] = useState(search?.createTask === true);
+  useEffect(() => {
+    if (search?.createTask) setCreateOpen(true);
+    if (prefill !== null) {
+      setCreateTitle(prefill.split("\n")[0]?.slice(0, 200) ?? "");
+      setCreateObjective(prefill);
+    }
+  }, [search?.createTask, search?.workDraft, prefill]);
+  useEffect(() => {
+    if (search?.section) setDeckSection(search.section);
+  }, [search?.section]);
   const [createMissionId, setCreateMissionId] = useState<MissionId | null>(null);
-  const [deckSection, setDeckSection] = useState<CommandDeckSection>(initialSection);
-  const [createTitle, setCreateTitle] = useState("");
-  const [createObjective, setCreateObjective] = useState("");
+  const [deckSection, setDeckSection] = useState<CommandDeckSection>(
+    search?.section ?? initialSection,
+  );
+  const [createTitle, setCreateTitle] = useState(prefill?.split("\n")[0]?.slice(0, 200) ?? "");
+  const [createObjective, setCreateObjective] = useState(prefill ?? "");
   const [createCriteria, setCreateCriteria] = useState<string[]>([]);
   const [createResourceIds, setCreateResourceIds] = useState<ReadonlySet<SharedResourceId>>(
     () => new Set(),
@@ -964,6 +969,14 @@ export function CommandDeck({
   return (
     <main className="min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_top_right,color-mix(in_srgb,var(--primary)_8%,transparent),transparent_32%)] p-3 sm:p-4">
       <div className="mx-auto flex min-h-full w-full max-w-[1800px] flex-col gap-3">
+        {selectedTaskId && !selectedTask ? (
+          <p
+            role="status"
+            className="rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground"
+          >
+            This Task is unavailable in the selected Project checkout.
+          </p>
+        ) : null}
         <section
           className="rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm"
           aria-label="Command Deck summary"
@@ -1380,24 +1393,7 @@ export function CommandDeck({
                               selectedTask.status === "cancelled") &&
                             selectedTask.workspace &&
                             selectedTask.workspace.status !== "removed" ? (
-                              <Button
-                                size="xs"
-                                variant="outline"
-                                disabled={busyTaskId === selectedTask.id}
-                                onClick={() =>
-                                  void runTaskCommand(
-                                    selectedTask,
-                                    "Could not remove workspace",
-                                    () =>
-                                      removeWorkspace({
-                                        environmentId: project.environmentId,
-                                        input: { taskId: selectedTask.id },
-                                      }),
-                                  )
-                                }
-                              >
-                                <Trash2Icon /> Remove workspace
-                              </Button>
+                              <WorkspaceRemovalUnavailable />
                             ) : null}
                           </div>
                         </div>

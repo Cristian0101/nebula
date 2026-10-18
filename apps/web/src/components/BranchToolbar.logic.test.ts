@@ -1,3 +1,4 @@
+import { resolveDraftBranchContext } from "./BranchToolbar.logic";
 import { EnvironmentId, type VcsRef } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
@@ -819,4 +820,35 @@ describe("sanitizeNewRefName", () => {
     expect(sanitizeNewRefName("new - branch")).toBe("new---branch");
     expect(sanitizeNewRefName("foo--bar")).toBe("foo--bar");
   });
+});
+
+it("records safe draft branch intent without changing a checkout", () => {
+  expect(
+    resolveDraftBranchContext({
+      projectCwd: "/repo",
+      ref: { name: "feature", worktreePath: null },
+      selectingBase: false,
+    }),
+  ).toEqual({ branch: "feature", worktreePath: null, envMode: "worktree" });
+  expect(
+    resolveDraftBranchContext({
+      projectCwd: "/repo",
+      ref: { name: "feature", worktreePath: "/existing" },
+      selectingBase: false,
+    }),
+  ).toEqual({ branch: "feature", worktreePath: "/existing", envMode: "local" });
+  expect(
+    resolveDraftBranchContext({
+      projectCwd: "/repo",
+      ref: { name: "main", worktreePath: "/repo" },
+      selectingBase: false,
+    }),
+  ).toEqual({ branch: "main", worktreePath: null, envMode: "local" });
+  expect(
+    resolveDraftBranchContext({
+      projectCwd: "/repo",
+      ref: { name: "main", worktreePath: "/existing" },
+      selectingBase: true,
+    }),
+  ).toEqual({ branch: "main", worktreePath: null, envMode: "worktree" });
 });

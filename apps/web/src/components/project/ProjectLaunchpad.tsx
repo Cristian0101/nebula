@@ -1,275 +1,545 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { useNavigate } from "@tanstack/react-router";
-import {
-  ArrowRightIcon,
-  BotIcon,
-  Clock3Icon,
-  LayoutDashboardIcon,
-  MessageSquarePlusIcon,
-  Settings2Icon,
-  SparklesIcon,
-  WorkflowIcon,
-} from "lucide-react";
-import { useMemo } from "react";
-
-import { isElectron } from "../../env";
+import type { ScopedProjectRef } from "@t3tools/contracts";
+import { deriveProviderReadiness } from "@t3tools/shared/providerReadiness";
+import { LayoutDashboardIcon, Settings2Icon, WorkflowIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
-import { environmentSnapshotAtom } from "../../state/shell";
-import { Button } from "../ui/button";
-import { SidebarInset } from "../ui/sidebar";
+import { useProjectNavigate } from "../../hooks/useProjectNavigate";
+import { useClientSettings, useEnvironmentSettings } from "../../hooks/useSettings";
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { encodeProjectCheckout } from "../../projectNavigation";
 import {
-  WorkspaceBreadcrumb,
-  WorkspaceBreadcrumbItem,
-  WorkspaceBreadcrumbSeparator,
-} from "../WorkspaceBreadcrumb";
-import { WorkspacePageHeader } from "../WorkspacePageHeader";
-import { useSettingsProjectGroups } from "../settings/ProjectSettingsPanel";
+  applyProviderInstanceSettings,
+  deriveProviderInstanceEntries,
+} from "../../providerInstances";
+import { environmentSnapshotAtom } from "../../state/shell";
+import { useEnvironmentConnectionState } from "../../state/environments";
+import { useEnvironmentSessionState } from "../../state/session";
+import { serverEnvironment } from "../../state/server";
+import { useEnvironmentQuery } from "../../state/query";
+import { projectEnvironment } from "../../state/projects";
+import { terminalEnvironment } from "../../state/terminal";
+import { previewEnvironment } from "../../state/preview";
+import { useUiStateStore } from "../../uiStateStore";
+import { Button } from "../ui/button";
+import { useProjectNavigationGroup } from "./projectNavigationContext";
+import {
+  deriveAgentPresence,
+  deriveProjectAttention,
+  deriveProjectResume,
+  selectProjectHomeScope,
+  type HomeDestination,
+} from "./home/projectHomeSelectors";
+import { deriveProjectServices, selectProjectTerminals } from "./home/projectHomeActivity";
+import {
+  EmptyProjectHero,
+  HomeCardBoundary,
+  HomeQueryState,
+  ProjectAttentionList,
+  ProjectContextBlock,
+  ProjectLaunchBar,
+  ProjectLiveNow,
+  ProjectResumeList,
+  homeRelativeTime,
+} from "./home/ProjectHomeSections";
 
-function relativeTime(value: string): string {
-  const elapsedMinutes = Math.max(0, Math.round((Date.now() - Date.parse(value)) / 60_000));
-  if (elapsedMinutes < 1) return "now";
-  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-  const hours = Math.round(elapsedMinutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
-}
+// Transient focus hints only; no execution state survives navigation here.
+const homeReturnFocus = new Map<string, string>();
 
 export function ProjectLaunchpadPage({ projectKey }: { readonly projectKey: string }) {
-  const groups = useSettingsProjectGroups();
-  const group = groups.find((candidate) => candidate.projectKey === projectKey) ?? null;
-  const project =
-    group?.memberProjects.find(
-      (member) => member.environmentId === group.environmentId && member.id === group.id,
-    ) ??
-    group?.memberProjects[0] ??
-    null;
-  if (!group || !project) {
+  const group = useProjectNavigationGroup();
+  // No representative or display-name fallback: the route frame owns resolution.
+  if (!group)
     return (
-      <SidebarInset className="flex h-dvh min-h-0 items-center justify-center bg-background text-sm text-muted-foreground">
-        This project is no longer available.
-      </SidebarInset>
+      <p role="status" className="p-6">
+        Checkout unavailable. Select a physical Project checkout.
+      </p>
     );
-  }
-
-  return <ProjectLaunchpad projectKey={projectKey} group={group} project={project} />;
+  return (
+    <ProjectHome
+      key={`${group.environmentId}:${group.id}`}
+      projectKey={projectKey}
+      projectRef={scopeProjectRef(group.environmentId, group.id)}
+      name={group.displayName}
+      host={
+        group.memberProjects.find(
+          (member) => member.id === group.id && member.environmentId === group.environmentId,
+        )?.environmentLabel ?? group.environmentId
+      }
+      path={group.workspaceRoot}
+    />
+  );
 }
 
-function ProjectLaunchpad({
+function ProjectHome({
   projectKey,
-  group,
-  project,
+  projectRef,
+  name,
+  host,
+  path,
 }: {
-  readonly projectKey: string;
-  readonly group: ReturnType<typeof useSettingsProjectGroups>[number];
-  readonly project: ReturnType<typeof useSettingsProjectGroups>[number]["memberProjects"][number];
+  projectKey: string;
+  projectRef: ScopedProjectRef;
+  name: string;
+  host: string;
+  path: string;
 }) {
-  const navigate = useNavigate();
-  const createQuickThread = useNewThreadHandler();
-  const snapshot = useAtomValue(environmentSnapshotAtom(project.environmentId));
-  const projectThreads = useMemo(
+  const navigate = useProjectNavigate();
+  const createDraft = useNewThreadHandler();
+  const snapshot = useAtomValue(environmentSnapshotAtom(projectRef.environmentId));
+  const config = useAtomValue(serverEnvironment.configValueAtom(projectRef.environmentId));
+  const settings = useEnvironmentSettings(projectRef.environmentId);
+  const autoSettleAfterDays = useClientSettings((value) => value.sidebarAutoSettleAfterDays);
+  const connection = useEnvironmentConnectionState(projectRef.environmentId);
+  const connected = connection.data?.phase === "connected";
+  const session = useEnvironmentSessionState(projectRef.environmentId);
+  const terminalAllowed =
+    connected &&
+    session.data?.authenticated === true &&
+    session.data.scopes?.includes("terminal:operate") === true;
+  const canCompose =
+    connected &&
+    session.data?.authenticated === true &&
+    session.data.scopes?.includes("orchestration:operate") === true;
+  const [launchText, setLaunchText] = useState("");
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const checkout = encodeProjectCheckout(projectRef);
+  const filter = useUiStateStore(
+    (state) => state.projectHomeResumeFilterByCheckout?.[checkout] ?? "All",
+  );
+  useEffect(() => {
+    const key = homeReturnFocus.get(checkout);
+    if (
+      !key ||
+      !snapshot ||
+      (document.activeElement !== document.body &&
+        document.activeElement?.id !== "project-home-main")
+    )
+      return;
+    const row = [...document.querySelectorAll<HTMLButtonElement>("button[data-home-row-key]")].find(
+      (item) => item.dataset.homeRowKey === key,
+    );
+    if (row) {
+      homeReturnFocus.delete(checkout);
+      row.focus({ preventScroll: true });
+    }
+  }, [checkout, snapshot]);
+  const setFilter = useUiStateStore((state) => state.setProjectHomeResumeFilter);
+  const workspacesState = useUiStateStore((state) => state.terminalWorkspacesByProjectId[checkout]);
+  const workspaces = workspacesState?.workspaces ?? [];
+  const scope = { ref: projectRef, environmentId: projectRef.environmentId, snapshot };
+  const scoped = selectProjectHomeScope(scope);
+  const inventorySupported = config?.environment.capabilities.projectInventory === true;
+  const inventory = useEnvironmentQuery(
+    connected && inventorySupported
+      ? projectEnvironment.inventory({
+          environmentId: projectRef.environmentId,
+          input: { projectId: projectRef.projectId, limit: 200 },
+        })
+      : null,
+  );
+  // Both sides are canonical server realpaths, not client-normalized user paths.
+  const rootWorkspace = inventory.data?.worktrees.find(
+    (item) =>
+      item.realPath === inventory.data?.identity?.projectRoot && item.availability === "present",
+  );
+  const context = useEnvironmentQuery(
+    connected && rootWorkspace
+      ? projectEnvironment.workspaceContext({
+          environmentId: projectRef.environmentId,
+          input: { projectId: projectRef.projectId, workspaceKey: rootWorkspace.workspaceKey },
+        })
+      : null,
+  );
+  const metadata = useEnvironmentQuery(
+    terminalAllowed
+      ? terminalEnvironment.metadata({ environmentId: projectRef.environmentId, input: null })
+      : null,
+  );
+  // Discovery can contain protected terminal associations, so use the same explicit scope.
+  const discovery = useEnvironmentQuery(
+    terminalAllowed
+      ? previewEnvironment.discoveredServers({ environmentId: projectRef.environmentId, input: {} })
+      : null,
+  );
+  const providers = useMemo(
     () =>
-      (snapshot?.threads ?? [])
-        .filter((thread) => thread.projectId === project?.id)
-        .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
-    [project?.id, snapshot?.threads],
+      applyProviderInstanceSettings(
+        deriveProviderInstanceEntries(config?.providers ?? []),
+        settings,
+      ),
+    [config?.providers, settings],
   );
-  const projectMissions = useMemo(
-    () =>
-      (snapshot?.missions ?? [])
-        .filter((mission) => mission.projectId === project?.id)
-        .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
-    [project?.id, snapshot?.missions],
-  );
-  const activeMissionRun = (snapshot?.missionRuns ?? []).find(
-    (run) =>
-      run.projectId === project?.id &&
-      (run.status === "running" || run.status === "paused" || run.status === "attention"),
-  );
-  const activeMission = projectMissions.find(
-    (mission) => mission.id === activeMissionRun?.missionId,
-  );
-
-  const openTerminalCenter = () =>
-    void navigate({ to: "/projects/$projectKey/terminal-center", params: { projectKey } });
-  const runSwarm = () =>
+  const attention = deriveProjectAttention({ ...scope, providers, connected, now });
+  const resume = deriveProjectResume({
+    ...scope,
+    filter,
+    now: new Date(now).toISOString(),
+    autoSettleAfterDays,
+  });
+  const agents = scoped.threads
+    .filter((thread) => !thread.archivedAt)
+    .flatMap((thread) => {
+      const status = deriveAgentPresence(thread);
+      if (!status) return [];
+      return [
+        {
+          id: thread.id,
+          title: thread.title,
+          status: connected ? status : "Unknown · host offline",
+          detail: `${thread.modelSelection.instanceId} · ${thread.branch ?? "Branch unknown"}`,
+          destination: { kind: "thread" as const, threadId: thread.id },
+        },
+      ];
+    });
+  const threadIds = scoped.threads.map((thread) => thread.id);
+  const terminals = selectProjectTerminals({
+    allowed: terminalAllowed && metadata.data !== null && !metadata.error,
+    projectId: projectRef.projectId,
+    threadIds,
+    workspaces,
+    terminals: metadata.data ?? [],
+  });
+  const services =
+    terminalAllowed && !metadata.error && !discovery.error
+      ? deriveProjectServices({
+          projectId: projectRef.projectId,
+          threadIds,
+          workspaces,
+          profiles: settings.devServerProfilesByProject[projectKey] ?? [],
+          terminals: metadata.data ?? [],
+          servers: discovery.data?.servers ?? [],
+        })
+      : [];
+  const openWorkbench = (workspaceId?: string | null) => {
+    if (workspaceId && workspacesState && workspaces.some((item) => item.id === workspaceId))
+      useUiStateStore.getState().setTerminalWorkspaceProjectState(checkout, {
+        ...workspacesState,
+        activeWorkspaceId: workspaceId,
+      });
+    void navigate({
+      to: "/projects/$projectKey/terminal-center",
+      params: { projectKey },
+      search: { checkout },
+    });
+  };
+  const open = (destination: HomeDestination) => {
+    const rowKey = (document.activeElement as HTMLElement | null)?.dataset.homeRowKey;
+    if (rowKey) homeReturnFocus.set(checkout, rowKey);
+    if (destination.kind === "thread")
+      return void navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId: projectRef.environmentId, threadId: destination.threadId },
+      });
+    // E3 remains separate; Provider Settings is the supported recovery surface at this base.
+    if (destination.kind === "provider")
+      return void navigate({
+        to: "/settings/providers",
+        search: { environmentId: projectRef.environmentId },
+      });
     void navigate({
       to: "/projects/$projectKey/command-deck",
       params: { projectKey },
-      search: { mode: "swarm" },
+      search: {
+        checkout,
+        ...(destination.kind === "task"
+          ? { selectedTask: destination.taskId }
+          : destination.kind === "mission"
+            ? { mode: "swarm", stage: destination.stage, missionId: destination.missionId }
+            : destination.kind === "plan"
+              ? { mode: "swarm", stage: "plan", proposalId: destination.proposalId }
+              : { section: "integration" }),
+      },
     });
+  };
+  const invalid =
+    inventory.data?.state === "invalid" ||
+    context.data?.state === "invalid" ||
+    inventory.data?.issues.includes("project-unavailable") ||
+    context.data?.issues.includes("workspace-unavailable") ||
+    context.data?.issues.includes("repository-mismatch");
+  const disabledReason = !connected
+    ? `${host} is offline. Reconnect to create a draft.`
+    : !canCompose
+      ? "Creating work needs orchestration permission on this host."
+      : invalid
+        ? "Checkout unavailable. Refresh or select a valid checkout."
+        : inventorySupported &&
+            (!context.data?.workspace ||
+              context.isPending ||
+              inventory.isPending ||
+              inventory.error !== null ||
+              context.error !== null)
+          ? "Checkout context is not verified. Refresh context before creating work."
+          : !scoped.project
+            ? "Project data is loading."
+            : null;
+  const readiness = providers
+    .filter((entry) => entry.enabled)
+    .map((entry) =>
+      deriveProviderReadiness({
+        environmentId: projectRef.environmentId,
+        instanceId: entry.instanceId,
+        connected,
+        now,
+        snapshot: { environmentId: projectRef.environmentId, provider: entry.snapshot },
+      }),
+    );
+  const readinessLabel = readiness.some((item) => item.runtime === "verified")
+    ? "Provider preflight observed; composer verifies before execution."
+    : "Provider readiness not verified; review it in the composer.";
+  const launch = async (kind: "chat" | "task" | "mission", text: string) => {
+    if (disabledReason) return;
+    const result = await createDraft(projectRef, {
+      branch: context.data?.git?.branchRef?.replace(/^refs\/heads\//u, "") ?? null,
+      worktreePath: null,
+      envMode: "local",
+      startFromOrigin: false,
+    });
+    if (!result) throw new Error("Draft unavailable");
+    useComposerDraftStore.getState().setPrompt(result.draftId, text);
+    if (kind !== "chat")
+      await navigate({
+        to: "/projects/$projectKey/command-deck",
+        params: { projectKey },
+        search: {
+          checkout,
+          workDraft: result.draftId,
+          ...(kind === "task" ? { createTask: true } : { mode: "swarm", stage: "brief" }),
+        },
+        replace: true,
+      });
+  };
+  const empty =
+    snapshot !== null &&
+    snapshot.tasks !== undefined &&
+    snapshot.missions !== undefined &&
+    scoped.project !== null &&
+    scoped.threads.length === 0 &&
+    scoped.tasks.length === 0 &&
+    scoped.missions.length === 0;
+  const gitObservation = context.data?.observations.find((item) => item.subject === "status");
+  const inventoryObservation = context.data?.observations.find(
+    (item) => item.subject === "worktrees",
+  );
+  const contextEvidence = !connected
+    ? `Cached · ${host} is offline. Live status unavailable; work may still be running.`
+    : context.data
+      ? [
+          context.data.state === "partial" ? "Partial information" : null,
+          gitObservation?.observedAt
+            ? `Git checked ${homeRelativeTime(gitObservation.observedAt, now)}`
+            : "Git freshness unknown",
+          inventoryObservation?.observedAt
+            ? `Worktree inventory ${inventoryObservation.cache === "cached" ? "cached" : "observed"} ${homeRelativeTime(inventoryObservation.observedAt, now)}`
+            : "Inventory freshness unknown",
+          snapshot?.updatedAt
+            ? `Project activity ${homeRelativeTime(snapshot.updatedAt, now)}`
+            : "Activity freshness unknown",
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : !inventorySupported
+        ? "Git context unavailable on this host. Project identity is canonical; Git facts are unknown."
+        : inventory.isPending || context.isPending
+          ? "Loading checkout context…"
+          : "Git unavailable or folder is not a repository. Checkout facts are unknown.";
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground isolate">
-      <div className="flex h-full min-h-0 flex-col">
-        <WorkspacePageHeader electron={isElectron} className="border-b border-border/70 bg-card/75">
-          <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
-            <WorkspaceBreadcrumb ariaLabel="Project Home breadcrumb">
-              <WorkspaceBreadcrumbItem>Projects</WorkspaceBreadcrumbItem>
-              <WorkspaceBreadcrumbSeparator />
-              <WorkspaceBreadcrumbItem>{group.displayName}</WorkspaceBreadcrumbItem>
-              <WorkspaceBreadcrumbSeparator />
-              <WorkspaceBreadcrumbItem current>Project Home</WorkspaceBreadcrumbItem>
-            </WorkspaceBreadcrumb>
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              aria-label="Project settings"
-              onClick={() =>
-                void navigate({ to: "/projects/$projectKey/settings", params: { projectKey } })
-              }
-            >
-              <Settings2Icon />
-            </Button>
-          </div>
-        </WorkspacePageHeader>
-
-        <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
-          <div className="mx-auto w-full max-w-6xl">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 text-sm text-primary">
-                  <SparklesIcon className="size-4" aria-hidden />
-                  <span>Nebula workspace</span>
-                </div>
-                <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-                  How do you want to work?
-                </h1>
-                <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-                  Stay hands-on in Terminal Center or give Architect an objective and let a reviewed
-                  Swarm coordinate the work.
-                </p>
-              </div>
-              <Button variant="outline" onClick={() => void navigate({ to: "/terminal-center" })}>
-                Global Terminal Center <ArrowRightIcon />
-              </Button>
-            </div>
-
-            <section
-              className="mt-6 grid gap-4 lg:grid-cols-[1fr_1fr_0.68fr]"
-              aria-label="Project modes"
-            >
-              <button
-                type="button"
-                onClick={openTerminalCenter}
-                className="group min-h-56 rounded-2xl border border-border bg-card p-5 text-left shadow-sm transition hover:border-primary/40 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <LayoutDashboardIcon className="size-5" aria-hidden />
-                </span>
-                <h2 className="mt-8 text-xl font-semibold">Terminal Center</h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Work manually with Codex, Antigravity, and your configured providers in a spatial
-                  engineering canvas.
-                </p>
-                <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-primary">
-                  Open Terminal Center{" "}
-                  <ArrowRightIcon className="size-4 transition group-hover:translate-x-0.5" />
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={runSwarm}
-                className="group min-h-56 rounded-2xl border border-primary/25 bg-primary/[0.06] p-5 text-left shadow-sm transition hover:border-primary/50 hover:bg-primary/[0.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
-                  <WorkflowIcon className="size-5" aria-hidden />
-                </span>
-                <h2 className="mt-8 text-xl font-semibold">Run a Swarm</h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Give Architect an objective, review the Mission plan, then let Nebula coordinate
-                  isolated agents, review, and integration.
-                </p>
-                <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-primary">
-                  Plan with Architect{" "}
-                  <ArrowRightIcon className="size-4 transition group-hover:translate-x-0.5" />
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() =>
-                  void createQuickThread(scopeProjectRef(project.environmentId, project.id))
+    <main
+      id="project-home-main"
+      tabIndex={-1}
+      className="min-h-0 min-w-0 flex-1 bg-background text-foreground"
+    >
+      <a href="#project-home-content" className="sr-only focus:not-sr-only focus:block focus:p-3">
+        Skip to Project Home content
+      </a>
+      <header className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <p className="text-sm text-muted-foreground">Project / Overview</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => openWorkbench()}>
+            <LayoutDashboardIcon />
+            Workbench
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Project settings"
+            onClick={() =>
+              void navigate({
+                to: "/projects/$projectKey/settings",
+                params: { projectKey },
+                search: { checkout },
+              })
+            }
+          >
+            <Settings2Icon />
+          </Button>
+        </div>
+      </header>
+      <div
+        id="project-home-content"
+        className="mx-auto w-full max-w-6xl space-y-5 px-4 pt-4 sm:px-6 sm:pt-6"
+      >
+        <HomeCardBoundary label="Project context">
+          <ProjectContextBlock
+            name={name}
+            host={host}
+            path={path}
+            context={context.data}
+            evidence={contextEvidence}
+            refresh={() => {
+              inventory.refresh();
+              context.refresh();
+            }}
+          />
+          {inventory.error || context.error ? (
+            <HomeQueryState
+              label="Checkout context"
+              pending={false}
+              unavailable
+              retry={() => {
+                inventory.refresh();
+                context.refresh();
+              }}
+            />
+          ) : null}
+        </HomeCardBoundary>
+        {!connected ? (
+          <p className="rounded-lg border border-border bg-muted p-3 text-sm" role="status">
+            {host} is offline. Cached information only; work may still be running. Reconnect in
+            Connections.
+          </p>
+        ) : null}
+        {!snapshot ? (
+          <HomeQueryState
+            label="Project activity"
+            pending
+            unavailable={false}
+            retry={() => void navigate({ to: "/settings/connections" })}
+          />
+        ) : null}
+        {snapshot &&
+        (snapshot.tasks === undefined ||
+          snapshot.missions === undefined ||
+          snapshot.missionRuns === undefined) ? (
+          <p role="status" className="text-xs text-muted-foreground">
+            Partial Project data. Task or Mission activity is unavailable from this host.
+          </p>
+        ) : null}
+        {!snapshot ? null : empty ? (
+          <EmptyProjectHero
+            name={name}
+            onIdea={(idea) => {
+              setLaunchText(idea);
+              document.getElementById("home-launch")?.focus();
+            }}
+          />
+        ) : (
+          <>
+            <HomeCardBoundary label="Needs you">
+              <ProjectAttentionList
+                items={attention}
+                open={open}
+                now={now}
+                partial={
+                  snapshot.tasks === undefined ||
+                  snapshot.missions === undefined ||
+                  snapshot.missionRuns === undefined
                 }
-                className="group min-h-56 rounded-2xl border border-border bg-card/70 p-5 text-left transition hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <span className="grid size-10 place-items-center rounded-xl bg-muted text-muted-foreground">
-                  <MessageSquarePlusIcon className="size-5" aria-hidden />
-                </span>
-                <h2 className="mt-8 text-lg font-semibold">Quick Thread</h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Open a normal coding conversation when you only need one agent.
-                </p>
-                <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium">
-                  New Thread{" "}
-                  <ArrowRightIcon className="size-4 transition group-hover:translate-x-0.5" />
-                </span>
-              </button>
-            </section>
-
-            <section className="mt-8" aria-labelledby="continue-heading">
-              <div className="flex items-center gap-2">
-                <Clock3Icon className="size-4 text-muted-foreground" aria-hidden />
-                <h2 id="continue-heading" className="text-sm font-medium">
-                  Continue
-                </h2>
-              </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                {activeMission ? (
-                  <button
-                    type="button"
-                    onClick={runSwarm}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left hover:bg-accent/30"
-                  >
-                    <span className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary">
-                      <BotIcon className="size-4" aria-hidden />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">
-                        {activeMission.title}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-muted-foreground">
-                        Active Mission · {activeMissionRun?.status}
-                      </span>
-                    </span>
-                    <ArrowRightIcon className="size-4 text-muted-foreground" aria-hidden />
-                  </button>
-                ) : null}
-                {projectThreads.slice(0, activeMission ? 3 : 4).map((thread) => (
-                  <button
-                    type="button"
-                    key={thread.id}
-                    onClick={() =>
-                      void navigate({
-                        to: "/$environmentId/$threadId",
-                        params: { environmentId: project.environmentId, threadId: thread.id },
-                      })
-                    }
-                    className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left hover:bg-accent/30"
-                  >
-                    <span className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground">
-                      <MessageSquarePlusIcon className="size-4" aria-hidden />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{thread.title}</span>
-                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                        {thread.modelSelection.instanceId} · {relativeTime(thread.updatedAt)}
-                      </span>
-                    </span>
-                    <ArrowRightIcon className="size-4 text-muted-foreground" aria-hidden />
-                  </button>
-                ))}
-                {!activeMission && projectThreads.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border p-5 text-sm text-muted-foreground md:col-span-2">
-                    Your recent Threads and Missions will appear here.
-                  </div>
-                ) : null}
-              </div>
-            </section>
-          </div>
-        </main>
+              />
+            </HomeCardBoundary>
+            <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)]">
+              <HomeCardBoundary label="Resume work">
+                <ProjectResumeList
+                  items={resume}
+                  filter={filter}
+                  setFilter={(value) => setFilter(checkout, value)}
+                  open={open}
+                  now={now}
+                />
+              </HomeCardBoundary>
+              <HomeCardBoundary label="Live now">
+                <ProjectLiveNow
+                  agents={agents}
+                  services={services}
+                  terminals={terminals}
+                  terminalMessage={
+                    !terminalAllowed ? (
+                      <p className="text-xs text-muted-foreground">
+                        Terminal activity unavailable. This view needs terminal permission and a
+                        connected host.
+                      </p>
+                    ) : (
+                      <HomeQueryState
+                        label="Terminal activity"
+                        pending={metadata.isPending}
+                        unavailable={metadata.error !== null}
+                        retry={metadata.refresh}
+                      />
+                    )
+                  }
+                  serviceMessage={
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {discovery.error ? (
+                        <HomeQueryState
+                          label="Server discovery"
+                          pending={false}
+                          unavailable
+                          retry={discovery.refresh}
+                        />
+                      ) : (
+                        "Unassigned external servers can be discovered and attached in Workbench. Preview and Logs use their existing controls."
+                      )}
+                    </div>
+                  }
+                  open={open}
+                  workbench={openWorkbench}
+                />
+              </HomeCardBoundary>
+            </div>
+          </>
+        )}
+        <HomeCardBoundary label="Start new work">
+          <ProjectLaunchBar
+            text={launchText}
+            setText={setLaunchText}
+            name={name}
+            disabledReason={disabledReason}
+            readiness={readinessLabel}
+            launch={launch}
+            gitAvailable={context.data?.git !== null && context.data?.git !== undefined && !invalid}
+          />
+        </HomeCardBoundary>
+        {empty ? (
+          <section aria-label="Project entry points" className="grid gap-3 pb-6 sm:grid-cols-3">
+            <Button variant="outline" onClick={() => openWorkbench()}>
+              <LayoutDashboardIcon />
+              Open Workbench
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void launch("mission", "")}
+              disabled={disabledReason !== null || !context.data?.git}
+            >
+              <WorkflowIcon />
+              Plan a Swarm
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void launch("chat", "")}
+              disabled={disabledReason !== null}
+            >
+              Quick thread
+            </Button>
+          </section>
+        ) : null}
       </div>
-    </SidebarInset>
+    </main>
   );
 }

@@ -1,3 +1,4 @@
+import { CHECKOUT_SWITCH_UNAVAILABLE, PULL_UNAVAILABLE } from "../lib/checkoutSafety";
 import { useAtomValue } from "@effect/atom-react";
 import { type ScopedThreadRef } from "@t3tools/contracts";
 import {
@@ -22,7 +23,6 @@ import { flushSync } from "react-dom";
 import {
   CheckIcon,
   ChevronDownIcon,
-  CloudDownloadIcon,
   CloudUploadIcon,
   ExternalLinkIcon,
   GitBranchPlusIcon,
@@ -77,7 +77,6 @@ import {
   useSourceControlActionRunning,
   useSourceControlPublishRepositoryAction,
   useVcsInitAction,
-  useVcsPullAction,
 } from "~/lib/sourceControlActions";
 import { useThread } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
@@ -295,13 +294,13 @@ function getMenuActionDisabledReason({
 
   if (item.id === "push") {
     if (!hasBranch) {
-      return "Detached HEAD: checkout a refName before pushing.";
+      return `Detached HEAD. ${CHECKOUT_SWITCH_UNAVAILABLE}`;
     }
     if (hasChanges) {
       return "Commit or stash local changes before pushing.";
     }
     if (isBehind) {
-      return "Branch is behind upstream. Pull/rebase before pushing.";
+      return `Branch is behind upstream. ${PULL_UNAVAILABLE}`;
     }
     if (!gitStatus.hasUpstream && !hasPrimaryRemote) {
       return 'Add an "origin" remote before pushing.';
@@ -316,7 +315,7 @@ function getMenuActionDisabledReason({
     return `View ${terminology.singular} is currently unavailable.`;
   }
   if (!hasBranch) {
-    return `Detached HEAD: checkout a refName before creating a ${terminology.singular}.`;
+    return `Detached HEAD. ${CHECKOUT_SWITCH_UNAVAILABLE}`;
   }
   if (hasChanges) {
     return `Commit local changes before creating a ${terminology.singular}.`;
@@ -328,7 +327,7 @@ function getMenuActionDisabledReason({
     return `No local commits to include in a ${terminology.singular}.`;
   }
   if (isBehind) {
-    return `Branch is behind upstream. Pull/rebase before creating a ${terminology.singular}.`;
+    return `Branch is behind upstream. ${PULL_UNAVAILABLE}`;
   }
   return `Create ${terminology.singular} is currently unavailable.`;
 }
@@ -359,7 +358,6 @@ function GitQuickActionIcon({
   const iconClassName = "size-3.5";
   if (quickAction.kind === "open_pr") return <SourceControlIcon className={iconClassName} />;
   if (quickAction.kind === "open_publish") return <CloudUploadIcon className={iconClassName} />;
-  if (quickAction.kind === "run_pull") return <CloudDownloadIcon className={iconClassName} />;
   if (quickAction.kind === "run_action") {
     if (quickAction.action === "commit") return <GitCommitIcon className={iconClassName} />;
     if (quickAction.action === "push" || quickAction.action === "commit_push") {
@@ -1117,7 +1115,6 @@ export default function GitActionsControl({
 
   const initAction = useVcsInitAction(sourceControlScope);
   const runImmediateGitAction = useGitStackedAction(sourceControlScope);
-  const pullAction = useVcsPullAction(sourceControlScope);
   const isGitActionRunning = useSourceControlActionRunning(
     sourceControlScope,
     RUNNING_SOURCE_CONTROL_ACTIONS,
@@ -1508,85 +1505,14 @@ export default function GitActionsControl({
     });
   };
 
-  const checkoutFeatureBranchAndContinuePendingAction = () => {
-    if (!pendingDefaultBranchAction) return;
-    const { action, commitMessage, onConfirmed, filePaths } = pendingDefaultBranchAction;
-    setPendingDefaultBranchAction(null);
-    void runGitActionWithToast({
-      action,
-      ...(commitMessage ? { commitMessage } : {}),
-      ...(onConfirmed ? { onConfirmed } : {}),
-      ...(filePaths ? { filePaths } : {}),
-      featureBranch: true,
-      skipDefaultBranchPrompt: true,
-    });
-  };
-
-  const runDialogActionOnNewBranch = () => {
-    if (!isCommitDialogOpen) return;
-    const commitMessage = dialogCommitMessage.trim();
-
-    setIsCommitDialogOpen(false);
-    setDialogCommitMessage("");
-    setExcludedFiles(new Set());
-    setIsEditingFiles(false);
-
-    void runGitActionWithToast({
-      action: "commit",
-      ...(commitMessage ? { commitMessage } : {}),
-      ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
-      featureBranch: true,
-      skipDefaultBranchPrompt: true,
-    });
-  };
-
   const runQuickAction = () => {
+    if (quickAction.disabled) return;
     if (quickAction.kind === "open_pr") {
       void openExistingPr();
       return;
     }
     if (quickAction.kind === "open_publish") {
       setIsPublishDialogOpen(true);
-      return;
-    }
-    if (quickAction.kind === "run_pull") {
-      const toastId = toastManager.add({
-        type: "loading",
-        title: "Pulling...",
-        timeout: 0,
-        data: threadToastData,
-      });
-      void (async () => {
-        const result = await pullAction.run();
-        if (result._tag === "Failure") {
-          if (isAtomCommandInterrupted(result)) {
-            toastManager.close(toastId);
-            return;
-          }
-          const error = squashAtomCommandFailure(result);
-          toastManager.update(
-            toastId,
-            stackedThreadToast({
-              type: "error",
-              title: "Pull failed",
-              description: error instanceof Error ? error.message : "An error occurred.",
-              ...(threadToastData !== undefined ? { data: threadToastData } : {}),
-            }),
-          );
-          return;
-        }
-
-        const pullResult = result.value;
-        toastManager.update(toastId, {
-          type: "success",
-          title: pullResult.status === "pulled" ? "Pulled" : "Already up to date",
-          description:
-            pullResult.status === "pulled"
-              ? `Updated ${pullResult.refName} from ${pullResult.upstreamRef ?? "upstream"}`
-              : `${pullResult.refName} is already synchronized.`,
-          data: threadToastData,
-        });
-      })();
       return;
     }
     if (quickAction.kind === "show_hint") {
@@ -1812,8 +1738,7 @@ export default function GitActionsControl({
               ) : null}
               {gitStatusForActions?.refName === null && (
                 <p className="px-2 py-1.5 text-xs text-warning">
-                  Detached HEAD: create and checkout a refName to enable push and pull request
-                  actions.
+                  Detached HEAD. {CHECKOUT_SWITCH_UNAVAILABLE}
                 </p>
               )}
               {gitStatusForActions &&
@@ -1821,9 +1746,7 @@ export default function GitActionsControl({
                 !gitStatusForActions.hasWorkingTreeChanges &&
                 gitStatusForActions.behindCount > 0 &&
                 gitStatusForActions.aheadCount === 0 && (
-                  <p className="px-2 py-1.5 text-xs text-warning">
-                    Behind upstream. Pull/rebase first.
-                  </p>
+                  <p className="px-2 py-1.5 text-xs text-warning">{PULL_UNAVAILABLE}</p>
                 )}
               {gitStatusError && (
                 <p className="px-2 py-1.5 text-xs text-destructive">{gitStatusError}</p>
@@ -1970,6 +1893,7 @@ export default function GitActionsControl({
                 size="sm"
               />
             </div>
+            <p className="text-xs text-muted-foreground">{CHECKOUT_SWITCH_UNAVAILABLE}</p>
           </DialogPanel>
           <DialogFooter variant="bare">
             <Button
@@ -1984,13 +1908,8 @@ export default function GitActionsControl({
             >
               Cancel
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={noneSelected}
-              onClick={runDialogActionOnNewBranch}
-            >
-              Commit on new refName
+            <Button variant="outline" size="sm" disabled title={CHECKOUT_SWITCH_UNAVAILABLE}>
+              Commit on new branch unavailable
             </Button>
             <Button size="sm" disabled={noneSelected} onClick={runDialogAction}>
               Commit
@@ -2020,6 +1939,7 @@ export default function GitActionsControl({
               {pendingDefaultBranchActionCopy?.title ?? "Run action on default refName?"}
             </DialogTitle>
             <DialogDescription>{pendingDefaultBranchActionCopy?.description}</DialogDescription>
+            <p className="text-xs text-muted-foreground">{CHECKOUT_SWITCH_UNAVAILABLE}</p>
           </DialogHeader>
           <DialogFooter className="dark:border-transparent dark:bg-transparent sm:flex-wrap sm:items-center">
             <Button
@@ -2041,9 +1961,10 @@ export default function GitActionsControl({
             <Button
               className="min-h-8 w-full max-w-full whitespace-normal py-1.5 leading-snug sm:min-h-7 sm:w-auto"
               size="sm"
-              onClick={checkoutFeatureBranchAndContinuePendingAction}
+              disabled
+              title={CHECKOUT_SWITCH_UNAVAILABLE}
             >
-              Checkout feature branch & continue
+              Checkout switching unavailable
             </Button>
           </DialogFooter>
         </DialogPopup>

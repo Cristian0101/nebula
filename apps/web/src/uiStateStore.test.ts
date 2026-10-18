@@ -1,4 +1,5 @@
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { encodeProjectCheckout } from "./projectNavigation";
+import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -491,6 +492,9 @@ describe("parsePersistedState", () => {
     });
 
     expect(parsed).toEqual({
+      activeProjectNavigation: null,
+      projectNavigationByKey: {},
+      projectHomeResumeFilterByCheckout: {},
       projectExpandedById: {
         logical: false,
       },
@@ -612,6 +616,9 @@ describe("uiStateStore persistence", () => {
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
     expect(persisted).toEqual({
+      activeProjectNavigation: null,
+      projectNavigationByKey: {},
+      projectHomeResumeFilterByCheckout: {},
       projectExpandedById: {
         logical: false,
       },
@@ -632,6 +639,9 @@ describe("uiStateStore persistence", () => {
     });
     expect(parsePersistedState(persisted)).toEqual({
       ...state,
+      activeProjectNavigation: null,
+      projectNavigationByKey: {},
+      projectHomeResumeFilterByCheckout: {},
     });
   });
 
@@ -646,5 +656,36 @@ describe("uiStateStore persistence", () => {
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
     expect(resolveProjectExpanded(persisted.projectExpandedById ?? {}, ["unknown"])).toBe(true);
+  });
+});
+
+describe("Project Home Resume preferences", () => {
+  it("keeps filters distinct for identical Project IDs across hosts", () => {
+    const local = encodeProjectCheckout({
+      environmentId: EnvironmentId.make("local"),
+      projectId: ProjectId.make("same"),
+    });
+    const remote = encodeProjectCheckout({
+      environmentId: EnvironmentId.make("remote"),
+      projectId: ProjectId.make("same"),
+    });
+    const store = useUiStateStore.getState();
+    store.setProjectHomeResumeFilter(local, "Threads");
+    store.setProjectHomeResumeFilter(remote, "Missions");
+    expect(useUiStateStore.getState().projectHomeResumeFilterByCheckout).toMatchObject({
+      [local]: "Threads",
+      [remote]: "Missions",
+    });
+    const parsed = parsePersistedState({
+      projectHomeResumeFilterByCheckout: {
+        [local]: "Threads",
+        [remote]: "Missions",
+        invalid: "bad" as never,
+      },
+    });
+    expect(parsed.projectHomeResumeFilterByCheckout).toEqual({
+      [local]: "Threads",
+      [remote]: "Missions",
+    });
   });
 });

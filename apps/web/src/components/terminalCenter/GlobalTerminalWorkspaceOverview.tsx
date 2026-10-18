@@ -1,3 +1,8 @@
+import { migrateTerminalWorkspaceScope } from "./terminalWorkspaceScope";
+import { useProjects } from "../../state/entities";
+import { useAtomValue } from "@effect/atom-react";
+import { allEnvironmentProjectIdentitiesKnownAtom } from "../../state/shell";
+import { encodeProjectCheckout } from "../../projectNavigation";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -50,7 +55,11 @@ const paneIcons: Record<TerminalWorkspacePaneType, typeof TerminalSquareIcon> = 
 
 function ProjectColumn({ group }: { readonly group: ProjectGroup }) {
   const navigate = useNavigate();
-  const projectState = useUiStateStore((state) => state.terminalWorkspacesByProjectId[group.id]);
+  const checkout = encodeProjectCheckout({
+    environmentId: group.environmentId,
+    projectId: group.id,
+  });
+  const projectState = useUiStateStore((state) => state.terminalWorkspacesByProjectId[checkout]);
   const project =
     group.memberProjects.find(
       (member) => member.environmentId === group.environmentId && member.id === group.id,
@@ -61,7 +70,6 @@ function ProjectColumn({ group }: { readonly group: ProjectGroup }) {
   });
   const workspace =
     projectState?.workspaces.find((candidate) => candidate.id === projectState.activeWorkspaceId) ??
-    projectState?.workspaces[0] ??
     null;
   const visible = workspace?.panes.filter((pane) => pane.visible) ?? [];
   const hiddenCount = workspace?.panes.filter((pane) => !pane.visible).length ?? 0;
@@ -81,6 +89,7 @@ function ProjectColumn({ group }: { readonly group: ProjectGroup }) {
           void navigate({
             to: "/projects/$projectKey/terminal-center",
             params: { projectKey: group.projectKey },
+            search: { checkout },
           })
         }
       >
@@ -90,6 +99,7 @@ function ProjectColumn({ group }: { readonly group: ProjectGroup }) {
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{group.displayName}</p>
           <p className="truncate text-[10px] text-muted-foreground">
+            {project.environmentLabel ?? project.environmentId} ·{" "}
             {workspace?.name ?? "Not initialized"} · {visible.length} panes
           </p>
         </div>
@@ -114,6 +124,7 @@ function ProjectColumn({ group }: { readonly group: ProjectGroup }) {
                 void navigate({
                   to: "/projects/$projectKey/terminal-center",
                   params: { projectKey: group.projectKey },
+                  search: { checkout },
                 })
               }
             >
@@ -138,7 +149,7 @@ function ProjectColumn({ group }: { readonly group: ProjectGroup }) {
               <TerminalSquareIcon className="mx-auto size-6 text-primary" />
               <p className="mt-3 text-xs font-medium">Open the Project Workspace</p>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Nebula will create its Default Workspace and rooted Shell.
+                Open the saved layout. Starting a shell is a separate action.
               </p>
             </div>
           </div>
@@ -153,6 +164,7 @@ function ProjectColumn({ group }: { readonly group: ProjectGroup }) {
             void navigate({
               to: "/projects/$projectKey/terminal-center",
               params: { projectKey: group.projectKey },
+              search: { checkout },
             })
           }
         >
@@ -166,6 +178,8 @@ function ProjectColumn({ group }: { readonly group: ProjectGroup }) {
 export function GlobalTerminalWorkspaceOverview() {
   const navigate = useNavigate();
   const groups = useSettingsProjectGroups();
+  const projects = useProjects();
+  const identitiesKnown = useAtomValue(allEnvironmentProjectIdentitiesKnownAtom);
   const threads = useThreadShells();
   const settings = usePrimarySettings();
   const workspaceStates = useUiStateStore((state) => state.terminalWorkspacesByProjectId);
@@ -216,7 +230,37 @@ export function GlobalTerminalWorkspaceOverview() {
         (candidate) =>
           candidate.environmentId === thread.environmentId && candidate.id === thread.projectId,
       ) ?? group.memberProjects[0]!;
-    const savedState = workspaceStates[group.id];
+    const checkout = encodeProjectCheckout({
+      environmentId: project.environmentId,
+      projectId: project.id,
+    });
+    const originalState = useUiStateStore.getState();
+    const scopedState = identitiesKnown
+      ? migrateTerminalWorkspaceScope(
+          originalState,
+          { environmentId: project.environmentId, projectId: project.id },
+          projects.map((project) => ({
+            environmentId: project.environmentId,
+            projectId: project.id,
+          })),
+        )
+      : originalState;
+    if (scopedState !== originalState) useUiStateStore.setState(scopedState);
+    const savedState = scopedState.terminalWorkspacesByProjectId[checkout];
+    if (
+      (!savedState &&
+        (scopedState.terminalWorkspacesByProjectId[project.id] ||
+          scopedState.terminalCenterByProjectId[project.id])) ||
+      (savedState &&
+        !savedState.workspaces.some((workspace) => workspace.id === savedState.activeWorkspaceId))
+    ) {
+      void navigate({
+        to: "/projects/$projectKey/terminal-center",
+        params: { projectKey: group.projectKey },
+        search: { checkout },
+      });
+      return;
+    }
     const state =
       savedState && savedState.workspaces.length > 0
         ? savedState
@@ -234,7 +278,7 @@ export function GlobalTerminalWorkspaceOverview() {
         : restoreWorkspacePane(workspace, existing.id);
       if (!existing.visible && restored === workspace) return;
       setWorkspaceState(
-        group.id,
+        checkout,
         updateWorkspace(state, workspace.id, () => restored),
       );
     } else {
@@ -250,7 +294,7 @@ export function GlobalTerminalWorkspaceOverview() {
         grid,
       });
       setWorkspaceState(
-        group.id,
+        checkout,
         updateWorkspace(state, workspace.id, (current) => ({
           ...current,
           panes: [...current.panes, pane],
@@ -261,6 +305,7 @@ export function GlobalTerminalWorkspaceOverview() {
     void navigate({
       to: "/projects/$projectKey/terminal-center",
       params: { projectKey: group.projectKey },
+      search: { checkout },
     });
   };
 
@@ -291,28 +336,38 @@ export function GlobalTerminalWorkspaceOverview() {
         <Button size="xs" variant="secondary">
           All Projects
         </Button>
-        {groups.map((group) => (
-          <Button
-            key={group.projectKey}
-            size="xs"
-            variant="ghost"
-            onClick={() =>
-              void navigate({
-                to: "/projects/$projectKey/terminal-center",
-                params: { projectKey: group.projectKey },
-              })
-            }
-          >
-            {group.displayName}
-          </Button>
-        ))}
+        {groups
+          .flatMap((group) => group.memberProjects.map((member) => ({ ...group, ...member })))
+          .map((group) => (
+            <Button
+              key={`${group.environmentId}:${group.id}`}
+              size="xs"
+              variant="ghost"
+              onClick={() =>
+                void navigate({
+                  to: "/projects/$projectKey/terminal-center",
+                  params: { projectKey: group.projectKey },
+                  search: {
+                    checkout: encodeProjectCheckout({
+                      environmentId: group.environmentId,
+                      projectId: group.id,
+                    }),
+                  },
+                })
+              }
+            >
+              {group.displayName} · {group.environmentLabel ?? group.environmentId}
+            </Button>
+          ))}
       </nav>
       <div className="flex min-h-0 flex-1">
         <main className="min-w-0 flex-1 overflow-x-auto p-3">
           <div className="flex h-full min-h-[520px] gap-3">
-            {groups.map((group) => (
-              <ProjectColumn key={group.projectKey} group={group} />
-            ))}
+            {groups
+              .flatMap((group) => group.memberProjects.map((member) => ({ ...group, ...member })))
+              .map((group) => (
+                <ProjectColumn key={`${group.environmentId}:${group.id}`} group={group} />
+              ))}
           </div>
         </main>
         <aside className="hidden w-72 shrink-0 overflow-auto border-l border-border bg-card/60 p-3 xl:block">

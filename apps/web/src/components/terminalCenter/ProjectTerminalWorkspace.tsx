@@ -1,3 +1,8 @@
+import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { useSettingsProjectGroups } from "../settings/ProjectSettingsPanel";
+import { encodeProjectCheckout } from "../../projectNavigation";
+import { migrateTerminalWorkspaceScope } from "./terminalWorkspaceScope";
+import { useProjects } from "../../state/entities";
 import { PaneSessionIdentity } from "./PaneSessionIdentity";
 import { resolveAgentWorkspace } from "./agentWorkspace";
 import { useAtomValue } from "@effect/atom-react";
@@ -13,7 +18,6 @@ import {
   type PreviewAnnotationPayload,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
 import {
   AppWindowIcon,
   BotIcon,
@@ -75,7 +79,10 @@ import {
   sortProviderInstanceEntries,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
-import { environmentSnapshotAtom } from "../../state/shell";
+import {
+  allEnvironmentProjectIdentitiesKnownAtom,
+  environmentSnapshotAtom,
+} from "../../state/shell";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { terminalEnvironment } from "../../state/terminal";
@@ -131,7 +138,6 @@ import {
   taskOwnershipContext,
   type OwnershipRuleDraft,
 } from "../ProjectTasksSection";
-import { useSettingsProjectGroups } from "../settings/ProjectSettingsPanel";
 import { deriveCurrentAction } from "../commandDeck/commandDeckLogic";
 import { useDiscoveredLocalServers } from "../preview/useDiscoveredLocalServers";
 import {
@@ -1061,7 +1067,7 @@ function PaneHeader({
     pane.agentSurface === "terminal" && hasAgentIdentity && Boolean(onChangePaneFormat);
   return (
     <div
-      className={`flex shrink-0 items-center gap-1.5 border-b border-border/70 bg-muted/20 px-1.5 ${pane.agentSurface ? "min-h-10 flex-wrap py-1" : "h-10"}`}
+      className="flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 border-b border-border/70 bg-muted/20 px-1.5 py-1"
       onMouseDown={onSelect}
     >
       <button
@@ -1389,6 +1395,7 @@ const RepositoryDiffPane = memo(function RepositoryDiffPane({
 });
 
 const CanonicalPreviewSurface = memo(function CanonicalPreviewSurface({
+  restoreOnly = false,
   threadRef,
   annotationThreadRef,
   url,
@@ -1399,6 +1406,7 @@ const CanonicalPreviewSurface = memo(function CanonicalPreviewSurface({
   onSendAnnotation,
   persistAnnotationToDraft,
 }: {
+  readonly restoreOnly?: boolean;
   readonly threadRef: ScopedThreadRef;
   readonly annotationThreadRef?: ScopedThreadRef;
   readonly url: string;
@@ -1420,7 +1428,7 @@ const CanonicalPreviewSurface = memo(function CanonicalPreviewSurface({
     activeSnapshot?.navStatus._tag === "Idle" ? null : activeSnapshot?.navStatus.url;
 
   useEffect(() => {
-    if (!url) return;
+    if (!url || (restoreOnly && refreshKey === 0)) return;
     const requestKey = `${url}:${refreshKey}`;
     if (requestedKeyRef.current === requestKey) return;
     if (refreshKey === 0 && activeUrl === url) {
@@ -1436,7 +1444,14 @@ const CanonicalPreviewSurface = memo(function CanonicalPreviewSurface({
     return () => {
       disposed = true;
     };
-  }, [activeUrl, openPreview, refreshKey, threadRef, url]);
+  }, [activeUrl, openPreview, refreshKey, restoreOnly, threadRef, url]);
+
+  if (restoreOnly && refreshKey === 0 && activeUrl !== url)
+    return (
+      <p role="status" className="p-4 text-sm text-muted-foreground">
+        Existing Preview unavailable. Inspection does not start a browser or service.
+      </p>
+    );
 
   if (openFailed)
     return (
@@ -1474,6 +1489,7 @@ const CanonicalPreviewSurface = memo(function CanonicalPreviewSurface({
 });
 
 const PreviewSurface = memo(function PreviewSurface({
+  restoreOnly = false,
   threadRef,
   annotationThreadRef,
   url,
@@ -1490,6 +1506,7 @@ const PreviewSurface = memo(function PreviewSurface({
   onSendAnnotation,
   persistAnnotationToDraft,
 }: {
+  readonly restoreOnly?: boolean;
   readonly threadRef: ScopedThreadRef;
   readonly annotationThreadRef?: ScopedThreadRef;
   readonly url: string;
@@ -1512,6 +1529,13 @@ const PreviewSurface = memo(function PreviewSurface({
   useEffect(() => {
     setFrameState(state === "ready" ? "connecting" : "failed");
   }, [refreshKey, state, url]);
+
+  if (restoreOnly && state !== "ready")
+    return (
+      <p role="status" className="p-4 text-sm text-muted-foreground">
+        Existing Preview unavailable. Inspection does not start a browser or service.
+      </p>
+    );
 
   if (!url || state === "idle")
     return (
@@ -1595,6 +1619,7 @@ const PreviewSurface = memo(function PreviewSurface({
   if (isPreviewSupportedInRuntime())
     return (
       <CanonicalPreviewSurface
+        restoreOnly={restoreOnly}
         threadRef={threadRef}
         {...(annotationThreadRef ? { annotationThreadRef } : {})}
         url={url}
@@ -1746,14 +1771,23 @@ export function ProjectTerminalWorkspace({
   projectKey,
   displayName,
   initialTaskId,
+  initialFilesOpen = false,
+  restoreOnly = false,
 }: {
   readonly project: WorkspaceProject;
   readonly projectKey: string;
   readonly displayName: string;
   readonly initialTaskId?: string;
+  readonly initialFilesOpen?: boolean;
+  readonly restoreOnly?: boolean;
 }) {
-  const navigate = useNavigate();
-  const groups = useSettingsProjectGroups();
+  const allProjects = useProjects();
+  const identitiesKnown = useAtomValue(allEnvironmentProjectIdentitiesKnownAtom);
+  const compactWorkbench = useMediaQuery("max-xl");
+  const workspaceKey = encodeProjectCheckout({
+    environmentId: project.environmentId,
+    projectId: project.id,
+  });
   const snapshot = useAtomValue(environmentSnapshotAtom(project.environmentId));
   const settings = usePrimarySettings();
   const updateClientSettings = useUpdateClientSettings();
@@ -1785,9 +1819,9 @@ export function ProjectTerminalWorkspace({
     [projectThreads],
   );
   const workspaceState = useUiStateStore(
-    (store) => store.terminalWorkspacesByProjectId[project.id],
+    (store) => store.terminalWorkspacesByProjectId[workspaceKey],
   );
-  const legacyState = useUiStateStore((store) => store.terminalCenterByProjectId[project.id]);
+  const legacyState = useUiStateStore((store) => store.terminalCenterByProjectId[workspaceKey]);
   const setWorkspaceState = useUiStateStore((store) => store.setTerminalWorkspaceProjectState);
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
@@ -1842,7 +1876,10 @@ export function ProjectTerminalWorkspace({
     useState<TerminalWorkspaceLayoutPreset>("main_rail");
   const [layoutMainRatio, setLayoutMainRatio] = useState(68);
   const [layoutFillEmpty, setLayoutFillEmpty] = useState(true);
-  const [filePickerOpen, setFilePickerOpen] = useState(false);
+  const [filePickerOpen, setFilePickerOpen] = useState(initialFilesOpen);
+  useEffect(() => {
+    if (initialFilesOpen) setFilePickerOpen(true);
+  }, [initialFilesOpen]);
   const [fileSearch, setFileSearch] = useState("");
   const [designMode, setDesignMode] = useState(false);
   const [designPreviewBinding, setDesignPreviewBinding] = useState<DesignPreviewBinding | null>(
@@ -1895,22 +1932,50 @@ export function ProjectTerminalWorkspace({
 
   useEffect(() => {
     if (workspaceState) return;
+    const state = useUiStateStore.getState();
+    const migrated = identitiesKnown
+      ? migrateTerminalWorkspaceScope(
+          state,
+          { environmentId: project.environmentId, projectId: project.id },
+          allProjects.map((project) => ({
+            environmentId: project.environmentId,
+            projectId: project.id,
+          })),
+        )
+      : state;
+    if (migrated !== state) {
+      useUiStateStore.setState(migrated);
+      return;
+    }
+    if (
+      state.terminalWorkspacesByProjectId[project.id] ||
+      state.terminalCenterByProjectId[project.id]
+    )
+      return;
     setWorkspaceState(
-      project.id,
+      workspaceKey,
       migrateTerminalCanvasToWorkspace({
         projectId: project.id,
         workspacePath: project.workspaceRoot,
         legacy: legacyState,
       }),
     );
-  }, [legacyState, project.id, project.workspaceRoot, setWorkspaceState, workspaceState]);
+  }, [
+    allProjects,
+    identitiesKnown,
+    legacyState,
+    project.environmentId,
+    project.id,
+    project.workspaceRoot,
+    setWorkspaceState,
+    workspaceState,
+    workspaceKey,
+  ]);
 
   const activeWorkspace =
     workspaceState?.workspaces.find(
       (workspace) => workspace.id === workspaceState.activeWorkspaceId,
-    ) ??
-    workspaceState?.workspaces[0] ??
-    null;
+    ) ?? null;
   useEffect(() => {
     if (!designPreviewBinding || activeWorkspace?.id === designPreviewBinding.workspaceId) return;
     setDesignMode(false);
@@ -2029,17 +2094,17 @@ export function ProjectTerminalWorkspace({
   );
 
   const persistProjectState = useCallback(
-    (next: TerminalWorkspaceProjectState) => setWorkspaceState(project.id, next),
-    [project.id, setWorkspaceState],
+    (next: TerminalWorkspaceProjectState) => setWorkspaceState(workspaceKey, next),
+    [workspaceKey, setWorkspaceState],
   );
   const updateActiveWorkspace = useCallback(
     (update: (workspace: TerminalWorkspace) => TerminalWorkspace) => {
       if (!activeWorkspace) return;
-      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[project.id];
+      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[workspaceKey];
       if (!currentState) return;
       persistProjectState(updateWorkspace(currentState, activeWorkspace.id, update));
     },
-    [activeWorkspace, persistProjectState, project.id],
+    [activeWorkspace, persistProjectState, project.id, workspaceKey],
   );
 
   useEffect(() => {
@@ -2069,7 +2134,7 @@ export function ProjectTerminalWorkspace({
       > & { readonly workspacePath?: string },
     ) => {
       if (!activeWorkspace) return null;
-      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[project.id];
+      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[workspaceKey];
       const currentWorkspace = currentState?.workspaces.find(
         (workspace) => workspace.id === activeWorkspace.id,
       );
@@ -2125,6 +2190,7 @@ export function ProjectTerminalWorkspace({
       addAt,
       persistProjectState,
       project.id,
+      workspaceKey,
       project.workspaceRoot,
       quickAddTargetStackId,
       taskById,
@@ -2200,6 +2266,7 @@ export function ProjectTerminalWorkspace({
     project.defaultModelSelection,
     project.environmentId,
     project.id,
+    workspaceKey,
     providerEntries,
     setTaskOwnership,
     taskAcceptanceCriteria,
@@ -2384,6 +2451,7 @@ export function ProjectTerminalWorkspace({
       createThread,
       project.environmentId,
       project.id,
+      workspaceKey,
       project.workspaceRoot,
       startThreadTurn,
       threadById,
@@ -2500,7 +2568,7 @@ export function ProjectTerminalWorkspace({
   const switchAgentSurface = useCallback(
     async (pane: TerminalWorkspacePane, surface: "chat" | "terminal") => {
       if (pane.agentSurface === surface) return pane;
-      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[project.id];
+      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[workspaceKey];
       const currentWorkspace = currentState?.workspaces.find(
         (workspace) => workspace.id === activeWorkspace?.id,
       );
@@ -2543,6 +2611,7 @@ export function ProjectTerminalWorkspace({
       launchProvider,
       launchProviderTerminal,
       project.id,
+      workspaceKey,
       project.workspaceRoot,
       providerEntries,
       taskById,
@@ -2767,7 +2836,7 @@ export function ProjectTerminalWorkspace({
 
   const attachExternalServer = useCallback(
     (server: DiscoveredLocalServer) => {
-      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[project.id];
+      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[workspaceKey];
       const currentWorkspace = currentState?.workspaces.find(
         (workspace) => workspace.id === activeWorkspace?.id,
       );
@@ -2843,6 +2912,7 @@ export function ProjectTerminalWorkspace({
       activeWorkspace?.id,
       addPane,
       project.id,
+      workspaceKey,
       selectedWorkspacePath,
       taskContext?.id,
       updateActiveWorkspace,
@@ -2870,7 +2940,7 @@ export function ProjectTerminalWorkspace({
 
   const addProjectServicePreview = useCallback(
     (service: TerminalWorkspaceProjectService) => {
-      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[project.id];
+      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[workspaceKey];
       const currentWorkspace = currentState?.workspaces.find(
         (workspace) => workspace.id === activeWorkspace?.id,
       );
@@ -2907,7 +2977,7 @@ export function ProjectTerminalWorkspace({
 
   const addProjectServiceWithLogs = useCallback(
     (service: TerminalWorkspaceProjectService) => {
-      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[project.id];
+      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[workspaceKey];
       const currentWorkspace = currentState?.workspaces.find(
         (workspace) => workspace.id === activeWorkspace?.id,
       );
@@ -2936,7 +3006,7 @@ export function ProjectTerminalWorkspace({
           workspacePath: service.workspacePath,
         });
       if (!devPane) return;
-      const latestState = useUiStateStore.getState().terminalWorkspacesByProjectId[project.id];
+      const latestState = useUiStateStore.getState().terminalWorkspacesByProjectId[workspaceKey];
       const latestWorkspace = latestState?.workspaces.find(
         (workspace) => workspace.id === activeWorkspace?.id,
       );
@@ -2975,7 +3045,7 @@ export function ProjectTerminalWorkspace({
 
   const focusProjectServiceOrigin = useCallback(
     (service: TerminalWorkspaceProjectService) => {
-      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[project.id];
+      const currentState = useUiStateStore.getState().terminalWorkspacesByProjectId[workspaceKey];
       if (!currentState) return;
       persistProjectState({
         ...currentState,
@@ -2996,7 +3066,7 @@ export function ProjectTerminalWorkspace({
       setPreviewTray("closed");
       setAddPaneOpen(false);
     },
-    [persistProjectState, project.id],
+    [persistProjectState, project.id, workspaceKey],
   );
 
   const startTests = useCallback(
@@ -3186,6 +3256,71 @@ export function ProjectTerminalWorkspace({
     [],
   );
 
+  if (
+    !workspaceState &&
+    (useUiStateStore.getState().terminalWorkspacesByProjectId[project.id] ||
+      useUiStateStore.getState().terminalCenterByProjectId[project.id])
+  )
+    return (
+      <SidebarInset className="flex flex-col items-center justify-center gap-3 p-6 text-center">
+        <h2>Choose checkout for saved layout</h2>
+        <p className="text-sm text-muted-foreground">
+          The original environment is ambiguous. Assign this layout only if this is its original
+          checkout. Pane and terminal IDs will be preserved.
+        </p>
+        <Button
+          onClick={() =>
+            useUiStateStore.setState((state) =>
+              migrateTerminalWorkspaceScope(
+                state,
+                { environmentId: project.environmentId, projectId: project.id },
+                allProjects.map((project) => ({
+                  environmentId: project.environmentId,
+                  projectId: project.id,
+                })),
+                true,
+              ),
+            )
+          }
+        >
+          Use saved layout on this checkout
+        </Button>
+      </SidebarInset>
+    );
+  if (workspaceState && !activeWorkspace)
+    return (
+      <SidebarInset className="flex flex-col items-center justify-center gap-3 p-6" role="status">
+        <h2>Saved workspace unavailable</h2>
+        <p>Select a remaining saved workspace. No process will be started.</p>
+        {workspaceState.workspaces.map((workspace) => (
+          <Button
+            key={workspace.id}
+            variant="outline"
+            onClick={() =>
+              persistProjectState({ ...workspaceState, activeWorkspaceId: workspace.id })
+            }
+          >
+            {workspace.name}
+          </Button>
+        ))}
+        <Button
+          variant="outline"
+          onClick={() => {
+            const created = createDefaultTerminalWorkspaceProjectState({
+              projectId: `${project.id}:${randomUUID()}`,
+              workspacePath: project.workspaceRoot,
+            }).workspaces[0]!;
+            persistProjectState({
+              ...workspaceState,
+              activeWorkspaceId: created.id,
+              workspaces: [...workspaceState.workspaces, created],
+            });
+          }}
+        >
+          Create workspace layout
+        </Button>
+      </SidebarInset>
+    );
   if (!workspaceState || !activeWorkspace)
     return (
       <SidebarInset className="grid h-dvh place-items-center bg-background text-sm text-muted-foreground">
@@ -3203,7 +3338,12 @@ export function ProjectTerminalWorkspace({
   const maximizedPane = maximizedPaneId
     ? (activeWorkspace.panes.find((pane) => pane.id === maximizedPaneId) ?? null)
     : null;
-  const isolatedPane = maximizedPane ?? focusedPane;
+  const compactPane = compactWorkbench
+    ? (visiblePanes.find((pane) => pane.id === activeWorkspace.selectedPaneId) ??
+      visiblePanes[0] ??
+      null)
+    : null;
+  const isolatedPane = maximizedPane ?? focusedPane ?? compactPane;
   const sessionForPane = (pane: TerminalWorkspacePane) =>
     sessions.find(
       (session) =>
@@ -3508,6 +3648,7 @@ export function ProjectTerminalWorkspace({
       const previewUrl = liveServer?.url ?? pane.previewUrl ?? "";
       return (
         <PreviewSurface
+          restoreOnly={restoreOnly}
           threadRef={previewThreadRef}
           url={previewUrl}
           title={pane.title}
@@ -4168,6 +4309,7 @@ export function ProjectTerminalWorkspace({
   const stagePreview = (
     <div className="h-full min-h-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <PreviewSurface
+        restoreOnly={restoreOnly}
         threadRef={previewThreadRef}
         {...(designMode && designTargetThreadRef
           ? { annotationThreadRef: designTargetThreadRef }
@@ -4446,7 +4588,7 @@ export function ProjectTerminalWorkspace({
     </aside>
   );
 
-  if (activeMode !== "workbench")
+  if (activeMode !== "workbench" && !compactWorkbench)
     return (
       <SidebarInset className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground">
         <WorkspacePageHeader className="h-auto flex-wrap border-b border-border bg-background py-2">
@@ -4469,7 +4611,7 @@ export function ProjectTerminalWorkspace({
               {designStageUrl || "No URL selected"}
             </p>
           </div>
-          <div className="flex items-center rounded-md border border-border bg-muted/20 p-0.5">
+          <div className="flex max-w-full flex-wrap items-center rounded-md border border-border bg-muted/20 p-0.5">
             <Button
               size="xs"
               variant={activeMode === "preview" ? "secondary" : "ghost"}
@@ -4674,7 +4816,7 @@ export function ProjectTerminalWorkspace({
     <SidebarInset className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground">
       <WorkspacePageHeader className="h-auto flex-wrap border-b border-border bg-background py-2">
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-semibold">{displayName} Terminal Workspace</h1>
+          <h1 className="truncate text-base font-semibold">{displayName} Workbench</h1>
           <p className="truncate text-[11px] text-muted-foreground">
             Live terminals, agents, servers, tests, and previews · UI composition, not a Git
             worktree
@@ -4695,7 +4837,7 @@ export function ProjectTerminalWorkspace({
             );
           }}
         />
-        <div className="flex items-center rounded-md border border-border bg-muted/20 p-0.5">
+        <div className="flex max-w-full flex-wrap items-center rounded-md border border-border bg-muted/20 p-0.5">
           <Button
             size="xs"
             variant="secondary"
@@ -4732,7 +4874,7 @@ export function ProjectTerminalWorkspace({
             <Columns2Icon /> Build + Preview
           </Button>
         </div>
-        <div className="flex items-center rounded-md border border-border bg-muted/20 p-0.5">
+        <div className="flex max-w-full flex-wrap items-center rounded-md border border-border bg-muted/20 p-0.5">
           <Button
             size="xs"
             variant="ghost"
@@ -4752,30 +4894,26 @@ export function ProjectTerminalWorkspace({
         </Button>
       </WorkspacePageHeader>
 
-      <nav
-        className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-muted/15 px-3 py-2"
-        aria-label="Project tabs"
-      >
-        <Button size="xs" variant="ghost" onClick={() => void navigate({ to: "/terminal-center" })}>
-          All Projects
-        </Button>
-        {groups.map((group) => (
-          <Button
-            key={group.projectKey}
-            size="xs"
-            variant={group.projectKey === projectKey ? "secondary" : "ghost"}
-            onClick={() =>
-              void navigate({
-                to: "/projects/$projectKey/terminal-center",
-                params: { projectKey: group.projectKey },
-              })
-            }
+      {compactWorkbench ? (
+        <label className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-sm">
+          Pane
+          <select
+            aria-label="Workbench pane"
+            className="min-w-0 flex-1 rounded-md border border-border bg-background p-2 focus-visible:ring-2 focus-visible:ring-ring"
+            value={compactPane?.id ?? ""}
+            onChange={(event) => {
+              const paneId = event.currentTarget.value;
+              updateActiveWorkspace((workspace) => ({ ...workspace, selectedPaneId: paneId }));
+            }}
           >
-            {group.displayName}
-          </Button>
-        ))}
-      </nav>
-
+            {visiblePanes.map((pane) => (
+              <option key={pane.id} value={pane.id}>
+                {pane.title}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-2">
         {workspaceState.workspaces.map((workspace) => (
           <Button
@@ -5202,7 +5340,7 @@ export function ProjectTerminalWorkspace({
         ) : null}
       </div>
 
-      <footer className="flex min-h-10 shrink-0 items-center gap-2 border-t border-border bg-background px-3 py-1.5 text-[11px] text-muted-foreground">
+      <footer className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-t border-border bg-background px-3 py-1.5 text-[11px] text-muted-foreground">
         <span>{visiblePanes.length} visible panes</span>
         <span>·</span>
         <span>
@@ -5220,7 +5358,7 @@ export function ProjectTerminalWorkspace({
               <summary className="cursor-pointer rounded px-2 py-1 hover:bg-muted">
                 Hidden panes ({hiddenPanes.length})
               </summary>
-              <div className="absolute bottom-8 right-0 z-[150] min-w-56 rounded-lg border border-border bg-popover p-2 shadow-xl">
+              <div className="absolute bottom-8 right-0 z-[150] w-56 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-popover p-2 shadow-xl">
                 {hiddenPanes.map((pane) => (
                   <button
                     key={pane.id}
@@ -5237,7 +5375,9 @@ export function ProjectTerminalWorkspace({
               </div>
             </details>
           ) : null}
-          <span>⌘\\ Split Right · ⇧⌘\\ Split Down · ⌥⌘T Tab Next · ⌘N New Pane · ⌘Enter Focus</span>
+          <span className="hidden xl:inline">
+            ⌘\\ Split Right · ⇧⌘\\ Split Down · ⌥⌘T Tab Next · ⌘N New Pane · ⌘Enter Focus
+          </span>
         </div>
       </footer>
 

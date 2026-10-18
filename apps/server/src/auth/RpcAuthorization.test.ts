@@ -2,6 +2,8 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthRelayReadScope,
+  AuthTerminalOperateScope,
+  ORCHESTRATION_WS_METHODS,
   AuthRelayWriteScope,
   WS_METHODS,
   WsRpcGroup,
@@ -45,6 +47,18 @@ describe("RPC authorization scopes", () => {
     );
     expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsRequestReviewers)).toBe(
       requiredScopeForRpcMethod(WS_METHODS.pullRequestsComment),
+    );
+  });
+
+  it("keeps inventory display reads separate from protected terminal metadata", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.vcsGetProjectInventory)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_WS_METHODS.getProjectWorkspaceContext)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.subscribeTerminalMetadata)).toBe(
+      AuthTerminalOperateScope,
     );
   });
 

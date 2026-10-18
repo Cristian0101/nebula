@@ -66,6 +66,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   getTaskChanges: "orchestration.getTaskChanges",
   getExecutionContext: "orchestration.getExecutionContext",
+  getProjectWorkspaceContext: "orchestration.getProjectWorkspaceContext",
   getTaskFileDiff: "orchestration.getTaskFileDiff",
   getIntegrationChanges: "orchestration.getIntegrationChanges",
   getIntegrationFileDiff: "orchestration.getIntegrationFileDiff",
@@ -4540,7 +4541,7 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<O
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
-    bootstrapThreadDisposition: Schema.optional(Schema.Literal("deleted")),
+    bootstrapThreadDisposition: Schema.optional(Schema.Literals(["deleted", "not-created"])),
   },
 ) {}
 

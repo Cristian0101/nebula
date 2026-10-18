@@ -341,9 +341,10 @@ describe("when: ref is clean, up to date, and has no open PR", () => {
 });
 
 describe("when: ref is behind upstream", () => {
-  it("resolveQuickAction returns pull", () => {
+  it("explains suspended pull before activation", () => {
     const quick = resolveQuickAction(status({ behindCount: 2 }), false);
-    assert.deepInclude(quick, { kind: "run_pull", label: "Pull", disabled: false });
+    assert.deepInclude(quick, { kind: "show_hint", label: "Pull unavailable", disabled: true });
+    assert.include(quick.hint, "Pull is temporarily unavailable");
   });
 
   it("buildMenuItems disables push and create PR", () => {
